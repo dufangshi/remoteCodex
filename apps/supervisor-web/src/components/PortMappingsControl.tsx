@@ -1,3 +1,5 @@
+import { getLocale } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useEffect, useRef, useState } from 'react';
 import { Network } from 'lucide-react';
 import { ApiError, request } from '../lib/api';
@@ -21,6 +23,7 @@ export function parseLocalPreviewLink(href: string): LocalLink | null {
 export function PortMappingsControl({ deviceId, open: controlledOpen, onOpenChange }: {
   deviceId: string; open?: boolean; onOpenChange?: (open: boolean) => void;
 }) {
+  useI18n();
   const [internalOpen, setInternalOpen] = useState(false);
   const manager = controlledOpen ?? internalOpen;
   const setManager = onOpenChange ?? setInternalOpen;
@@ -67,8 +70,8 @@ export function PortMappingsControl({ deviceId, open: controlledOpen, onOpenChan
       if (!controller.signal.aborted) { setMappings(list.mappings); setAvailable(config.available); }
     }).catch(cause => {
       if (!controller.signal.aborted) setError(cause instanceof ApiError && cause.statusCode === 404
-        ? 'Update this device’s Supervisor to enable port mappings.'
-        : cause instanceof Error ? cause.message : 'Could not load port mappings.');
+        ? translate("devices.updateThisDeviceSSupervisorToEnable_827e58")
+        : cause instanceof Error ? cause.message : translate("devices.couldNotLoadPortMappings"));
     });
     return () => controller.abort();
   }, [api, manager, link]);
@@ -77,7 +80,7 @@ export function PortMappingsControl({ deviceId, open: controlledOpen, onOpenChan
     const signal = lifetime.current!.signal;
     setBusy(true); setError(null); setCopied(null);
     try { await run(signal); }
-    catch (cause) { if (!signal.aborted) setError(cause instanceof Error ? cause.message : 'Port mapping failed.'); }
+    catch (cause) { if (!signal.aborted) setError(cause instanceof Error ? cause.message : translate("devices.portMappingFailed")); }
     finally { if (!signal.aborted) setBusy(false); }
   }
   async function enable(value: number, signal: AbortSignal): Promise<Mapping> {
@@ -96,7 +99,7 @@ export function PortMappingsControl({ deviceId, open: controlledOpen, onOpenChan
     // Reserve the tab in the click handler so asynchronous API calls do not
     // trigger the browser's popup blocker. Never expose the main window opener.
     const tab = window.open('about:blank', '_blank');
-    if (!tab) { setError('Allow popups for this site, then try again.'); return; }
+    if (!tab) { setError(translate("devices.allowPopupsForThisSiteThenTry")); return; }
     tab.opener = null;
     void action(async signal => {
       try {
@@ -111,52 +114,52 @@ export function PortMappingsControl({ deviceId, open: controlledOpen, onOpenChan
   const buttonClass = 'host-secondary-button min-h-10 rounded-md border px-3 text-sm disabled:opacity-50';
   const inputClass = 'host-input min-h-10 w-full rounded-md border px-3';
   const readiness = available === false
-    ? <p className="host-muted text-sm" role="status">Port previews are not configured on this Relay yet.</p>
-    : available === null && !error ? <p className="host-muted text-sm" role="status">Loading port mappings…</p> : null;
+    ? <p className="host-muted text-sm" role="status">{translate("devices.portPreviewsAreNotConfiguredOnThis")}</p>
+    : available === null && !error ? <p className="host-muted text-sm" role="status">{translate("devices.loadingPortMappings")}</p> : null;
   const errorMessage = error ? <p className="host-error text-sm" role="alert">{error}</p> : null;
   return <>
-    {controlledOpen === undefined && <button aria-label="Port mappings" title="Port mappings" onClick={() => setManager(true)}><Network /></button>}
-    {manager && <FormDialog title="Port mappings" description="Open HTTP services running on this device. Mappings are private to your account." busy={busy} onClose={() => setManager(false)}>
+    {controlledOpen === undefined && <button aria-label={translate("devices.portMappings")} title={translate("devices.portMappings")} onClick={() => setManager(true)}><Network /></button>}
+    {manager && <FormDialog title={translate("devices.portMappings")} description={translate("devices.openHTTPServicesRunningOnThisDevice")} busy={busy} onClose={() => setManager(false)}>
       <div className="space-y-4 min-w-0">
         {readiness}{errorMessage}
         <form className="flex flex-wrap gap-2" onSubmit={event => {
           event.preventDefault();
           void action(async signal => { await enable(Number(port), signal); setPort(''); setLabel(''); });
         }}>
-          <label className="min-w-0 flex-1 text-sm">HTTP port<input aria-label="HTTP port" className={inputClass} type="number" inputMode="numeric" min="1" max="65535" required value={port} onChange={event => setPort(event.target.value)} disabled={busy} /></label>
-          <label className="min-w-0 flex-1 text-sm">Label<input aria-label="Port label" className={inputClass} maxLength={40} value={label} onChange={event => setLabel(event.target.value)} disabled={busy} /></label>
-          <button className={`${buttonClass} self-end`} disabled={busy || available !== true}>Enable</button>
+          <label className="min-w-0 flex-1 text-sm">{translate("devices.hTTPPort")}<input aria-label={translate("devices.hTTPPort")} className={inputClass} type="number" inputMode="numeric" min="1" max="65535" required value={port} onChange={event => setPort(event.target.value)} disabled={busy} /></label>
+          <label className="min-w-0 flex-1 text-sm">{translate("devices.label")}<input aria-label={translate("devices.portLabel")} className={inputClass} maxLength={40} value={label} onChange={event => setLabel(event.target.value)} disabled={busy} /></label>
+          <button className={`${buttonClass} self-end`} disabled={busy || available !== true}>{translate("devices.enable")}</button>
         </form>
-        {mappings.length === 0 && available === true && <p className="host-muted text-sm">No enabled ports.</p>}
+        {mappings.length === 0 && available === true && <p className="host-muted text-sm">{translate("devices.noEnabledPorts")}</p>}
         <ul className="space-y-3">
           {mappings.map(mapping => <li key={mapping.id} className="rounded-md border p-3 space-y-2">
             <div className="break-words text-sm font-medium">{mapping.label ? `${mapping.label} · ` : ''}127.0.0.1:{mapping.port}</div>
-            <div className="host-muted text-xs">Enabled {new Date(mapping.createdAt).toLocaleString()}</div>
+            <div className="host-muted text-xs">{translate("devices.enabled")} {new Date(mapping.createdAt).toLocaleString(getLocale())}</div>
             <div className="flex flex-wrap gap-2">
-              <button className={buttonClass} type="button" disabled={busy || available !== true} onClick={() => open(mapping, null)}>Open</button>
+              <button className={buttonClass} type="button" disabled={busy || available !== true} onClick={() => open(mapping, null)}>{translate("devices.open")}</button>
               <button className={buttonClass} type="button" disabled={busy || available !== true} onClick={() => void action(async signal => {
                 const { url } = await launch(mapping, '/', signal);
                 // Copy the stable address, never the short-lived login handoff.
                 const address = new URL(url); address.searchParams.delete('__rc_launch');
                 await navigator.clipboard.writeText(address.href); setCopied(mapping.id);
-              })}>{copied === mapping.id ? 'Copied' : 'Copy address'}</button>
+              })}>{copied === mapping.id ? translate("devices.copied") : translate("devices.copyAddress")}</button>
               <button className={buttonClass} type="button" disabled={busy} onClick={() => void action(async signal => {
                 await request(api + '/' + mapping.id, { method: 'DELETE', signal });
                 setMappings(items => items.filter(item => item.id !== mapping.id));
-              })}>Stop</button>
+              })}>{translate("devices.stop")}</button>
             </div>
           </li>)}
         </ul>
-        <p className="host-muted text-xs">Stopping a mapping closes its connections. The local service keeps running. On WSL, the service must be reachable from the Supervisor’s WSL environment.</p>
+        <p className="host-muted text-xs">{translate("devices.stoppingAMappingClosesItsConnectionsThe")}</p>
       </div>
     </FormDialog>}
-    {link && <FormDialog title="Open device web service?" description={`Enable a private mapping for 127.0.0.1:${link.port} and open this link in a new tab?`} busy={busy} onClose={() => setLink(null)}>
+    {link && <FormDialog title={translate("devices.openDeviceWebService")} description={translate("devices.enableAPrivateMappingFor1270", { value1: link.port })} busy={busy} onClose={() => setLink(null)}>
       <div className="space-y-4 min-w-0">
         <p className="host-muted text-sm break-all">{link.path}</p>
         {readiness}{errorMessage}
         <div className="flex justify-end gap-2">
-          <button className={buttonClass} disabled={busy} onClick={() => setLink(null)}>Cancel</button>
-          <button className={buttonClass} disabled={busy || available !== true} onClick={() => open()}>{busy ? 'Opening…' : 'Enable and open'}</button>
+          <button className={buttonClass} disabled={busy} onClick={() => setLink(null)}>{translate("devices.cancel")}</button>
+          <button className={buttonClass} disabled={busy || available !== true} onClick={() => open()}>{busy ? translate("devices.opening") : translate("devices.enableAndOpen")}</button>
         </div>
       </div>
     </FormDialog>}

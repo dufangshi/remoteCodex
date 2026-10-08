@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ComposerSendShortcut } from '@remote-codex/thread-ui';
 import { relayModeActive } from './api';
@@ -7,6 +8,7 @@ import {
 } from './composerPreferences';
 
 export function useComposerPreferences() {
+  useI18n();
   const enabled = relayModeActive();
   const [sendShortcut, setShortcut] =
     useState<ComposerSendShortcut>('ctrlEnter');
@@ -32,7 +34,7 @@ export function useComposerPreferences() {
       setError(
         caught instanceof Error
           ? caught.message
-          : 'Unable to load your message shortcuts.',
+          : translate("settings.unableToLoadYourMessageShortcuts"),
       );
     } finally {
       if (current === revision.current) setLoading(false);
@@ -72,7 +74,7 @@ export function useComposerPreferences() {
           setError(
             caught instanceof Error
               ? caught.message
-              : 'Unable to save your message shortcuts.',
+              : translate("settings.unableToSaveYourMessageShortcuts"),
           );
         }
       } finally {

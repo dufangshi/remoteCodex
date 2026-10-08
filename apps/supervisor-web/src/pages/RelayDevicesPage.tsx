@@ -1,3 +1,5 @@
+import { getLocale } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { SharedAccessCard } from '../components/SharedAccessCard';
 import { SecurityVerification } from '../components/RelaySecurity';
 import { securityRequest, type SecurityStatus } from '../lib/relaySecurity';
@@ -180,6 +182,7 @@ function sanitizeGrantMetadata(
 }
 
 export function RelayDevicesPage() {
+  const { locale: i18nLocale } = useI18n();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [rawPortal, setPortal] = useState<RelayPortalSummaryDto | null>(null);
@@ -192,7 +195,7 @@ export function RelayDevicesPage() {
       if (!verified) {const status=await securityRequest<SecurityStatus>(''); if (!status.recentlyVerified) {setRotationVerification(status);return;}}
       const result=await request<RelayCreateDeviceResultDto>(`/relay/devices/${rotatingDevice.id}/token`,{method:'POST'});
       setCreatedDevice(result);setAddDeviceOpen(true);setRotatingDevice(null);setRotationVerification(null);await load({showLoading:false});
-    } catch(e) {setError(errorMessage(e,'Token rotation failed.'));}
+    } catch(e) {setError(errorMessage(e,translate("devices.tokenRotationFailed")));}
   }
   const [deviceName, setDeviceName] = useState('');
   const [createdDevice, setCreatedDevice] =
@@ -256,7 +259,7 @@ export function RelayDevicesPage() {
         setRefreshError(null);
         return true;
       } catch (caught) {
-        const message = errorMessage(caught, 'Unable to load devices.');
+        const message = errorMessage(caught, translate("devices.unableToLoadDevices"));
         if (showLoading || !hasLoadedPortalRef.current) {
           setError(message);
         } else {
@@ -380,7 +383,7 @@ export function RelayDevicesPage() {
       setAddDeviceOpen(false);
       await load({ showLoading: false });
     } catch (caught) {
-      setError(errorMessage(caught, 'Unable to create device.'));
+      setError(errorMessage(caught, translate("devices.unableToCreateDevice")));
     } finally {
       setBusy(null);
     }
@@ -418,7 +421,7 @@ export function RelayDevicesPage() {
         });
       });
     } catch (caught) {
-      setError(errorMessage(caught, 'Unable to delete device.'));
+      setError(errorMessage(caught, translate("devices.unableToDeleteDevice")));
     } finally {
       setBusy(null);
     }
@@ -472,7 +475,7 @@ export function RelayDevicesPage() {
       setDialogError(null);
       await load({ showLoading: false });
     } catch (caught) {
-      setDialogError(errorMessage(caught, 'Unable to share device.'));
+      setDialogError(errorMessage(caught, translate("devices.unableToShareDevice")));
     } finally {
       setBusy(null);
     }
@@ -502,7 +505,7 @@ export function RelayDevicesPage() {
       await load({ showLoading: false });
     } catch (caught) {
       setDialogError(
-        errorMessage(caught, 'Unable to update shared access.'),
+        errorMessage(caught, translate("devices.unableToUpdateSharedAccess")),
       );
     } finally {
       setBusy(null);
@@ -518,7 +521,7 @@ export function RelayDevicesPage() {
       setRevokeTarget(null);
       await load({ showLoading: false });
     } catch (caught) {
-      setError(errorMessage(caught, 'Unable to remove shared access.'));
+      setError(errorMessage(caught, translate("devices.unableToRemoveSharedAccess")));
     } finally {
       setBusy(null);
     }
@@ -545,7 +548,7 @@ export function RelayDevicesPage() {
       await load({ showLoading: false });
     } catch (caught) {
       setDialogError(
-        errorMessage(caught, 'Unable to update shared thread.'),
+        errorMessage(caught, translate("devices.unableToUpdateSharedThread")),
       );
     } finally {
       setBusy(null);
@@ -561,7 +564,7 @@ export function RelayDevicesPage() {
       setRevokeTarget(null);
       await load({ showLoading: false });
     } catch (caught) {
-      setError(errorMessage(caught, 'Unable to remove shared thread access.'));
+      setError(errorMessage(caught, translate("devices.unableToRemoveSharedThreadAccess")));
     } finally {
       setBusy(null);
     }
@@ -577,7 +580,7 @@ export function RelayDevicesPage() {
       setDeviceCopyError({
         deviceId: device.id,
         message:
-          'Clipboard access is unavailable. Check browser permissions and try again.',
+          translate("devices.clipboardAccessIsUnavailableCheckBrowserPermissions"),
       });
       return;
     }
@@ -609,7 +612,7 @@ export function RelayDevicesPage() {
       setDeviceCopyError({
         deviceId: device.id,
         message:
-          'Unable to copy the setup command. Check browser clipboard permissions and try again.',
+          translate("devices.unableToCopyTheSetupCommandCheck"),
       });
     }
   }
@@ -623,22 +626,22 @@ export function RelayDevicesPage() {
   }> = [
     {
       id: 'incoming-threads',
-      label: 'Threads with me',
+      label: translate("devices.threadsWithMe"),
       count: portal?.sharedWithMe.length ?? 0,
     },
     {
       id: 'incoming-devices',
-      label: 'Devices with me',
+      label: translate("devices.devicesWithMe"),
       count: groupGrantsByDevice(sharedDevicesWithMe).length,
     },
     {
       id: 'outgoing-devices',
-      label: 'Devices by me',
+      label: translate("devices.devicesByMe"),
       count: groupGrantsByDevice(outgoingGrants).length,
     },
     {
       id: 'outgoing-threads',
-      label: 'Threads by me',
+      label: translate("devices.threadsByMe"),
       count: portal?.sharedByMe.length ?? 0,
     },
   ];
@@ -673,21 +676,20 @@ export function RelayDevicesPage() {
   return (
     <div>
       <div className="product-page space-y-6">
-        <ProductHeader title="Devices" backHref="/" backLabel="Relay home" />
+        <ProductHeader title={translate("devices.devices")} backHref="/" backLabel={translate("devices.relayHome")} />
 
         <section className="product-page-header">
           <div>
             <h1 className="product-title">
-              Devices and shared sessions
-            </h1>
+              {translate("devices.devicesAndSharedSessions")}</h1>
           </div>
         </section>
 
         {error ? <Notice tone="danger">{error}</Notice> : null}
         {refreshError ? (
           <Notice tone="danger">
-            Latest device status could not be refreshed: {refreshError}
-            {' Retrying automatically.'}
+            {translate("devices.latestDeviceStatusCouldNotBeRefreshed")} {refreshError}
+            {translate("devices.retryingAutomatically")}
           </Notice>
         ) : null}
         <section aria-labelledby="devices-heading">
@@ -698,11 +700,9 @@ export function RelayDevicesPage() {
                 id="devices-heading"
                 tabIndex={-1}
               >
-                Devices
-              </h2>
+                {translate("devices.devices")}</h2>
               <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-                Your relay supervisors and their current availability.
-              </p>
+                {translate("devices.yourRelaySupervisorsAndTheirCurrentAvailability")}</p>
             </div>
             <button
               aria-controls="add-device-form"
@@ -720,7 +720,7 @@ export function RelayDevicesPage() {
               ) : (
                 <Plus className="h-4 w-4" />
               )}
-              {addDeviceOpen ? 'Close' : 'Add device'}
+              {addDeviceOpen ? translate("devices.close") : translate("devices.addDevice")}
             </button>
           </div>
 
@@ -743,12 +743,12 @@ export function RelayDevicesPage() {
 
           <div className="mt-4 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)]">
             <div className="hidden grid-cols-[minmax(14rem,1fr)_minmax(14rem,0.8fr)_auto] gap-5 border-b border-[var(--theme-border)] px-3 py-2 text-xs font-medium text-[var(--theme-fg-muted)] md:grid">
-              <span>Device</span>
-              <span>Activity</span>
-              <span className="text-right">Action</span>
+              <span>{translate("devices.device")}</span>
+              <span>{translate("devices.activity")}</span>
+              <span className="text-right">{translate("devices.action")}</span>
             </div>
             {loading ? (
-              <LoadingRows label="Loading devices..." />
+              <LoadingRows label={translate("devices.loadingDevices")} />
             ) : portal?.devices.length ? (
               <div className="divide-y divide-[var(--theme-border)]">
                 {portal.devices.map((device) => (
@@ -780,9 +780,7 @@ export function RelayDevicesPage() {
               </div>
             ) : (
               <div className="product-empty">
-                No devices yet. Add a device to create its permanent supervisor
-                token.
-              </div>
+                {translate("devices.noDevicesYetAddADeviceTo")}</div>
             )}
           </div>
         </section>
@@ -793,14 +791,12 @@ export function RelayDevicesPage() {
               className="text-lg font-semibold text-[var(--theme-fg)]"
               id="shared-access-heading"
             >
-              Shared access
-            </h2>
+              {translate("devices.sharedAccess")}</h2>
             <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-              Access you received and access you granted.
-            </p>
+              {translate("devices.accessYouReceivedAndAccessYouGranted")}</p>
           </div>
           <div
-            aria-label="Shared access views"
+            aria-label={translate("devices.sharedAccessViews")}
             className="product-segmented shared-access-tabs mt-4"
             role="tablist"
           >
@@ -844,7 +840,7 @@ export function RelayDevicesPage() {
               loading={loading}
               loadingText="Loading shared sessions..."
               shares={portal?.sharedWithMe ?? []}
-              title="Shared with me"
+              title={translate("devices.sharedWithMe")}
               subtitle="Sessions another relay user has shared with this account."
               renderShare={(share) => (
                 <SharedSessionRow
@@ -862,7 +858,7 @@ export function RelayDevicesPage() {
               grants={sharedDevicesWithMe}
               loading={loading}
               loadingText="Loading shared devices..."
-              title="Shared devices"
+              title={translate("devices.sharedDevices")}
               subtitle="Devices another relay user has shared with this account."
               renderDevice={(group) => (
                 <GrantDeviceCard
@@ -880,7 +876,7 @@ export function RelayDevicesPage() {
               grants={outgoingGrants}
               loading={loading}
               loadingText="Loading shared devices..."
-              title="Shared devices by me"
+              title={translate("devices.sharedDevicesByMe")}
               subtitle="Devices this relay account has shared with other users."
               renderDevice={(group) => (
                 <GrantDeviceCard
@@ -916,7 +912,7 @@ export function RelayDevicesPage() {
               loading={loading}
               loadingText="Loading shared threads..."
               shares={portal?.sharedByMe ?? []}
-              title="Shared threads by me"
+              title={translate("devices.sharedThreadsByMe")}
               subtitle="Threads this relay account has shared with other users."
               renderShare={(share) => (
                 <SharedSessionRow
@@ -982,18 +978,18 @@ export function RelayDevicesPage() {
           onShare={(input) => void createDeviceGrant(sharingDevice, input)}
         />
       ) : null}
-      <ConfirmDialog open={Boolean(rotatingDevice) && !rotationVerification} title="Replace device token?" description="The current connection will close. Update the device setup with the new token to reconnect. Existing workspaces and threads are kept." confirmLabel="Replace token" onConfirm={() => void rotateDevice()} onCancel={() => setRotatingDevice(null)} />
+      <ConfirmDialog open={Boolean(rotatingDevice) && !rotationVerification} title={translate("devices.replaceDeviceToken")} description={translate("devices.theCurrentConnectionWillCloseUpdateThe")} confirmLabel={translate("devices.replaceToken")} onConfirm={() => void rotateDevice()} onCancel={() => setRotatingDevice(null)} />
       {rotationVerification && <SecurityVerification status={rotationVerification} onCancel={()=> {setRotationVerification(null);setRotatingDevice(null);}} onVerified={()=>rotateDevice(true)} />}
       <ConfirmDialog
         open={deletingDevice !== null}
-        title="Delete relay device"
+        title={translate("devices.deleteRelayDevice")}
         description={
           deletingDevice
-            ? `Delete ${deletingDevice.name}? Its device token will stop working immediately. This cannot be undone.`
+            ? translate("devices.deleteItsDeviceTokenWillStopWorking", { value1: deletingDevice.name })
             : ''
         }
-        confirmLabel="Delete device"
-        busyLabel="Deleting..."
+        confirmLabel={translate("devices.deleteDevice")}
+        busyLabel={translate("devices.deleting")}
         busy={Boolean(deletingDevice && busy === deletingDevice.id)}
         error={deletingDevice ? error : null}
         onCancel={() => {
@@ -1008,12 +1004,12 @@ export function RelayDevicesPage() {
         open={revokeTarget !== null}
         title={
           revokeTarget?.kind === 'grant'
-            ? 'Revoke shared device access'
-            : 'Revoke shared thread access'
+            ? translate("devices.revokeSharedDeviceAccess")
+            : translate("devices.revokeSharedThreadAccess")
         }
         description={revokeTarget ? revokeDescription(revokeTarget) : ''}
-        confirmLabel="Revoke access"
-        busyLabel="Revoking..."
+        confirmLabel={translate("devices.revokeAccess")}
+        busyLabel={translate("devices.revoking")}
         busy={revokeTargetBusy(revokeTarget, busy)}
         error={revokeTarget ? error : null}
         onCancel={() => {
@@ -1048,6 +1044,7 @@ function AddDeviceForm({
   onClose: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <form
       aria-labelledby="add-device-heading"
@@ -1059,15 +1056,12 @@ function AddDeviceForm({
         className="text-sm font-semibold text-[var(--theme-fg)]"
         id="add-device-heading"
       >
-        Create a device token
-      </h3>
+        {translate("devices.createADeviceToken")}</h3>
       <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-        Name the private supervisor that will use this token.
-      </p>
+        {translate("devices.nameThePrivateSupervisorThatWillUse")}</p>
       <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end">
         <label className="block min-w-0 flex-1 text-sm text-[var(--theme-fg-soft)]">
-          Device name
-          <input
+          {translate("devices.deviceName")}<input
             autoFocus
             className="relay-input mt-2 min-h-11 w-full"
             disabled={busy}
@@ -1084,15 +1078,14 @@ function AddDeviceForm({
             onClick={onClose}
             type="button"
           >
-            Cancel
-          </button>
+            {translate("devices.cancel")}</button>
           <button
             className="relay-button-primary inline-flex min-h-11 items-center gap-2"
             disabled={busy || !deviceName.trim()}
             type="submit"
           >
             <MonitorSmartphone className="h-4 w-4" />
-            {busy ? 'Creating...' : 'Create token'}
+            {busy ? translate("devices.creating_28ea76") : translate("devices.createToken")}
           </button>
         </div>
       </div>
@@ -1101,6 +1094,7 @@ function AddDeviceForm({
 }
 
 function LoadingRows({ label }: { label: string }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <div aria-busy="true" aria-live="polite" className="divide-y divide-[var(--theme-border)]" role="status">
       <span className="sr-only">{label}</span>
@@ -1136,6 +1130,7 @@ function ShareSection({
   subtitle: string;
   title: string;
 }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <section className="pt-5">
       <div className="mb-3 flex items-start justify-between gap-3 px-1">
@@ -1218,6 +1213,7 @@ function GrantSection({
   subtitle: string;
   title: string;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const deviceGroups = groupGrantsByDevice(grants);
   return (
     <section className="pt-5">
@@ -1270,11 +1266,12 @@ function SharedSessionRow({
   share: RelaySessionShareDto;
   onOpen?: () => void;
 }) {
+  const { locale: i18nLocale } = useI18n();
   return <SharedAccessCard title={relayShareTitleText(share)}
     subtitle={relayShareWorkspaceLabel(share)}
     deviceName={share.deviceName} deviceConnected={share.deviceConnected}
     username={mode === 'incoming' ? share.ownerUsername : share.targetUsername} mode={mode}
-    permissions={[share.threadAccess === 'read' ? 'View only' : 'Collaborator', workspaceAccessLabel(share.workspaceAccess)]}
+    permissions={[share.threadAccess === 'read' ? translate("devices.viewOnly") : translate("devices.collaborator"), workspaceAccessLabel(share.workspaceAccess)]}
     events={share.accessEvents} lastAccessedAt={share.lastAccessedAt} busy={busy} expanded={expanded}
     onOpen={onOpen} onEdit={onEdit} onRevoke={onRevoke} onToggleAccess={onToggleAccess} />;
 }
@@ -1298,6 +1295,7 @@ function GrantDeviceCard({
   onRevoke?: (grant: RelayAccessGrantDto) => void;
   onToggleAccess?: (grant: RelayAccessGrantDto) => void;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const firstGrant = grants[0];
   if (!firstGrant) {
     return null;
@@ -1311,7 +1309,7 @@ function GrantDeviceCard({
           {deviceName}
         </p>
         <span className="shrink-0 rounded-full bg-[var(--theme-muted)] px-2 py-0.5 text-[11px] text-[var(--theme-fg-muted)]">
-          {grants.length} {grants.length === 1 ? 'share' : 'shares'}
+          {grants.length} {grants.length === 1 ? translate("devices.share") : translate("devices.shares")}
         </span>
       </header>
       <div className="mt-3 divide-y divide-[var(--theme-border)] border-t border-[var(--theme-border)]">
@@ -1354,10 +1352,11 @@ function GrantScopeRow({
   onRevoke?: () => void;
   onToggleAccess?: () => void;
 }) {
+  const { locale: i18nLocale } = useI18n();
   return <SharedAccessCard deviceName={grant.deviceName} deviceConnected={grant.deviceConnected} title={grant.label?.trim() || (grant.scope === 'thread' ? stableGrantThreadTitle(grant) : grant.scope === 'workspace' ? grant.workspaceLabel : grant.deviceName) || grantScopeLabel(grant)}
     subtitle={`${grantScopeLabel(grant)} · ${grant.scope === 'device' ? deviceGrantScopeText(grant) : grant.workspaceLabel || grant.deviceName}`}
     username={mode === 'incoming' ? grant.ownerUsername : grant.targetUsername} mode={mode}
-    permissions={[grant.threadAccess === 'read' ? 'View only' : 'Collaborator', workspaceAccessLabel(grant.workspaceAccess), ...(grant.canCreateThreads ? ['Can create threads'] : [])]}
+    permissions={[grant.threadAccess === 'read' ? translate("devices.viewOnly") : translate("devices.collaborator"), workspaceAccessLabel(grant.workspaceAccess), ...(grant.canCreateThreads ? [translate("devices.canCreateThreads")] : [])]}
     events={grant.accessEvents} lastAccessedAt={grant.lastAccessedAt} busy={busy} expanded={expanded}
     onOpen={onOpen} onEdit={onEdit} onRevoke={onRevoke} onToggleAccess={onToggleAccess} />;
 }
@@ -1378,6 +1377,7 @@ function useAccessibleDialog({
   busy: boolean;
   onClose: () => void;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const dialogRef = useRef<HTMLDivElement>(null);
   const busyRef = useRef(busy);
   const closeRef = useRef(onClose);
@@ -1469,6 +1469,7 @@ function RelayDialog({
   onClose: () => void;
   title: string;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const titleId = useId();
   const descriptionId = useId();
   const dialogRef = useAccessibleDialog({ busy, onClose });
@@ -1507,7 +1508,7 @@ function RelayDialog({
             </p>
           </div>
           <button
-            aria-label={`Close ${title}`}
+            aria-label={translate("devices.close_069e97", { value1: title })}
             className="product-icon-button"
             disabled={busy}
             onClick={onClose}
@@ -1545,6 +1546,7 @@ function SharePermissionsDialog({
   }) => void;
   share: RelaySessionShareDto;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const [label, setLabel] = useState(share.label ?? '');
   const [threadAccess, setThreadAccess] = useState<RelayThreadAccessDto>(
     share.threadAccess,
@@ -1569,10 +1571,10 @@ function SharePermissionsDialog({
   return (
     <RelayDialog
       busy={busy}
-      description={`${share.targetUsername} can access ${relayShareTitleText(share)}.`}
+      description={translate("devices.canAccess", { value1: share.targetUsername, value2: relayShareTitleText(share) })}
       error={error}
       onClose={onClose}
-      title="Shared thread permissions"
+      title={translate("devices.sharedThreadPermissions")}
     >
       <form
         className="mt-5"
@@ -1581,31 +1583,28 @@ function SharePermissionsDialog({
         <fieldset className="m-0 min-w-0 border-0 p-0" disabled={busy}>
         <div className="space-y-4">
           <label className="block text-sm text-[var(--theme-fg-soft)]">
-            Label
-            <input
+            {translate("devices.label")}<input
               className="relay-input mt-2 min-h-11 w-full"
               data-dialog-initial-focus
               onChange={(event) => setLabel(event.target.value)}
-              placeholder="Optional shared thread label"
+              placeholder={translate("devices.optionalSharedThreadLabel")}
               value={label}
             />
           </label>
           <label className="block text-sm text-[var(--theme-fg-soft)]">
-            Thread access
-            <select
+            {translate("devices.threadAccess")}<select
               className="relay-input mt-2 min-h-11 w-full"
               onChange={(event) =>
                 setThreadAccess(event.target.value as RelayThreadAccessDto)
               }
               value={threadAccess}
             >
-              <option value="read">View only</option>
-              <option value="control">Collaborator</option>
+              <option value="read">{translate("devices.viewOnly")}</option>
+              <option value="control">{translate("devices.collaborator")}</option>
             </select>
           </label>
           <label className="block text-sm text-[var(--theme-fg-soft)]">
-            Workspace access
-            <select
+            {translate("devices.workspaceAccess")}<select
               className="relay-input mt-2 min-h-11 w-full"
               disabled={workspaceAccessLocked}
               onChange={(event) =>
@@ -1615,29 +1614,25 @@ function SharePermissionsDialog({
               }
               value={workspaceAccessLocked ? 'none' : workspaceAccess}
             >
-              <option value="none">No workspace</option>
-              <option value="read">Workspace read</option>
-              <option value="write">Workspace write</option>
+              <option value="none">{translate("devices.noWorkspace")}</option>
+              <option value="read">{translate("devices.workspaceRead")}</option>
+              <option value="write">{translate("devices.workspaceWrite")}</option>
             </select>
           </label>
           {workspaceAccessLocked ? (
             <p className="rounded-md border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-2 text-xs text-[var(--theme-fg-muted)]">
-              This share was created without a workspace scope, so only thread
-              access can be changed.
-            </p>
+              {translate("devices.thisShareWasCreatedWithoutAWorkspace")}</p>
           ) : null}
           <label className="block text-sm text-[var(--theme-fg-soft)]">
-            Expiration
-            <input
-              aria-label="Expiration"
+            {translate("devices.expiration")}<input
+              aria-label={translate("devices.expiration")}
               className="relay-input mt-2 min-h-11 w-full"
               onChange={(event) => setExpiresAt(event.target.value)}
               type="datetime-local"
               value={expiresAt}
             />
             <span className="mt-1 block text-xs text-[var(--theme-fg-muted)]">
-              Leave empty for no expiration.
-            </span>
+              {translate("devices.leaveEmptyForNoExpiration")}</span>
           </label>
         </div>
         <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -1647,14 +1642,13 @@ function SharePermissionsDialog({
             onClick={onClose}
             type="button"
           >
-            Cancel
-          </button>
+            {translate("devices.cancel")}</button>
           <button
             className="relay-button-primary min-h-11 w-full sm:w-auto"
             disabled={busy}
             type="submit"
           >
-            {busy ? 'Saving...' : 'Save permissions'}
+            {busy ? translate("devices.saving") : translate("devices.savePermissions")}
           </button>
         </div>
         </fieldset>
@@ -1682,6 +1676,7 @@ function ShareDeviceDialog({
     canCreateThreads: boolean;
   }) => void;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const [targetIdentifier, setTargetIdentifier] = useState('');
   const [label, setLabel] = useState('');
   const [threadAccess, setThreadAccess] =
@@ -1704,10 +1699,10 @@ function ShareDeviceDialog({
   return (
     <RelayDialog
       busy={busy}
-      description="Give another relay account access to this device and its workspaces."
+      description={translate("devices.giveAnotherRelayAccountAccessToThis")}
       error={error}
       onClose={onClose}
-      title={`Share ${device.name}`}
+      title={translate("devices.share_928c7a", { value1: device.name })}
     >
       <form
         className="mt-5"
@@ -1716,41 +1711,37 @@ function ShareDeviceDialog({
         <fieldset className="m-0 min-w-0 border-0 p-0" disabled={busy}>
         <div className="space-y-4">
           <label className="block text-sm text-[var(--theme-fg-soft)]">
-            Relay account
-            <input
+            {translate("devices.relayAccount")}<input
               className="relay-input mt-2 min-h-11 w-full"
               data-dialog-initial-focus
               onChange={(event) => setTargetIdentifier(event.target.value)}
-              placeholder="username or email"
+              placeholder={translate("devices.usernameOrEmail")}
               value={targetIdentifier}
             />
           </label>
           <label className="block text-sm text-[var(--theme-fg-soft)]">
-            Label
-            <input
+            {translate("devices.label")}<input
               className="relay-input mt-2 min-h-11 w-full"
               onChange={(event) => setLabel(event.target.value)}
-              placeholder="Optional note shown in Shared devices by me"
+              placeholder={translate("devices.optionalNoteShownInSharedDevicesBy")}
               value={label}
             />
           </label>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block text-sm text-[var(--theme-fg-soft)]">
-              Thread access
-              <select
+              {translate("devices.threadAccess")}<select
                 className="relay-input mt-2 min-h-11 w-full"
                 onChange={(event) =>
                   setThreadAccess(event.target.value as RelayThreadAccessDto)
                 }
                 value={threadAccess}
               >
-                <option value="read">View only</option>
-                <option value="control">Collaborator</option>
+                <option value="read">{translate("devices.viewOnly")}</option>
+                <option value="control">{translate("devices.collaborator")}</option>
               </select>
             </label>
             <label className="block text-sm text-[var(--theme-fg-soft)]">
-              Workspace access
-              <select
+              {translate("devices.workspaceAccess")}<select
                 className="relay-input mt-2 min-h-11 w-full"
                 onChange={(event) =>
                   setWorkspaceAccess(
@@ -1759,15 +1750,14 @@ function ShareDeviceDialog({
                 }
                 value={workspaceAccess}
               >
-                <option value="none">No workspace</option>
-                <option value="read">Workspace read</option>
-                <option value="write">Workspace write</option>
+                <option value="none">{translate("devices.noWorkspace")}</option>
+                <option value="read">{translate("devices.workspaceRead")}</option>
+                <option value="write">{translate("devices.workspaceWrite")}</option>
               </select>
             </label>
           </div>
           <label className="flex min-h-11 items-center justify-between gap-3 text-sm text-[var(--theme-fg-soft)]">
-            Can create new threads
-            <input
+            {translate("devices.canCreateNewThreads")}<input
               checked={canCreateThreads}
               className="h-4 w-4 accent-[var(--theme-accent)]"
               onChange={(event) => setCanCreateThreads(event.target.checked)}
@@ -1782,15 +1772,14 @@ function ShareDeviceDialog({
             onClick={onClose}
             type="button"
           >
-            Cancel
-          </button>
+            {translate("devices.cancel")}</button>
           <button
             className="relay-button-primary inline-flex min-h-11 w-full items-center justify-center gap-2 sm:w-auto"
             disabled={busy || !targetIdentifier.trim()}
             type="submit"
           >
             <Share2 className="h-4 w-4" />
-            {busy ? 'Sharing...' : 'Share device'}
+            {busy ? translate("devices.sharing") : translate("devices.shareDevice")}
           </button>
         </div>
         </fieldset>
@@ -1818,6 +1807,7 @@ function GrantPermissionsDialog({
     expiresAt: string | null;
   }) => void;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const [label, setLabel] = useState(grant.label ?? '');
   const [threadAccess, setThreadAccess] = useState<RelayThreadAccessDto>(
     grant.threadAccess,
@@ -1847,10 +1837,10 @@ function GrantPermissionsDialog({
   return (
     <RelayDialog
       busy={busy}
-      description={`${grant.targetUsername} can access ${grantTitleText(grant)}.`}
+      description={translate("devices.canAccess", { value1: grant.targetUsername, value2: grantTitleText(grant) })}
       error={error}
       onClose={onClose}
-      title="Shared access permissions"
+      title={translate("devices.sharedAccessPermissions")}
     >
       <form
         className="mt-5"
@@ -1859,32 +1849,29 @@ function GrantPermissionsDialog({
         <fieldset className="m-0 min-w-0 border-0 p-0" disabled={busy}>
         <div className="space-y-4">
           <label className="block text-sm text-[var(--theme-fg-soft)]">
-            Label
-            <input
+            {translate("devices.label")}<input
               className="relay-input mt-2 min-h-11 w-full"
               data-dialog-initial-focus
               onChange={(event) => setLabel(event.target.value)}
-              placeholder="Optional shared access label"
+              placeholder={translate("devices.optionalSharedAccessLabel")}
               value={label}
             />
           </label>
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block text-sm text-[var(--theme-fg-soft)]">
-              Thread access
-              <select
+              {translate("devices.threadAccess")}<select
                 className="relay-input mt-2 min-h-11 w-full"
                 onChange={(event) =>
                   setThreadAccess(event.target.value as RelayThreadAccessDto)
                 }
                 value={threadAccess}
               >
-                <option value="read">View only</option>
-                <option value="control">Collaborator</option>
+                <option value="read">{translate("devices.viewOnly")}</option>
+                <option value="control">{translate("devices.collaborator")}</option>
               </select>
             </label>
             <label className="block text-sm text-[var(--theme-fg-soft)]">
-              Workspace access
-              <select
+              {translate("devices.workspaceAccess")}<select
                 className="relay-input mt-2 min-h-11 w-full"
                 disabled={workspaceAccessLocked}
                 onChange={(event) =>
@@ -1894,16 +1881,15 @@ function GrantPermissionsDialog({
                 }
                 value={workspaceAccessLocked ? 'none' : workspaceAccess}
               >
-                <option value="none">No workspace</option>
-                <option value="read">Workspace read</option>
-                <option value="write">Workspace write</option>
+                <option value="none">{translate("devices.noWorkspace")}</option>
+                <option value="read">{translate("devices.workspaceRead")}</option>
+                <option value="write">{translate("devices.workspaceWrite")}</option>
               </select>
             </label>
           </div>
           {canCreateThreadsAvailable ? (
             <label className="flex min-h-11 items-center justify-between gap-3 text-sm text-[var(--theme-fg-soft)]">
-              Can create new threads
-              <input
+              {translate("devices.canCreateNewThreads")}<input
                 checked={canCreateThreads}
                 className="h-4 w-4 accent-[var(--theme-accent)]"
                 onChange={(event) => setCanCreateThreads(event.target.checked)}
@@ -1912,17 +1898,15 @@ function GrantPermissionsDialog({
             </label>
           ) : null}
           <label className="block text-sm text-[var(--theme-fg-soft)]">
-            Expiration
-            <input
-              aria-label="Expiration"
+            {translate("devices.expiration")}<input
+              aria-label={translate("devices.expiration")}
               className="relay-input mt-2 min-h-11 w-full"
               onChange={(event) => setExpiresAt(event.target.value)}
               type="datetime-local"
               value={expiresAt}
             />
             <span className="mt-1 block text-xs text-[var(--theme-fg-muted)]">
-              Leave empty for no expiration.
-            </span>
+              {translate("devices.leaveEmptyForNoExpiration")}</span>
           </label>
         </div>
         <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -1932,14 +1916,13 @@ function GrantPermissionsDialog({
             onClick={onClose}
             type="button"
           >
-            Cancel
-          </button>
+            {translate("devices.cancel")}</button>
           <button
             className="relay-button-primary min-h-11 w-full sm:w-auto"
             disabled={busy}
             type="submit"
           >
-            {busy ? 'Saving...' : 'Save permissions'}
+            {busy ? translate("devices.saving") : translate("devices.savePermissions")}
           </button>
         </div>
         </fieldset>
@@ -1969,6 +1952,7 @@ function DeviceRow({
   onDelete: () => void;
   onShare: () => void;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
   const actionsMenuRef = useRef<HTMLDivElement>(null);
   const actionsTriggerRef = useRef<HTMLButtonElement>(null);
@@ -1980,20 +1964,20 @@ function DeviceRow({
   const statusText = hostedStatus
     ? hostedStatusLabel(hostedStatus)
     : device.connected
-      ? 'Online'
-      : 'Offline';
+      ? translate("devices.online_c3e839")
+      : translate("devices.offline");
   const activityText =
     hostedStatus === 'stopped'
-      ? 'Stopped. Connect to wake this VM.'
+      ? translate("devices.stoppedConnectToWakeThisVM")
       : hostedStatus && hostedStatus !== 'online'
-        ? `${statusText}. The hosted supervisor is not ready yet.`
+        ? translate("devices.theHostedSupervisorIsNotReadyYet", { value1: statusText })
         : device.connected
           ? device.connectedAt
             ? `Online since ${formatRelayTimestamp(device.connectedAt)}`
-            : 'Online. Connected time unavailable.'
+            : translate("devices.onlineConnectedTimeUnavailable")
           : device.lastHeartbeatAt
             ? `Last heartbeat ${formatRelayTimestamp(device.lastHeartbeatAt)}`
-            : 'No heartbeat recorded.';
+            : translate("devices.noHeartbeatRecorded");
 
   useEffect(() => {
     if (!actionsMenuOpen) return;
@@ -2087,11 +2071,11 @@ function DeviceRow({
             {device.name}
           </p>
           <span className={`device-presence-label ${device.connected ? 'is-online' : 'is-offline'}`}>
-            {device.connected ? 'Online' : 'Offline'}
+            {device.connected ? translate("devices.online_c3e839") : translate("devices.offline")}
           </span>
           {hostedStatus ? (
             <span className="shrink-0 rounded-full bg-[var(--theme-muted)] px-2 py-0.5 text-[10px] font-medium text-[var(--theme-fg-muted)]">
-              Hosted: {statusText}
+              {translate("devices.hosted")} {statusText}
             </span>
           ) : null}
         </div>
@@ -2108,8 +2092,7 @@ function DeviceRow({
             className="mt-1 text-[var(--status-success-fg)]"
             role="status"
           >
-            Setup command copied.
-          </p>
+            {translate("devices.setupCommandCopied")}</p>
         ) : null}
       </div>
       <div className="flex min-w-0 items-center gap-2 md:justify-end">
@@ -2120,14 +2103,14 @@ function DeviceRow({
           type="button"
         >
           <Plug className="h-4 w-4" />
-          {hostedStatus === 'stopped' ? 'Start & connect' : 'Connect'}
+          {hostedStatus === 'stopped' ? translate("devices.startConnect") : translate("devices.connect")}
         </button>
         <div className="relative" ref={actionsMenuRef}>
           <button
             aria-controls={menuId}
             aria-expanded={actionsMenuOpen}
             aria-haspopup="menu"
-            aria-label={`More actions for ${device.name}`}
+            aria-label={translate("devices.moreActionsFor", { value1: device.name })}
             className="product-icon-button"
             onClick={() => {
               if (actionsMenuOpen) {
@@ -2151,7 +2134,7 @@ function DeviceRow({
           </button>
           {actionsMenuOpen ? (
             <div
-              aria-label={`Actions for ${device.name}`}
+              aria-label={translate("devices.actionsFor", { value1: device.name })}
               className="absolute right-0 top-full z-40 mt-1 w-64 max-w-[calc(100vw-2rem)] rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-1 shadow-[var(--theme-shadow)]"
               id={menuId}
               onKeyDown={handleMenuKeyDown}
@@ -2165,8 +2148,7 @@ function DeviceRow({
                 type="button"
               >
                 <Copy className="h-4 w-4" />
-                Copy setup for macOS/Linux
-              </button>
+                {translate("devices.copySetupForMacOSLinux")}</button>
               <button
                 className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)] disabled:cursor-not-allowed disabled:opacity-50"
                 disabled={!canCopySetup}
@@ -2175,8 +2157,7 @@ function DeviceRow({
                 type="button"
               >
                 <Copy className="h-4 w-4" />
-                Copy setup for Windows
-              </button>
+                {translate("devices.copySetupForWindows")}</button>
               <button
                 className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]"
                 onClick={() => {
@@ -2188,9 +2169,8 @@ function DeviceRow({
                 type="button"
               >
                 <Share2 className="h-4 w-4" />
-                Share device
-              </button>
-              {!hostedStatus && <button className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-[var(--theme-hover)]" role="menuitem" onClick={()=>{setActionsMenuOpen(false);onRotate();}}>Replace device token</button>}
+                {translate("devices.shareDevice")}</button>
+              {!hostedStatus && <button className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-[var(--theme-hover)]" role="menuitem" onClick={()=>{setActionsMenuOpen(false);onRotate();}}>{translate("devices.replaceDeviceToken_268410")}</button>}
               <div className="mt-1 border-t border-[var(--theme-border)] pt-1">
                 <button
                   className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-[var(--status-danger-fg)] transition hover:bg-[var(--status-danger-bg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)] disabled:cursor-not-allowed disabled:opacity-50"
@@ -2203,14 +2183,13 @@ function DeviceRow({
                   role="menuitem"
                   title={
                     hostedStatus
-                      ? 'Hosted VMs are managed by a relay admin.'
-                      : `Delete ${device.name}`
+                      ? translate("devices.hostedVMsAreManagedByARelay")
+                      : translate("devices.delete_43de5b", { value1: device.name })
                   }
                   type="button"
                 >
                   <Trash2 className="h-4 w-4" />
-                  Delete device
-                </button>
+                  {translate("devices.deleteDevice")}</button>
               </div>
             </div>
           ) : null}
@@ -2229,6 +2208,7 @@ function DeviceRow({
 }
 
 function DeviceTokenPanel({ result }: { result: RelayCreateDeviceResultDto }) {
+  const { locale: i18nLocale } = useI18n();
   const [platform, setPlatform] = useState<SupervisorPlatform>('unix');
   const command = relaySupervisorCommand(result.token, platform);
   return (
@@ -2237,19 +2217,17 @@ function DeviceTokenPanel({ result }: { result: RelayCreateDeviceResultDto }) {
       className="mt-4 rounded-lg border border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] p-4"
     >
       <h2 className="text-base font-semibold text-[var(--theme-fg)]">
-        Token created for {result.device.name}
+        {translate("devices.tokenCreatedFor")} {result.device.name}
       </h2>
       <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-        You can copy this setup again from the device actions menu.
-      </p>
-      <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">The command installs or updates the latest Remote Codex runtime, installs Node.js if needed, and starts this device. It uses this device's permanent token.</p>
+        {translate("devices.youCanCopyThisSetupAgainFrom")}</p>
+      <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">{translate("devices.theCommandInstallsOrUpdatesTheLatest")}</p>
       <div className="mt-3">
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--theme-fg-muted)]">
-            Supervisor command
-          </p>
+            {translate("devices.supervisorCommand")}</p>
           <div
-            aria-label="Supervisor command platform"
+            aria-label={translate("devices.supervisorCommandPlatform")}
             className="inline-flex rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-0.5"
             role="group"
           >
@@ -2269,7 +2247,7 @@ function DeviceTokenPanel({ result }: { result: RelayCreateDeviceResultDto }) {
         </div>
         <CodeBlock
           copyLabel={`Copy ${platform === 'windows' ? 'Windows PowerShell' : 'macOS and Linux'} supervisor command`}
-          label={platform === 'windows' ? 'PowerShell' : 'Shell'}
+          label={platform === 'windows' ? 'PowerShell' : translate("devices.shell")}
           nested
           value={command}
         />
@@ -2287,6 +2265,7 @@ function PlatformButton({
   children: React.ReactNode;
   onClick: () => void;
 }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <button
       aria-pressed={active}
@@ -2304,7 +2283,7 @@ function PlatformButton({
 }
 
 function CodeBlock({
-  copyLabel = 'Copy',
+  copyLabel = translate("devices.copy"),
   label,
   nested = false,
   value,
@@ -2314,6 +2293,7 @@ function CodeBlock({
   nested?: boolean;
   value: string;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const [copyState, setCopyState] = useState<
     'idle' | 'copied' | 'error'
   >('idle');
@@ -2353,7 +2333,7 @@ function CodeBlock({
           type="button"
         >
           <Copy className="h-3.5 w-3.5" />
-          {copyState === 'copied' ? 'Copied' : 'Copy'}
+          {copyState === 'copied' ? translate("devices.copied") : translate("devices.copy")}
         </button>
       </div>
       <code className="block break-all rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] px-3 py-2 font-mono text-xs text-[var(--theme-fg)]">
@@ -2364,16 +2344,14 @@ function CodeBlock({
           className="mt-1 text-xs text-[var(--status-success-fg)]"
           role="status"
         >
-          Copied to clipboard.
-        </p>
+          {translate("devices.copiedToClipboard")}</p>
       ) : null}
       {copyState === 'error' ? (
         <p
           className="mt-1 text-xs text-[var(--status-danger-fg)]"
           role="alert"
         >
-          Clipboard access failed. Select the text and copy it manually.
-        </p>
+          {translate("devices.clipboardAccessFailedSelectTheTextAnd")}</p>
       ) : null}
     </div>
   );
@@ -2383,6 +2361,7 @@ function Notice({ children }: {
   tone: 'danger';
   children: React.ReactNode;
 }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <div
       className="rounded-lg border border-[var(--status-danger-border)] bg-[var(--status-danger-bg)] px-3 py-2 text-sm text-[var(--status-danger-fg)]"
@@ -2436,7 +2415,7 @@ function relayWebsocketBaseUrl() {
 }
 
 function formatRelayTimestamp(value: string | null | undefined) {
-  return value ? new Date(value).toLocaleString() : 'Unavailable';
+  return value ? new Date(value).toLocaleString(getLocale()) : translate("devices.unavailable");
 }
 
 function hostedStatusLabel(
@@ -2477,13 +2456,13 @@ function fromDatetimeLocalValue(value: string) {
 }
 
 export function relayShareTitleText(share: RelaySessionShareDto) {
-  return stableShareThreadTitle(share) ?? (share.label?.trim() || 'Shared thread');
+  return stableShareThreadTitle(share) ?? (share.label?.trim() || translate("devices.sharedThread"));
 }
 
 export function relayShareWorkspaceLabel(share: RelaySessionShareDto) {
   return share.workspaceAccess === 'none'
-    ? 'No workspace access'
-    : share.workspaceLabel?.trim() || 'Workspace unavailable';
+    ? translate("devices.noWorkspaceAccess")
+    : share.workspaceLabel?.trim() || translate("devices.workspaceUnavailable");
 }
 
 function stableShareThreadTitle(share: RelaySessionShareDto) {
@@ -2496,18 +2475,18 @@ function stableShareThreadTitle(share: RelaySessionShareDto) {
 }
 
 function grantTitleText(grant: RelayAccessGrantDto) {
-  return grant.deviceName?.trim() || 'Shared device';
+  return grant.deviceName?.trim() || translate("devices.sharedDevice");
 }
 
 function deviceGrantScopeText(grant: RelayAccessGrantDto) {
   if (grant.workspaceScope !== 'selected') {
-    return 'Entire device';
+    return translate("devices.entireDevice");
   }
   if (grant.workspaceLabel?.trim()) {
-    return `Selected workspace: ${grant.workspaceLabel.trim()}`;
+    return translate("devices.selectedWorkspace", { value1: grant.workspaceLabel.trim() });
   }
   const count = grant.workspaceIds.length;
-  return `${count} selected workspace${count === 1 ? '' : 's'}`;
+  return translate("devices.selectedWorkspace_99995e", { value1: count, value2: count === 1 ? '' : 's' });
 }
 
 function revokeDescription(
@@ -2559,23 +2538,23 @@ function stableGrantThreadTitle(grant: RelayAccessGrantDto) {
 function grantScopeLabel(grant: RelayAccessGrantDto) {
   switch (grant.scope) {
     case 'device':
-      return 'Device';
+      return translate("devices.device");
     case 'workspace':
-      return 'Workspace';
+      return translate("devices.workspace");
     case 'thread':
     default:
-      return 'Thread';
+      return translate("devices.thread");
   }
 }
 
 function workspaceAccessLabel(access: RelayWorkspaceAccessDto) {
   switch (access) {
     case 'write':
-      return 'Workspace write';
+      return translate("devices.workspaceWrite");
     case 'read':
-      return 'Workspace read';
+      return translate("devices.workspaceRead");
     case 'none':
     default:
-      return 'No workspace';
+      return translate("devices.noWorkspace");
   }
 }

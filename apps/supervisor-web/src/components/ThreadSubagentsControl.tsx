@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useEffect, useRef, useState } from 'react';
 import { Bot, X } from 'lucide-react';
 import type { ThreadDetailDto, ThreadSubagentDto } from '@remote-codex/shared';
@@ -5,19 +6,20 @@ import type { ThreadDetailDto, ThreadSubagentDto } from '@remote-codex/shared';
 function statusLabel(status: string) {
   switch (status) {
     case 'running':
-      return 'Running';
+      return translate("workbench.running");
     case 'failed':
-      return 'Failed';
+      return translate("workbench.failed");
     case 'interrupted':
-      return 'Interrupted';
+      return translate("workbench.interrupted");
     case 'completed':
-      return 'Completed';
+      return translate("workbench.completed");
     default:
       return status;
   }
 }
 
 export function ThreadSubagentsControl({ detail }: { detail: ThreadDetailDto }) {
+  useI18n();
   const subagents = detail.activeSubagents ?? [];
   const running = subagents.filter((agent) => agent.status === 'running');
   const [open, setOpen] = useState(false);
@@ -52,9 +54,9 @@ export function ThreadSubagentsControl({ detail }: { detail: ThreadDetailDto }) 
         ref={trigger}
         type="button"
         className="matter-watches-toggle"
-        aria-label={`Subagents (${running.length})`}
+        aria-label={translate("workbench.subagents", { value1: running.length })}
         aria-expanded={open}
-        title="Native subagents"
+        title={translate("workbench.nativeSubagents")}
         onClick={() => setOpen((current) => !current)}
       >
         <Bot size={14} />
@@ -64,23 +66,22 @@ export function ThreadSubagentsControl({ detail }: { detail: ThreadDetailDto }) 
         <div className="fixed inset-0 z-[95] flex items-center justify-center p-4">
           <button
             className="absolute inset-0 bg-[var(--overlay-scrim)] backdrop-blur-sm"
-            aria-label="Close subagents"
+            aria-label={translate("workbench.closeSubagents")}
             onClick={close}
           />
           <section
             role="dialog"
             aria-modal="true"
-            aria-label="Native subagents"
+            aria-label={translate("workbench.nativeSubagents")}
             className="relative w-full max-w-xl rounded-xl border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 text-[var(--theme-fg)] shadow-xl"
           >
             <header className="mb-3 flex items-center justify-between">
               <div>
-                <h2>Native subagents</h2>
+                <h2>{translate("workbench.nativeSubagents")}</h2>
                 <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-                  {running.length} currently running
-                </p>
+                  {running.length} {translate("workbench.currentlyRunning")}</p>
               </div>
-              <button aria-label="Close subagents dialog" onClick={close}>
+              <button aria-label={translate("workbench.closeSubagentsDialog")} onClick={close}>
                 <X size={18} />
               </button>
             </header>
@@ -93,7 +94,7 @@ export function ThreadSubagentsControl({ detail }: { detail: ThreadDetailDto }) 
                   <div className="flex items-center justify-between gap-2">
                     <strong className="text-sm">{agent.name || agent.id}</strong>
                     <span className="text-xs text-[var(--theme-fg-muted)]">
-                      {agent.isBackground && agent.status === 'running' ? 'Running in background' : statusLabel(agent.status)}
+                      {agent.isBackground && agent.status === 'running' ? translate("workbench.runningInBackground") : statusLabel(agent.status)}
                     </span>
                   </div>
                   <code className="mt-1 block text-[11px] text-[var(--theme-fg-muted)]">

@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import type { ReactNode } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -18,6 +19,7 @@ export function ProductHeader({
   backLabel?: string;
   actions?: ReactNode;
 }) {
+  useI18n();
   return (
     <div className="product-navigation-space">
       <header className="product-topbar product-navigation">
@@ -28,8 +30,8 @@ export function ProductHeader({
         {backHref && (
           <Link
             to={backHref}
-            aria-label={backLabel ?? 'Back'}
-            title={backLabel ?? 'Back'}
+            aria-label={backLabel ?? translate("workbench.back")}
+            title={backLabel ?? translate("workbench.back")}
             className="product-icon-button"
           >
             <ArrowLeft size={19} />

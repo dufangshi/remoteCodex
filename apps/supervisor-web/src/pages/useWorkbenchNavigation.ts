@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ThreadDetailDto, ThreadDto } from '@remote-codex/shared';
 import type {
@@ -57,6 +58,7 @@ export function useWorkbenchNavigation(
   deviceId: string | null,
   routeThreadId?: string,
 ) {
+  useI18n();
   const relay = relayModeActive();
   const [snapshot, setSnapshot] = useState<NavigationSnapshot>({
     threads: [],
@@ -183,7 +185,7 @@ export function useWorkbenchNavigation(
       } catch (e) {
         if (alive)
           setError(
-            e instanceof Error ? e.message : 'Navigation could not refresh.',
+            e instanceof Error ? e.message : translate("workbench.navigationCouldNotRefresh"),
           );
       } finally {
         inFlight = false;
@@ -255,7 +257,7 @@ export function useWorkbenchNavigation(
       if (document.visibilityState === 'hidden' || !document.hasFocus()) return;
       void save(undefined, true).catch((e) =>
       setError(
-        e instanceof ApiError ? e.message : 'Could not save recent thread.',
+        e instanceof ApiError ? e.message : translate("workbench.couldNotSaveRecentThread"),
       ),
     );
     };
@@ -279,7 +281,7 @@ export function useWorkbenchNavigation(
       const target = snapshot.threads.find(t => referenceKey(t) === key);
       await save(!(target?.favorite ?? favorite), false, target);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save shortcut.');
+      setError(e instanceof Error ? e.message : translate("workbench.couldNotSaveShortcut"));
     } finally {
       setBusy(false);
     }
@@ -345,8 +347,8 @@ export function useWorkbenchNavigation(
           const turn = value.turns.filter(t => t.completedAt && Math.abs(Date.parse(t.completedAt) - eventTime) < 60_000)
             .sort((a, b) => Math.abs(Date.parse(a.completedAt!) - eventTime) - Math.abs(Date.parse(b.completedAt!) - eventTime))[0];
           const text = [...(turn?.items ?? [])].reverse().find(item => item.kind === 'agentMessage' && item.text.trim())?.text.trim().replace(/\s+/g, ' ') ?? '';
-          const summary = text ? Array.from(text).slice(0, 180).join('') + (Array.from(text).length > 180 ? '…' : '') : 'Open the thread to view its response.';
-          if (alive) setNotificationDetails(previous => ({ ...previous, [notification.id]: { title: `${value.thread.title} · ${turn?.status === 'failed' ? 'Failed' : turn?.status === 'interrupted' ? 'Interrupted' : 'Completed'}`, summary } }));
+          const summary = text ? Array.from(text).slice(0, 180).join('') + (Array.from(text).length > 180 ? '…' : '') : translate("workbench.openTheThreadToViewItsResponse");
+          if (alive) setNotificationDetails(previous => ({ ...previous, [notification.id]: { title: `${value.thread.title} · ${turn?.status === 'failed' ? translate("workbench.failed") : turn?.status === 'interrupted' ? translate("workbench.interrupted") : translate("workbench.completed")}`, summary } }));
         } catch { /* Leave metadata visible; retry unavailable previews when the bell opens again. */ }
       }
     }));

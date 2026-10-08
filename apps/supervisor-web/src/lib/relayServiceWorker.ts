@@ -1,3 +1,4 @@
+import { setLocale, translate, useI18n } from '@remote-codex/thread-ui/i18n';
 /// <reference lib="webworker" />
 import { installPushHandlers } from './notificationWorker';
 import {
@@ -23,6 +24,8 @@ setTransportReporter((status) => {
   });
 });
 worker.addEventListener('message', (event) => {
+  if (event.data?.type === 'remote-codex-locale' && typeof event.data.locale === 'string')
+    setLocale(event.data.locale, false);
   if (
     event.data?.type === 'remote-codex-reset-transport' &&
     typeof event.data.deviceId === 'string'
@@ -61,7 +64,7 @@ worker.addEventListener('fetch', (event) => {
             message:
               error instanceof Error
                 ? error.message
-                : 'Encrypted connection failed.',
+                : translate("workbench.encryptedConnectionFailed"),
           }),
           {
             status: 502,

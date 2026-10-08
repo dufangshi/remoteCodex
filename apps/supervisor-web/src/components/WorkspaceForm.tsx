@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { FolderOpen, FolderPlus, GitBranch } from 'lucide-react';
 
@@ -47,9 +48,9 @@ function inferWorkspaceLabel(value: string) {
 }
 
 const modeOptions = [
-  { value: 'folder' as const, label: 'New folder', Icon: FolderPlus },
-  { value: 'path' as const, label: 'Existing path', Icon: FolderOpen },
-  { value: 'git' as const, label: 'Git repository', Icon: GitBranch },
+  { value: 'folder' as const, get label() { return translate("files.newFolder"); }, Icon: FolderPlus },
+  { value: 'path' as const, get label() { return translate("files.existingPath"); }, Icon: FolderOpen },
+  { value: 'git' as const, get label() { return translate("files.gitRepository"); }, Icon: GitBranch },
 ];
 
 const modeFields: Record<
@@ -57,25 +58,25 @@ const modeFields: Record<
   { label: string; placeholder: string; hint: string; submitLabel: string; busyLabel: string }
 > = {
   folder: {
-    label: 'Folder name',
+    get label() { return translate("files.folderName"); },
     placeholder: 'my-project',
-    hint: 'Creates a new directory under the configured development folder.',
-    submitLabel: 'Create folder',
-    busyLabel: 'Creating...',
+    get hint() { return translate("files.createsANewDirectoryUnderTheConfigured"); },
+    get submitLabel() { return translate("files.createFolder"); },
+    get busyLabel() { return translate("files.creating"); },
   },
   path: {
-    label: 'Absolute path',
+    get label() { return translate("files.absolutePath"); },
     placeholder: '/Users/name/project',
-    hint: 'Registers a directory that is already available on this device.',
-    submitLabel: 'Add workspace',
-    busyLabel: 'Adding...',
+    get hint() { return translate("files.registersADirectoryThatIsAlreadyAvailable"); },
+    get submitLabel() { return translate("files.addWorkspace"); },
+    get busyLabel() { return translate("files.adding"); },
   },
   git: {
-    label: 'Repository URL',
+    get label() { return translate("files.repositoryURL"); },
     placeholder: 'https://github.com/owner/repo.git',
-    hint: 'Clones the repository into the configured development folder.',
-    submitLabel: 'Clone repository',
-    busyLabel: 'Cloning...',
+    get hint() { return translate("files.clonesTheRepositoryIntoTheConfiguredDevelopment"); },
+    get submitLabel() { return translate("files.cloneRepository"); },
+    get busyLabel() { return translate("files.cloning"); },
   },
 };
 
@@ -106,6 +107,7 @@ export function WorkspaceForm({
   onInputChange,
   onSubmit,
 }: WorkspaceFormProps) {
+  useI18n();
   const resolvedInitialMode = initialMode ?? inferInitialMode(initialPath);
   const initialAutoLabel = inferWorkspaceLabel(initialPath);
   const [mode, setMode] = useState<WorkspaceFormMode>(resolvedInitialMode);
@@ -155,16 +157,16 @@ export function WorkspaceForm({
 
   function validateTarget(rawTarget: string) {
     if (!rawTarget) {
-      return `${field.label} is required.`;
+      return translate("files.isRequired", { value1: field.label });
     }
     if (mode === 'folder' && !folderNamePattern.test(rawTarget)) {
-      return 'Use 1-128 letters, numbers, periods, underscores, or hyphens.';
+      return translate("files.use1128LettersNumbersPeriodsUnderscores");
     }
     if (mode === 'path' && !isAbsolutePath(rawTarget)) {
-      return 'Enter an absolute path, such as /Users/name/project.';
+      return translate("files.enterAnAbsolutePathSuchAsUsers");
     }
     if (mode === 'git' && !isGitInput(rawTarget)) {
-      return 'Enter an HTTPS or SSH Git repository URL.';
+      return translate("files.enterAnHTTPSOrSSHGitRepository");
     }
     return null;
   }
@@ -201,8 +203,8 @@ export function WorkspaceForm({
   return (
     <form onSubmit={handleSubmit} className={formClassName} noValidate>
       <fieldset disabled={busy}>
-        <legend className="host-form-label text-sm font-medium">Workspace source</legend>
-        <div className="product-segmented mt-2 !grid w-full grid-cols-3 !overflow-visible" aria-label="Workspace source">
+        <legend className="host-form-label text-sm font-medium">{translate("files.workspaceSource")}</legend>
+        <div className="product-segmented mt-2 !grid w-full grid-cols-3 !overflow-visible" aria-label={translate("files.workspaceSource")}>
           {modeOptions.map(({ value, label: optionLabel, Icon }) => (
             <button
               key={value}
@@ -233,7 +235,7 @@ export function WorkspaceForm({
           }}
           placeholder={field.placeholder}
           autoFocus
-          autoCapitalize="none"
+          autoCapitalize={"none"}
           autoCorrect="off"
           spellCheck={false}
           disabled={busy}
@@ -258,7 +260,7 @@ export function WorkspaceForm({
 
       <div>
         <label htmlFor="workspace-label" className="host-form-label text-sm font-medium">
-          Display label <span className="host-muted font-normal">(optional)</span>
+          {translate("files.displayLabel")} <span className="host-muted font-normal">{translate("files.optional")}</span>
         </label>
         <input
           id="workspace-label"
@@ -268,7 +270,7 @@ export function WorkspaceForm({
             setLabel(event.target.value);
             clearErrors();
           }}
-          placeholder="Uses the folder or repository name"
+          placeholder={translate("files.usesTheFolderOrRepositoryName")}
           disabled={busy}
           className="host-form-control mt-2 min-h-11 w-full rounded-lg border px-4 py-2.5 outline-none transition disabled:cursor-not-allowed disabled:opacity-60"
         />
@@ -282,8 +284,7 @@ export function WorkspaceForm({
             disabled={busy}
             className="host-secondary-button inline-flex h-11 items-center justify-center rounded-md border px-4 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Cancel
-          </button>
+            {translate("files.cancel")}</button>
         ) : null}
         <button
           type="submit"

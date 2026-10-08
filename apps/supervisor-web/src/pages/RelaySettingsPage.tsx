@@ -1,8 +1,10 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useEffect } from 'react';
 
 import { useAppShellNav } from '../components/AppShellNavContext';
 
 export function RelaySettingsPage() {
+  useI18n();
   const shellNav = useAppShellNav();
 
   useEffect(() => {
@@ -11,7 +13,6 @@ export function RelaySettingsPage() {
 
   return (
     <div className="sr-only" data-testid="relay-settings-page">
-      Settings
-    </div>
+      {translate("settings.settings")}</div>
   );
 }

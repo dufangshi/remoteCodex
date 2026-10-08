@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useEffect, useState } from 'react';
 import { request } from '../lib/api';
 
@@ -19,6 +20,7 @@ export function UpstreamModelPicker({
   value: string;
   onChange: (model: string) => void;
 }) {
+  useI18n();
   const [models, setModels] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -52,13 +54,13 @@ export function UpstreamModelPicker({
         .then((result) => {
           if (!alive) return;
           if (!Array.isArray(result.models))
-            throw Error('Update this Supervisor to enable model discovery.');
+            throw Error(translate("settings.updateThisSupervisorToEnableModelDiscovery"));
           setModels(result.models);
           setTruncated(result.truncated);
         })
         .catch((e) => {
           if (alive)
-            setError(e instanceof Error ? e.message : 'Unable to load models');
+            setError(e instanceof Error ? e.message : translate("settings.unableToLoadModels"));
         })
         .finally(() => {
           if (alive) setLoading(false);
@@ -73,8 +75,7 @@ export function UpstreamModelPicker({
   return (
     <div>
       <label className="block text-sm">
-        Model
-        <select
+        {translate("settings.model")}<select
           className="host-input mt-1 w-full min-w-0 rounded-md border border-[var(--theme-border)] bg-[var(--theme-panel)] p-2 text-sm"
           required
           value={value}
@@ -82,10 +83,10 @@ export function UpstreamModelPicker({
           onChange={(e) => onChange(e.target.value)}
         >
           <option value="">
-            {loading ? 'Loading models…' : 'Select a model'}
+            {loading ? translate("settings.loadingModels") : translate("settings.selectAModel")}
           </option>
           {value && !models.some((m) => m.id === value) && (
-            <option value={value}>{value} (configured)</option>
+            <option value={value}>{value} {translate("settings.configured")}</option>
           )}
           {models.map((m) => (
             <option key={m.id} value={m.id}>
@@ -97,14 +98,14 @@ export function UpstreamModelPicker({
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--theme-fg-muted)]">
         <span>
           {!ready
-            ? 'Enter the upstream URL and API key to discover models.'
+            ? translate("settings.enterTheUpstreamURLAndAPIKey")
             : loading
-              ? 'Discovering models from this upstream…'
+              ? translate("settings.discoveringModelsFromThisUpstream")
               : error
                 ? ''
                 : models.length
-                  ? `${models.length} models found${truncated ? ' (list truncated)' : ''}.`
-                  : 'No models returned by this upstream.'}
+                  ? translate("settings.modelsFound", { value1: models.length, value2: truncated ? translate("settings.listTruncated") : '' })
+                  : translate("settings.noModelsReturnedByThisUpstream")}
         </span>
         <button
           type="button"
@@ -112,8 +113,7 @@ export function UpstreamModelPicker({
           disabled={!ready || loading}
           onClick={() => setRefresh((n) => n + 1)}
         >
-          Refresh models
-        </button>
+          {translate("settings.refreshModels")}</button>
       </div>
       {error && (
         <p

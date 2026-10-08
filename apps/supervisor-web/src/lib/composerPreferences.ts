@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import type { ComposerSendShortcut } from '@remote-codex/thread-ui';
 import { request } from './api';
 
@@ -7,7 +8,7 @@ interface ComposerPreferences {
 
 function checked(preferences: ComposerPreferences) {
   if (!['ctrlEnter', 'enter'].includes(preferences.sendShortcut)) {
-    throw new Error('Unable to read your message shortcuts.');
+    throw new Error(translate("chat.unableToReadYourMessageShortcuts"));
   }
   return preferences;
 }

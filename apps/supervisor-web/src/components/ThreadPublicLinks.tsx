@@ -1,3 +1,5 @@
+import { getLocale } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useEffect, useState } from 'react';
 import type { ThreadExportTurnOptionDto } from '@remote-codex/shared';
 import { Copy, Link2, Trash2, Check } from 'lucide-react';
@@ -16,6 +18,7 @@ export function ThreadPublicLinks({
   deviceId: string;
   threadId: string;
 }) {
+  useI18n();
   const [links, setLinks] = useState<SnapshotLink[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -52,7 +55,7 @@ export function ThreadPublicLinks({
       await navigator.clipboard.writeText(`${location.origin}/s/${id}`);
       setCopied(id);
     } catch {
-      setError('Link created. Copy it using the copy button, or select the URL.');
+      setError(translate("sharing.linkCreatedCopyItUsingTheCopy"));
     }
   }
   async function create() {
@@ -61,7 +64,7 @@ export function ThreadPublicLinks({
     let publicationToken: string | undefined;
     try {
       const turnIds = scope === 'all' ? turns.map(turn => turn.turnId) : [...selected];
-      if (!turnIds.length) throw new Error('Select at least one turn.');
+      if (!turnIds.length) throw new Error(translate("sharing.selectAtLeastOneTurn"));
       const theme = document.querySelector('.thread-ui-shell')?.getAttribute('data-theme-effective') === 'light' ? 'light' : 'dark';
       let snapshot;
       if (liveUpdates) {
@@ -70,7 +73,7 @@ export function ThreadPublicLinks({
           publicationToken = publication.token;
           snapshot = publication.snapshot;
         } catch (error) {
-          throw new Error(`Unable to enable live sharing. Make sure this device's Supervisor is up to date. ${error instanceof Error ? error.message : ''}`);
+          throw new Error(translate("sharing.unableToEnableLiveSharingMakeSure", { value1: error instanceof Error ? error.message : '' }));
         }
       } else {
         snapshot = await loadExportSnapshot(threadId, { mode: 'selected', turnIds });
@@ -90,7 +93,7 @@ export function ThreadPublicLinks({
       await copy(link.id);
     } catch (e) {
       if (publicationToken) await request(`/api/publications/${publicationToken}`, { method: 'DELETE' }).catch(() => {});
-      setError(e instanceof Error ? e.message : 'Unable to create link.');
+      setError(e instanceof Error ? e.message : translate("sharing.unableToCreateLink"));
     } finally {
       setBusy(false);
     }
@@ -102,7 +105,7 @@ export function ThreadPublicLinks({
       await request(`/relay/public-links/${id}`, { method: 'DELETE' });
       setLinks((current) => current.filter((link) => link.id !== id));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to revoke link.');
+      setError(e instanceof Error ? e.message : translate("sharing.unableToRevokeLink"));
     } finally {
       setBusy(false);
     }
@@ -110,23 +113,22 @@ export function ThreadPublicLinks({
   return (
     <section className="thread-public-links space-y-4">
       <p className="thread-export-dialog-subtitle text-sm">
-        Anyone with the link can read the selected prompts, images and final replies.
-      </p>
+        {translate("sharing.anyoneWithTheLinkCanReadThe")}</p>
       <fieldset className="thread-public-link-options" disabled={busy}>
-        <legend>Turns to share</legend>
+        <legend>{translate("sharing.turnsToShare")}</legend>
         <div className="thread-public-link-scope">
-          <label><input type="radio" name="public-link-scope" checked={scope === 'all'} onChange={() => setScope('all')} />All current turns {loaded ? `(${turns.length})` : ''}</label>
-          <label><input type="radio" name="public-link-scope" checked={scope === 'selected'} onChange={() => setScope('selected')} />Choose turns</label>
+          <label><input type="radio" name="public-link-scope" checked={scope === 'all'} onChange={() => setScope('all')} />{translate("sharing.allCurrentTurns")} {loaded ? `(${turns.length})` : ''}</label>
+          <label><input type="radio" name="public-link-scope" checked={scope === 'selected'} onChange={() => setScope('selected')} />{translate("sharing.chooseTurns")}</label>
         </div>
-        {!loaded && <p role="status">Loading turns…</p>}
-        {scope === 'selected' && loaded && <div className="thread-public-link-turns" aria-label="Turns to share">
-          <div className="thread-public-link-selection"><span>{selected.size} selected</span><button type="button" onClick={() => setSelected(new Set())}>Clear selection</button></div>
+        {!loaded && <p role="status">{translate("sharing.loadingTurns")}</p>}
+        {scope === 'selected' && loaded && <div className="thread-public-link-turns" aria-label={translate("sharing.turnsToShare")}>
+          <div className="thread-public-link-selection"><span>{selected.size} {translate("sharing.selected")}</span><button type="button" onClick={() => setSelected(new Set())}>{translate("sharing.clearSelection")}</button></div>
           {turns.map(turn => <label key={turn.turnId}>
-            <input type="checkbox" checked={selected.has(turn.turnId)} aria-label={`Share turn ${turn.turnNumber}`} onChange={event => setSelected(current => { const next = new Set(current); if (event.target.checked) next.add(turn.turnId); else next.delete(turn.turnId); return next; })} />
-            <span><strong>Turn {turn.turnNumber}</strong><span>{turn.userPromptPreview || 'No prompt text'}</span></span>
+            <input type="checkbox" checked={selected.has(turn.turnId)} aria-label={translate("sharing.shareTurn", { value1: turn.turnNumber })} onChange={event => setSelected(current => { const next = new Set(current); if (event.target.checked) next.add(turn.turnId); else next.delete(turn.turnId); return next; })} />
+            <span><strong>{translate("sharing.turn")} {turn.turnNumber}</strong><span>{turn.userPromptPreview || translate("sharing.noPromptText")}</span></span>
           </label>)}
         </div>}
-        <label className="thread-public-link-live"><input type="checkbox" checked={liveUpdates} onChange={event => setLiveUpdates(event.target.checked)} /><span><strong>Keep updated with new turns</strong><span>{liveUpdates ? 'Also publishes future turns automatically, even after you close this page. Unselected earlier turns stay private.' : 'Save a fixed snapshot. Later messages will not appear in this link.'}</span></span></label>
+        <label className="thread-public-link-live"><input type="checkbox" checked={liveUpdates} onChange={event => setLiveUpdates(event.target.checked)} /><span><strong>{translate("sharing.keepUpdatedWithNewTurns")}</strong><span>{liveUpdates ? translate("sharing.alsoPublishesFutureTurnsAutomaticallyEvenAfter") : translate("sharing.saveAFixedSnapshotLaterMessagesWill")}</span></span></label>
       </fieldset>
       <button
         type="button"
@@ -135,9 +137,9 @@ export function ThreadPublicLinks({
         className="thread-public-link-create matter-dialog-primary flex items-center gap-2 rounded-lg border px-4 py-2 text-sm"
       >
         <Link2 size={17} />
-        {busy ? 'Creating link…' : 'Create & copy link'}
+        {busy ? translate("sharing.creatingLink") : translate("sharing.createCopyLink")}
       </button>
-      {copied && <p role="status" className="thread-export-dialog-subtitle flex items-center gap-2"><Check size={14} />Read-only link copied</p>}
+      {copied && <p role="status" className="thread-export-dialog-subtitle flex items-center gap-2"><Check size={14} />{translate("sharing.readOnlyLinkCopied")}</p>}
       {error && (
         <p role="alert" className="text-sm text-red-500">
           {error}
@@ -150,13 +152,13 @@ export function ThreadPublicLinks({
         >
           <div className="mb-2 flex items-center justify-between gap-2">
             <span className="text-xs">
-              {link.live ? 'Live' : 'Snapshot'} · {link.turnCount} turns ·{' '}
-              {new Date(link.createdAt).toLocaleString()}
+              {link.live ? translate("sharing.live") : translate("sharing.snapshot")} · {link.turnCount} {translate("sharing.turns")}{' '}
+              {new Date(link.createdAt).toLocaleString(getLocale())}
             </span>
             <button
               className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg hover:bg-[var(--theme-bg)]"
-              aria-label="Revoke share link"
-              title="Revoke link"
+              aria-label={translate("sharing.revokeShareLink")}
+              title={translate("sharing.revokeLink")}
               disabled={busy}
               onClick={() => void revoke(link.id)}
             >
@@ -166,13 +168,13 @@ export function ThreadPublicLinks({
           <div className="flex items-center gap-2">
             <input
               readOnly
-              aria-label="Public share URL"
+              aria-label={translate("sharing.publicShareURL")}
               className="min-w-0 flex-1 rounded border border-[var(--theme-border)] bg-transparent p-2 text-xs"
               value={`${location.origin}/s/${link.id}`}
             />
             <button
               className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg hover:bg-[var(--theme-bg)]"
-              aria-label="Copy share link"
+              aria-label={translate("sharing.copyShareLink")}
               onClick={() => void copy(link.id)}
             >
               {copied === link.id ? <Check size={18} /> : <Copy size={18} />}

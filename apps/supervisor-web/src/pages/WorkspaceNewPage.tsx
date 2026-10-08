@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -10,6 +11,7 @@ import { ApiError, createWorkspace, fetchWorkspaceSettings } from '../lib/api';
 import { currentThreadsHref, currentWorkspacesHref } from '../lib/relayRoutes';
 
 export function WorkspaceNewPage() {
+  useI18n();
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -44,7 +46,7 @@ export function WorkspaceNewPage() {
       if (caught instanceof ApiError) {
         setError(caught.payload.message);
       } else {
-        setError(caught instanceof Error ? caught.message : 'Unable to create workspace.');
+        setError(caught instanceof Error ? caught.message : translate("files.unableToCreateWorkspace"));
       }
     } finally {
       setBusy(false);
@@ -57,10 +59,10 @@ export function WorkspaceNewPage() {
 
   return (
     <FloatingRoutePanel
-      backLabel="Back to workspaces"
-      eyebrow="Workspaces"
-      title="Add a workspace"
-      description="Choose a folder, existing path, or Git repository."
+      backLabel={translate("files.backToWorkspaces")}
+      eyebrow={translate("files.workspaces")}
+      title={translate("files.addAWorkspace")}
+      description={translate("files.chooseAFolderExistingPathOrGit")}
       onBack={handleCancel}
     >
       <WorkspaceForm

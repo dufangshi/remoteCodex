@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { LogOut, Settings } from 'lucide-react';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
@@ -30,7 +31,7 @@ function menuErrorMessage(caught: unknown) {
     ? caught.payload.message
     : caught instanceof Error
       ? caught.message
-      : 'Unable to log out. Try again.';
+      : translate("auth.unableToLogOutTryAgain");
 }
 
 export function RelayUserMenu({
@@ -40,6 +41,7 @@ export function RelayUserMenu({
   className?: string;
   menuAlign?: 'left' | 'right';
 }) {
+  useI18n();
   const navigate = useNavigate();
   const location = useLocation();
   const menuId = useId();
@@ -176,7 +178,7 @@ export function RelayUserMenu({
         aria-controls={open ? menuId : undefined}
         aria-expanded={open}
         aria-haspopup="menu"
-        aria-label={`Relay account menu for ${user.username}`}
+        aria-label={translate("auth.relayAccountMenuFor", { value1: user.username })}
         className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] text-sm font-semibold text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]"
         onClick={() => {
           initialFocusRef.current = 'first';
@@ -219,8 +221,7 @@ export function RelayUserMenu({
             to="/relay-account"
           >
             <Settings aria-hidden="true" className="h-4 w-4" />
-            Account settings
-          </Link>
+            {translate("auth.accountSettings")}</Link>
 
           <button
             aria-busy={loggingOut}
@@ -231,7 +232,7 @@ export function RelayUserMenu({
             type="button"
           >
             <LogOut aria-hidden="true" className="h-4 w-4" />
-            {loggingOut ? 'Logging out...' : 'Log out'}
+            {loggingOut ? translate("auth.loggingOut") : translate("auth.logOut")}
           </button>
           {logoutError ? (
             <p

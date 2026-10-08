@@ -1,3 +1,5 @@
+import { getLocale } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import type {
   AgentBackendDto,
   AgentBackendIdDto,
@@ -26,18 +28,18 @@ const themeOptions: Array<{
 }> = [
   {
     value: 'light',
-    label: 'Light',
-    description: 'Always use the bright theme.',
+    get label() { return translate("files.light"); },
+    get description() { return translate("files.alwaysUseTheBrightTheme"); },
   },
   {
     value: 'dark',
-    label: 'Dark',
-    description: 'Always use the dark theme.',
+    get label() { return translate("files.dark"); },
+    get description() { return translate("files.alwaysUseTheDarkTheme"); },
   },
   {
     value: 'system',
-    label: 'System',
-    description: 'Follow the operating system appearance.',
+    get label() { return translate("files.system"); },
+    get description() { return translate("files.followTheOperatingSystemAppearance"); },
   },
 ];
 
@@ -103,12 +105,12 @@ function unavailableBackend(
   displayName: string,
 ): AgentBackendDto {
   const descriptorUnavailable = provider === 'acp'
-    ? 'This device supervisor does not advertise ACP. Update and restart Remote Codex, or add acp to REMOTE_CODEX_ENABLED_AGENT_PROVIDERS.'
-    : 'Backend descriptor is not available.';
+    ? translate("files.thisDeviceSupervisorDoesNotAdvertiseACP")
+    : translate("files.backendDescriptorIsNotAvailable_f12b31");
   return {
     provider,
     displayName,
-    description: `${displayName} backend descriptor is not available.`,
+    description: translate("files.backendDescriptorIsNotAvailable", { value1: displayName }),
     enabled: false,
     isDefault: provider === defaultAgentBackendId,
     status: {
@@ -196,7 +198,7 @@ function formatArchiveDate(value: string) {
     return value;
   }
 
-  return date.toLocaleString(undefined, {
+  return date.toLocaleString(getLocale(), {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',

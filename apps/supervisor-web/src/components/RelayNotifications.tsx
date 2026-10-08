@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useEffect, useState } from 'react';
 import { nativeAppBridge } from '../lib/nativeApp';
 import {
@@ -11,6 +12,7 @@ import {
 } from '../lib/relayPush';
 
 export function RelayNotifications() {
+  useI18n();
   const [settings, setSettings] = useState<PushSettings | null>(null);
   const [enabled, setEnabled] = useState(false);
   const [busy, setBusy] = useState(true);
@@ -31,7 +33,7 @@ export function RelayNotifications() {
       setError(
         e instanceof Error
           ? e.message
-          : 'Unable to load notification settings.',
+          : translate("workbench.unableToLoadNotificationSettings"),
       );
     } finally {
       setBusy(false);
@@ -50,21 +52,21 @@ export function RelayNotifications() {
       : enablePush(settings.publicKey, Notification.requestPermission());
     void operation.then(refresh).catch((e) => {
       setError(
-        e instanceof Error ? e.message : 'Unable to change notifications.',
+        e instanceof Error ? e.message : translate("workbench.unableToChangeNotifications"),
       );
       setBusy(false);
     });
   }
   if (native) return (
     <section className="grid gap-4 py-6">
-      <h2 className="text-base font-semibold">Thread notifications</h2>
-      <p className="text-sm text-[var(--theme-fg-muted)]">Tap a system notification to open its device and thread.</p>
+      <h2 className="text-base font-semibold">{translate("workbench.threadNotifications")}</h2>
+      <p className="text-sm text-[var(--theme-fg-muted)]">{translate("workbench.tapASystemNotificationToOpenIts")}</p>
       <p className="text-sm">{native.platform === 'ios'
-        ? settings?.nativePushAvailable ? 'Background push is available on this relay. Allow notifications in iOS Settings.' : 'This relay has not configured Apple Push Notifications. Updates are available while the app is active; background delivery is not guaranteed.'
-        : 'Allow notifications and keep the monitoring service running. Android battery restrictions and background service limits can pause monitoring.'}</p>
+        ? settings?.nativePushAvailable ? translate("workbench.backgroundPushIsAvailableOnThisRelay") : translate("workbench.thisRelayHasNotConfiguredApplePush")
+        : translate("workbench.allowNotificationsAndKeepTheMonitoringService")}</p>
       <div className="flex flex-wrap gap-3">
-        <button className="relay-button-primary min-h-11" onClick={() => native.notificationSettings()}>Open notification settings</button>
-        <button className="relay-button-secondary min-h-11" onClick={() => native.changeRelay()}>Change relay</button>
+        <button className="relay-button-primary min-h-11" onClick={() => native.notificationSettings()}>{translate("workbench.openNotificationSettings")}</button>
+        <button className="relay-button-secondary min-h-11" onClick={() => native.changeRelay()}>{translate("workbench.changeRelay")}</button>
       </div>
       {error && <p role="alert">{error}</p>}
     </section>
@@ -72,34 +74,26 @@ export function RelayNotifications() {
   return (
     <section className="grid gap-5 py-6 sm:grid-cols-[11rem_minmax(0,1fr)] sm:gap-8">
       <header>
-        <h2 className="text-base font-semibold">Thread notifications</h2>
+        <h2 className="text-base font-semibold">{translate("workbench.threadNotifications")}</h2>
         <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-          Your Relay account.
-        </p>
+          {translate("workbench.yourRelayAccount")}</p>
       </header>
       <div className="space-y-3 text-sm">
         <p>
-          Notify this browser when a thread turn completes or fails on any
-          device you own. Threads and devices shared with you are excluded.
-        </p>
+          {translate("workbench.notifyThisBrowserWhenAThreadTurn")}</p>
         <p className="text-[var(--theme-fg-muted)]">
-          Pages can be closed. Clicking a notification opens its thread or
-          focuses the tab already showing it. Chat content is not included.
-        </p>
+          {translate("workbench.pagesCanBeClosedClickingANotification")}</p>
         {!supported ? (
           <p>
-            This browser cannot enable Web Push here. Use HTTPS and a supported
-            browser; on iPhone or iPad, add Remote Codex to the Home Screen
-            first.
-          </p>
+            {translate("workbench.thisBrowserCannotEnableWebPushHere")}</p>
         ) : (
           <>
             <p>
               {busy
-                ? 'Checking notifications…'
+                ? translate("workbench.checkingNotifications")
                 : enabled
-                  ? 'Enabled in this browser'
-                  : 'Disabled in this browser'}
+                  ? translate("workbench.enabledInThisBrowser")
+                  : translate("workbench.disabledInThisBrowser")}
             </p>
             <button
               type="button"
@@ -107,20 +101,16 @@ export function RelayNotifications() {
               disabled={busy || !settings}
               onClick={toggle}
             >
-              {enabled ? 'Disable notifications' : 'Enable notifications'}
+              {enabled ? translate("workbench.disableNotifications") : translate("workbench.enableNotifications")}
             </button>
             {Notification.permission === 'denied' && (
               <p>
-                Notifications are blocked. Allow them in this site’s browser
-                settings, then reload.
-              </p>
+                {translate("workbench.notificationsAreBlockedAllowThemInThis")}</p>
             )}
           </>
         )}
         <p className="text-[var(--theme-fg-muted)]">
-          Enable separately in each browser. Signing out or ending this login
-          session disables its subscription.
-        </p>
+          {translate("workbench.enableSeparatelyInEachBrowserSigningOut")}</p>
         {error && (
           <p role="alert" className="text-[var(--status-danger-fg)]">
             {error}

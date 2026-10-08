@@ -1,3 +1,5 @@
+import { getLocale } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useEffect, useId, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Clock3 } from 'lucide-react';
 import {
@@ -43,20 +45,21 @@ interface WatchSnapshot {
   timezone?: string;
 }
 const statusLabel: Record<Watch['status'], string> = {
-  active: 'Active in current session',
-  unconfirmed: 'Status unconfirmed',
-  sessionEnded: 'Session ended',
-  notScheduled: 'No longer scheduled',
-  deleted: 'Cancelled',
-  expired: 'Expired',
-  completed: 'Completed',
+  get active() { return translate("workbench.activeInCurrentSession"); },
+  get unconfirmed() { return translate("workbench.statusUnconfirmed"); },
+  get sessionEnded() { return translate("workbench.sessionEnded"); },
+  get notScheduled() { return translate("workbench.noLongerScheduled"); },
+  get deleted() { return translate("workbench.cancelled"); },
+  get expired() { return translate("workbench.expired"); },
+  get completed() { return translate("workbench.completed"); },
 };
 const isCurrent = (watch: Watch) =>
   watch.status === 'active' || watch.status === 'unconfirmed';
 const dateLabel = (date: string | null) =>
-  date ? new Date(date).toLocaleString() : 'Unavailable';
+  date ? new Date(date).toLocaleString(getLocale()) : translate("workbench.unavailable");
 
 function WatchCard({ watch: w }: { watch: Watch }) {
+  const { locale: i18nLocale } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const detailsId = useId();
   const ambiguous = w.ambiguousTriggerCount ?? 0;
@@ -64,7 +67,7 @@ function WatchCard({ watch: w }: { watch: Watch }) {
   const partial = count != null && (w.pricedTriggerCount ?? 0) < count;
   const coverage = partial
     ? `Cost reported for ${w.pricedTriggerCount ?? 0} of ${count} recorded runs.`
-    : 'Sum of costs reported by the recorded watch turns.';
+    : translate("workbench.sumOfCostsReportedByTheRecorded");
   return (
     <article className="min-w-0 rounded-lg border border-[var(--theme-border)] p-3">
       <div className="flex items-start justify-between gap-3">
@@ -75,44 +78,42 @@ function WatchCard({ watch: w }: { watch: Watch }) {
           </p>
           {w.status === 'unconfirmed' && (
             <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-              This recorded watch may have ended. Its live schedule has not been confirmed.
-            </p>
+              {translate("workbench.thisRecordedWatchMayHaveEndedIts")}</p>
           )}
         </div>
-        <div className="shrink-0 text-sm" aria-label="Watch total cost">
+        <div className="shrink-0 text-sm" aria-label={translate("workbench.watchTotalCost")}>
           {w.priceEstimate || w.tokenUsage ? (
             <TokenUsageCost
               usage={w.tokenUsage ?? null}
               price={w.priceEstimate ?? null}
-              costLabel="Watch total cost"
-              detailsNote={`${coverage}${ambiguous ? ' Ambiguous runs are excluded.' : ''}`}
+              costLabel={translate("workbench.watchTotalCost")}
+              detailsNote={`${coverage}${ambiguous ? translate("workbench.ambiguousRunsAreExcluded") : ''}`}
               tooltipZIndex={120}
             />
           ) : (
             <span className="text-xs text-[var(--theme-fg-muted)]">
-              Cost unavailable
-            </span>
+              {translate("workbench.costUnavailable")}</span>
           )}
         </div>
       </div>
       <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-        <dt className="text-[var(--theme-fg-muted)]">Created</dt>
+        <dt className="text-[var(--theme-fg-muted)]">{translate("workbench.created")}</dt>
         <dd>
           {w.createdAt ? (
             <time dateTime={w.createdAt}>{dateLabel(w.createdAt)}</time>
           ) : (
-            'Unavailable'
+            translate("workbench.unavailable")
           )}
         </dd>
-        <dt className="text-[var(--theme-fg-muted)]">Triggers</dt>
+        <dt className="text-[var(--theme-fg-muted)]">{translate("workbench.triggers")}</dt>
         <dd>
           {count == null
-            ? 'Unavailable'
-            : `${count.toLocaleString()}${ambiguous ? ' confirmed' : ''}`}
+            ? translate("workbench.unavailable")
+            : `${count.toLocaleString(getLocale())}${ambiguous ? ' confirmed' : ''}`}
         </dd>
         {w.lastTriggeredAt && (
           <>
-            <dt className="text-[var(--theme-fg-muted)]">Last triggered</dt>
+            <dt className="text-[var(--theme-fg-muted)]">{translate("workbench.lastTriggered")}</dt>
             <dd>
               <time dateTime={w.lastTriggeredAt}>
                 {dateLabel(w.lastTriggeredAt)}
@@ -122,17 +123,15 @@ function WatchCard({ watch: w }: { watch: Watch }) {
         )}
         {w.statusCheckedAt && (
           <>
-            <dt className="text-[var(--theme-fg-muted)]">Status checked</dt>
+            <dt className="text-[var(--theme-fg-muted)]">{translate("workbench.statusChecked")}</dt>
             <dd><time dateTime={w.statusCheckedAt}>{dateLabel(w.statusCheckedAt)}</time></dd>
           </>
         )}
       </dl>
       {ambiguous > 0 && (
         <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">
-          {ambiguous} additional{' '}
-          {ambiguous === 1 ? 'run matches' : 'runs match'} multiple watches;
-          excluded from this total.
-        </p>
+          {ambiguous} {translate("workbench.additional")}{' '}
+          {ambiguous === 1 ? translate("workbench.runMatches") : translate("workbench.runsMatch")} {translate("workbench.multipleWatchesExcludedFromThisTotal")}</p>
       )}
       {partial && (
         <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">{coverage}</p>
@@ -145,7 +144,7 @@ function WatchCard({ watch: w }: { watch: Watch }) {
         onClick={() => setExpanded(!expanded)}
       >
         {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        {expanded ? 'Hide details' : 'Show details'}
+        {expanded ? translate("workbench.hideDetails") : translate("workbench.showDetails")}
       </button>
       {expanded && (
         <div
@@ -163,7 +162,7 @@ function WatchCard({ watch: w }: { watch: Watch }) {
             </dd>
             {w.expiresAt && (
               <>
-                <dt className="text-[var(--theme-fg-muted)]">Expires</dt>
+                <dt className="text-[var(--theme-fg-muted)]">{translate("workbench.expires")}</dt>
                 <dd>{dateLabel(w.expiresAt)}</dd>
               </>
             )}
@@ -178,6 +177,7 @@ function WatchCard({ watch: w }: { watch: Watch }) {
 }
 
 export function ThreadWatchesControl({ thread }: { thread: ThreadDto }) {
+  const { locale: i18nLocale } = useI18n();
   const [snapshot, setSnapshot] = useState<WatchSnapshot>({ watches: [] });
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -229,13 +229,13 @@ export function ThreadWatchesControl({ thread }: { thread: ThreadDto }) {
         ref={trigger}
         type="button"
         className="matter-watches-toggle"
-        aria-label={`Watches (${current.length})`}
+        aria-label={translate("workbench.watches", { value1: current.length })}
         aria-expanded={open}
         onClick={() => {
           refreshRef.current();
           setOpen(!open);
         }}
-        title="Session watches"
+        title={translate("workbench.sessionWatches")}
       >
         <Clock3 size={14} />
         <span>{current.length}</span>
@@ -255,14 +255,12 @@ export function ThreadWatchesControl({ thread }: { thread: ThreadDto }) {
         >
           <DialogHeader className="text-left">
             <DialogTitle ref={title} tabIndex={-1} className="outline-none">
-              Watches
-            </DialogTitle>
+              {translate("workbench.watches_2cb575")}</DialogTitle>
             <DialogDescription className="pr-4 text-xs text-[var(--theme-fg-muted)]">
-              Session timers stop when the Claude process exits.{' '}
+              {translate("workbench.sessionTimersStopWhenTheClaudeProcess")}{' '}
               {snapshot.timezone}
               <span className="mt-1 block">
-                Totals include recorded scheduled turns.
-              </span>
+                {translate("workbench.totalsIncludeRecordedScheduledTurns")}</span>
             </DialogDescription>
           </DialogHeader>
           <div className="min-w-0 space-y-3 overflow-y-auto overscroll-contain max-h-[65dvh]">
@@ -272,7 +270,7 @@ export function ThreadWatchesControl({ thread }: { thread: ThreadDto }) {
             {past.length > 0 && (
               <details className="min-w-0">
                 <summary className="cursor-pointer text-sm text-[var(--theme-fg-muted)]">
-                  Past watches ({past.length})
+                  {translate("workbench.pastWatches")}{past.length})
                 </summary>
                 <div className="mt-3 space-y-3">
                   {past.map((w) => (

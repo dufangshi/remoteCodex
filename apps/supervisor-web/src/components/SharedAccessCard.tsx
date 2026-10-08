@@ -1,3 +1,5 @@
+import { getLocale } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useId, useState } from 'react';
 import {
   ArrowUpRight,
@@ -48,10 +50,11 @@ export function SharedAccessCard({
   onRevoke?: (() => void) | undefined;
   onToggleAccess?: (() => void) | undefined;
 }) {
+  useI18n();
   const [profileOpen, setProfileOpen] = useState(false);
   const historyId = useId();
   const date = (value: string) =>
-    new Date(value).toLocaleString(undefined, {
+    new Date(value).toLocaleString(getLocale(), {
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
@@ -71,21 +74,21 @@ export function SharedAccessCard({
             {subtitle}
           </p>
         </div>
-        <button type="button" className="shared-access-open" onClick={onOpen} disabled={deviceConnected !== true || !onOpen} title={deviceConnected === true ? "Open" : deviceConnected === false ? "Supervisor offline — reconnect the device to open" : "Supervisor status unavailable"}>
-          Open <ArrowUpRight size={15} aria-hidden="true" />
+        <button type="button" className="shared-access-open" onClick={onOpen} disabled={deviceConnected !== true || !onOpen} title={deviceConnected === true ? translate("sharing.open") : deviceConnected === false ? translate("sharing.supervisorOfflineReconnectTheDeviceToOpen") : translate("sharing.supervisorStatusUnavailable")}>
+          {translate("sharing.open")} <ArrowUpRight size={15} aria-hidden="true" />
         </button>
       </div>
       <div className="shared-access-device">
         <span className="shared-access-device-name" title={deviceName}><MonitorSmartphone size={14} aria-hidden="true" /><span>{deviceName}</span></span>
         <span className="shared-supervisor-presence" data-online={deviceConnected === true} role="status">
-          <span aria-hidden="true" />Supervisor {deviceConnected === true ? 'online' : deviceConnected === false ? 'offline' : 'unknown'}
+          <span aria-hidden="true" />Supervisor {deviceConnected === true ? translate("sharing.online") : deviceConnected === false ? translate("sharing.offline") : translate("sharing.unknown")}
         </span>
       </div>
       <div className="shared-access-card-person">
         <button
           type="button"
           className="shared-profile-button"
-          aria-label={`View ${username}'s profile`}
+          aria-label={translate("sharing.viewSProfile", { value1: username })}
           onClick={() => setProfileOpen(true)}
         >
           <span className="shared-profile-avatar" aria-hidden="true">
@@ -93,7 +96,7 @@ export function SharedAccessCard({
           </span>
           <span className="min-w-0 text-left">
             <span className="block text-[10px] text-[var(--theme-fg-muted)]">
-              {mode === 'incoming' ? 'Shared by' : 'Shared with'}
+              {mode === 'incoming' ? translate("sharing.sharedBy") : translate("sharing.sharedWith")}
             </span>
             <span className="block truncate text-xs font-medium">
               {username}
@@ -105,8 +108,8 @@ export function SharedAccessCard({
             <button
               type="button"
               className="product-icon-button"
-              aria-label="Permissions"
-              title="Edit permissions"
+              aria-label={translate("sharing.permissions")}
+              title={translate("sharing.editPermissions")}
               disabled={busy}
               onClick={onEdit}
             >
@@ -115,8 +118,8 @@ export function SharedAccessCard({
             <button
               type="button"
               className="product-icon-button"
-              aria-label="Access history"
-              title="Recent access"
+              aria-label={translate("sharing.accessHistory")}
+              title={translate("sharing.recentAccess")}
               aria-expanded={expanded}
               aria-controls={historyId}
               onClick={onToggleAccess}
@@ -126,8 +129,8 @@ export function SharedAccessCard({
             <button
               type="button"
               className="product-icon-button shared-access-revoke"
-              aria-label="Revoke"
-              title="Revoke access"
+              aria-label={translate("sharing.revoke")}
+              title={translate("sharing.revokeAccess")}
               disabled={busy}
               onClick={onRevoke}
             >
@@ -147,8 +150,8 @@ export function SharedAccessCard({
         {mode === 'outgoing' && (
           <span className="shared-access-date">
             {lastAccessedAt
-              ? `Visited ${date(lastAccessedAt)}`
-              : 'No visits yet'}
+              ? translate("sharing.visited", { value1: date(lastAccessedAt) })
+              : translate("sharing.noVisitsYet")}
           </span>
         )}
       </div>
@@ -156,9 +159,9 @@ export function SharedAccessCard({
         <section
           id={historyId}
           className="shared-access-history"
-          aria-label="Recent access"
+          aria-label={translate("sharing.recentAccess")}
         >
-          <h4 className="mb-2 text-xs font-medium">Recent access</h4>
+          <h4 className="mb-2 text-xs font-medium">{translate("sharing.recentAccess")}</h4>
           {events.length ? (
             <ol>
               {events.map((event) => (
@@ -183,8 +186,7 @@ export function SharedAccessCard({
             </ol>
           ) : (
             <p className="text-xs text-[var(--theme-fg-muted)]">
-              No visits recorded yet.
-            </p>
+              {translate("sharing.noVisitsRecordedYet")}</p>
           )}
         </section>
       )}
@@ -193,8 +195,8 @@ export function SharedAccessCard({
           title={username}
           description={
             mode === 'incoming'
-              ? 'This person shared access with you.'
-              : 'You shared access with this person.'
+              ? translate("sharing.thisPersonSharedAccessWithYou")
+              : translate("sharing.youSharedAccessWithThisPerson")
           }
           onClose={() => setProfileOpen(false)}
         >
@@ -205,8 +207,7 @@ export function SharedAccessCard({
             <div className="min-w-0">
               <p className="truncate font-semibold">{username}</p>
               <p className="text-xs text-[var(--theme-fg-muted)]">
-                Remote Codex account
-              </p>
+                {translate("sharing.remoteCodexAccount")}</p>
             </div>
           </div>
           <div className="rounded-xl border border-[var(--theme-border)] p-4">
@@ -225,8 +226,7 @@ export function SharedAccessCard({
                 onEdit?.();
               }}
             >
-              Edit permissions
-            </button>
+              {translate("sharing.editPermissions")}</button>
           )}
         </FormDialog>
       )}

@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import type { ReactNode } from 'react';
 import { ArrowLeft } from 'lucide-react';
 
@@ -17,9 +18,10 @@ export function FloatingRoutePanel({
   description,
   children,
   maxWidthClassName = '!max-w-2xl',
-  backLabel = 'Back',
+  backLabel = translate("workbench.back"),
   onBack,
 }: FloatingRoutePanelProps) {
+  useI18n();
   return (
     <div className={`product-page ${maxWidthClassName} pt-[calc(env(safe-area-inset-top)+1rem)] sm:pt-8`}>
       <section>

@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { ProductHeader } from '../components/ProductHeader';
 import { ArrowRight, BookOpen, MonitorSmartphone, RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -11,10 +12,11 @@ function errorMessage(caught: unknown) {
     ? caught.payload.message
     : caught instanceof Error
       ? caught.message
-      : 'The relay service could not be reached.';
+      : translate("auth.theRelayServiceCouldNotBeReached");
 }
 
 export function RelayHomePage() {
+  const { locale: i18nLocale } = useI18n();
   const [session, setSession] = useState<RelaySessionDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -41,17 +43,17 @@ export function RelayHomePage() {
     session?.authenticated === true && session.user?.role !== 'admin';
 
   const title = loading
-    ? 'Checking relay access'
+    ? translate("auth.checkingRelayAccess")
     : error
-      ? 'Relay service unavailable'
+      ? translate("auth.relayServiceUnavailable")
       : authenticated
-        ? 'Choose a device to continue'
-        : 'Sign in to your relay workspace';
+        ? translate("auth.chooseADeviceToContinue")
+        : translate("auth.signInToYourRelayWorkspace");
 
   return (
     <main className="min-h-screen bg-[var(--app-bg)] px-4 py-5 text-[var(--app-fg)] sm:px-6 sm:py-6">
       <div className="mx-auto w-full max-w-5xl">
-        <ProductHeader title="Remote Codex" actions={<Link className="product-icon-button" to="/relay-guide" aria-label="Guide" title="Guide"><BookOpen size={18} /></Link>} />
+        <ProductHeader title="Remote Codex" actions={<Link className="product-icon-button" to="/relay-guide" aria-label={translate("auth.guide")} title={translate("auth.guide")}><BookOpen size={18} /></Link>} />
 
         <section className="py-10 sm:py-14" aria-busy={loading}>
           <div className="flex items-center gap-2 text-sm text-[var(--theme-fg-muted)]">
@@ -68,12 +70,12 @@ export function RelayHomePage() {
               }`}
             />
             {loading
-              ? 'Checking session'
+              ? translate("auth.checkingSession")
               : error
-                ? 'Connection failed'
+                ? translate("auth.connectionFailed")
                 : authenticated
-                  ? `Signed in as ${session.user?.username}`
-                  : 'Signed out'}
+                  ? translate("auth.signedInAs", { value1: session.user?.username })
+                  : translate("auth.signedOut")}
           </div>
 
           <h1 className="mt-4 max-w-2xl text-2xl font-semibold tracking-normal text-[var(--theme-fg)] sm:text-3xl">
@@ -81,10 +83,10 @@ export function RelayHomePage() {
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--theme-fg-soft)]">
             {error
-              ? 'Your session could not be checked. Verify the relay address and try again.'
+              ? translate("auth.yourSessionCouldNotBeCheckedVerify")
               : authenticated
-                ? 'Open device management to connect to a supervisor, then continue into its workspaces and threads.'
-                : 'Use your relay account to reach the devices, workspaces, and threads shared with you.'}
+                ? translate("auth.openDeviceManagementToConnectToA")
+                : translate("auth.useYourRelayAccountToReachThe")}
           </p>
 
           {error ? (
@@ -100,8 +102,7 @@ export function RelayHomePage() {
                 type="button"
               >
                 <RefreshCw aria-hidden="true" className="h-4 w-4" />
-                Retry
-              </button>
+                {translate("auth.retry")}</button>
             </div>
           ) : loading ? (
             <div className="mt-6 h-11 w-36 animate-pulse rounded-lg bg-[var(--theme-muted)]" aria-hidden="true" />
@@ -111,7 +112,7 @@ export function RelayHomePage() {
               to={authenticated ? '/relay-devices' : '/relay-portal'}
             >
               <MonitorSmartphone aria-hidden="true" className="h-4 w-4" />
-              {authenticated ? 'Open devices' : 'Sign in'}
+              {authenticated ? translate("auth.openDevices") : translate("auth.signIn")}
               <ArrowRight aria-hidden="true" className="h-4 w-4" />
             </Link>
           )}
@@ -120,21 +121,17 @@ export function RelayHomePage() {
         <section className="border-t border-[var(--theme-border)] py-6">
           <div className="grid gap-4 sm:grid-cols-[10rem_minmax(0,1fr)]">
             <div>
-              <h2 className="text-sm font-semibold text-[var(--theme-fg)]">Connection path</h2>
+              <h2 className="text-sm font-semibold text-[var(--theme-fg)]">{translate("auth.connectionPath")}</h2>
               <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                Three steps, one outbound tunnel.
-              </p>
+                {translate("auth.threeStepsOneOutboundTunnel")}</p>
             </div>
             <ol className="divide-y divide-[var(--theme-border)] border-y border-[var(--theme-border)]">
-              <ConnectionStep number="01" title="Register a device">
-                Create a permanent token for the private supervisor machine.
-              </ConnectionStep>
-              <ConnectionStep number="02" title="Start the supervisor">
-                Keep an outbound relay connection open from that machine.
-              </ConnectionStep>
-              <ConnectionStep number="03" title="Open your workspace">
-                Select the online device and continue to its workspaces and threads.
-              </ConnectionStep>
+              <ConnectionStep number="01" title={translate("auth.registerADevice")}>
+                {translate("auth.createAPermanentTokenForThePrivate")}</ConnectionStep>
+              <ConnectionStep number="02" title={translate("auth.startTheSupervisor")}>
+                {translate("auth.keepAnOutboundRelayConnectionOpenFrom")}</ConnectionStep>
+              <ConnectionStep number="03" title={translate("auth.openYourWorkspace")}>
+                {translate("auth.selectTheOnlineDeviceAndContinueTo")}</ConnectionStep>
             </ol>
           </div>
         </section>
@@ -152,6 +149,7 @@ function ConnectionStep({
   number: string;
   title: string;
 }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <li className="grid grid-cols-[2rem_minmax(0,1fr)] gap-3 py-3 first:pt-0 last:pb-0">
       <span className="font-mono text-xs leading-6 text-[var(--theme-fg-muted)]">{number}</span>

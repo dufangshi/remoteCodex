@@ -1,3 +1,5 @@
+import { getLocale } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { FormDialog } from './FormDialog';
 import { useDialogLifecycle } from './useDialogLifecycle';
 import { request } from '../lib/api';
@@ -31,6 +33,7 @@ const input = 'relay-input min-h-11 w-full';
 const secondary =
   'relay-button-secondary inline-flex min-h-10 items-center justify-center gap-2 px-3 text-sm disabled:opacity-50';
 function ErrorText({ error }: { error: string | null }) {
+  const { locale: i18nLocale } = useI18n();
   return error ? (
     <p role="alert" className="text-sm text-[var(--status-danger-fg)]">
       {error}
@@ -47,6 +50,7 @@ export function LoginVerification({
   onSuccess: () => Promise<void>;
   onBack: () => void;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const [code, setCode] = useState(''),
     [remember, setRemember] = useState(true),
     [recovery, setRecovery] = useState(false);
@@ -72,10 +76,9 @@ export function LoginVerification({
         aria-hidden="true"
       />
       <div>
-        <h1 className="text-xl font-semibold">Verify it’s you</h1>
+        <h1 className="text-xl font-semibold">{translate("auth.verifyItSYou")}</h1>
         <p className="mt-2 text-sm text-[var(--theme-fg-muted)]">
-          One more step for this browser.
-        </p>
+          {translate("auth.oneMoreStepForThisBrowser")}</p>
       </div>
       {challenge.passkey && (
         <button
@@ -83,8 +86,7 @@ export function LoginVerification({
           disabled={busy}
           onClick={() => void verify(true)}
         >
-          <Fingerprint size={18} /> Use a passkey
-        </button>
+          <Fingerprint size={18} /> {translate("auth.useAPasskey")}</button>
       )}
       {(challenge.authenticator || recovery) && (
         <form
@@ -95,7 +97,7 @@ export function LoginVerification({
           }}
         >
           <label className="block text-sm">
-            {recovery ? 'Recovery code' : 'Authenticator code'}
+            {recovery ? translate("auth.recoveryCode") : translate("auth.authenticatorCode")}
             <input
               autoFocus
               autoComplete="one-time-code"
@@ -115,14 +117,13 @@ export function LoginVerification({
                 checked={remember}
                 onChange={(e) => setRemember(e.target.checked)}
               />{' '}
-              Trust this browser for 30 days
-            </label>
+              {translate("auth.trustThisBrowserFor30Days")}</label>
           )}
           <button
             className="relay-button-primary min-h-11 w-full"
             disabled={busy || !code.trim()}
           >
-            {busy ? 'Verifying…' : 'Verify'}
+            {busy ? translate("auth.verifying") : translate("auth.verify")}
           </button>
         </form>
       )}
@@ -133,8 +134,7 @@ export function LoginVerification({
             checked={remember}
             onChange={(e) => setRemember(e.target.checked)}
           />{' '}
-          Trust this browser for 30 days
-        </label>
+          {translate("auth.trustThisBrowserFor30Days")}</label>
       )}
       <ErrorText error={error} />
       <div className="flex flex-wrap justify-between gap-3 text-sm">
@@ -147,7 +147,7 @@ export function LoginVerification({
             setError(null);
           }}
         >
-          {recovery ? 'Use another method' : 'Use a recovery code'}
+          {recovery ? translate("auth.useAnotherMethod") : translate("auth.useARecoveryCode")}
         </button>
         <button
           type="button"
@@ -163,14 +163,14 @@ export function LoginVerification({
               .catch((e) => setError(securityError(e)))
           }
         >
-          Back to sign in
-        </button>
+          {translate("auth.backToSignIn")}</button>
       </div>
     </section>
   );
 }
 
 export function usePendingLogin() {
+  const { locale: i18nLocale } = useI18n();
   const [challenge, setChallenge] = useState<LoginChallenge | null>(null);
   useEffect(() => {
     let active = true;
@@ -197,6 +197,7 @@ export function SecurityVerification({
   onVerified: (verificationToken?: string) => Promise<void>;
   onCancel: () => void;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const [value, setValue] = useState(''),
     [busy, setBusy] = useState(false),
     [error, setError] = useState<string | null>(null);
@@ -221,19 +222,16 @@ export function SecurityVerification({
     }
   }
   return (
-    <FormDialog title="Verify your identity" onClose={onCancel} busy={busy}>
+    <FormDialog title={translate("auth.verifyYourIdentity")} onClose={onCancel} busy={busy}>
       <p className="text-sm text-[var(--theme-fg-muted)]">
-        Confirm this security change with your authenticator, recovery code or
-        passkey.
-      </p>
+        {translate("auth.confirmThisSecurityChangeWithYourAuthenticator")}</p>
       {status.passkeys.length > 0 && (
         <button
           className={`${secondary} w-full`}
           disabled={busy}
           onClick={() => void verify(true)}
         >
-          <Fingerprint size={16} /> Use a passkey
-        </button>
+          <Fingerprint size={16} /> {translate("auth.useAPasskey")}</button>
       )}
       <form
         className="space-y-4"
@@ -243,7 +241,7 @@ export function SecurityVerification({
         }}
       >
         <label className="block text-sm">
-          {factor ? 'Authenticator or recovery code' : 'Password'}
+          {factor ? translate("auth.authenticatorOrRecoveryCode") : translate("auth.password")}
           <input
             autoFocus
             className={`${input} mt-2`}
@@ -263,13 +261,12 @@ export function SecurityVerification({
             disabled={busy}
             onClick={onCancel}
           >
-            Cancel
-          </button>
+            {translate("auth.cancel")}</button>
           <button
             className="relay-button-primary min-h-10 px-4"
             disabled={busy || !value}
           >
-            {busy ? 'Verifying…' : 'Verify'}
+            {busy ? translate("auth.verifying") : translate("auth.verify")}
           </button>
         </div>
       </form>
@@ -284,6 +281,7 @@ function RecoveryCodes({
   codes: string[];
   onClose: () => void;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const [copied, setCopied] = useState(false),
     [saved, setSaved] = useState(false),
     [error, setError] = useState<string | null>(null);
@@ -294,7 +292,7 @@ function RecoveryCodes({
       setCopied(true);
       setSaved(true);
     } catch {
-      setError('Copy was unavailable. Download the codes instead.');
+      setError(translate("auth.copyWasUnavailableDownloadTheCodesInstead"));
     }
   }
   function download() {
@@ -310,13 +308,11 @@ function RecoveryCodes({
     <div
       className="space-y-4 rounded-lg border border-[var(--theme-accent-strong)] p-4"
       role="region"
-      aria-label="Save recovery codes"
+      aria-label={translate("auth.saveRecoveryCodes")}
     >
-      <h3 className="font-medium">Save your recovery codes</h3>
+      <h3 className="font-medium">{translate("auth.saveYourRecoveryCodes")}</h3>
       <p className="text-sm text-[var(--theme-fg-muted)]">
-        Use these if you lose your authenticator or passkey. Each code works
-        once. These codes won’t be shown again.
-      </p>
+        {translate("auth.useTheseIfYouLoseYourAuthenticator")}</p>
       <div className="grid gap-2 rounded-md bg-[var(--theme-bg)] p-3 font-mono text-sm sm:grid-cols-2">
         {codes.map((code) => (
           <span key={code}>{code}</span>
@@ -325,18 +321,15 @@ function RecoveryCodes({
       <ErrorText error={error} />
       <div className="flex flex-wrap gap-2">
         <button className={secondary} onClick={() => void copy()}>
-          {copied ? <Check size={15} /> : <Copy size={15} />} Copy
-        </button>
+          {copied ? <Check size={15} /> : <Copy size={15} />} {translate("auth.copy")}</button>
         <button className={secondary} onClick={download}>
-          <Download size={15} /> Download
-        </button>
+          <Download size={15} /> {translate("auth.download")}</button>
         <button
           className="relay-button-primary px-4"
           disabled={!saved}
           onClick={onClose}
         >
-          Done
-        </button>
+          {translate("auth.done")}</button>
       </div>
     </div>
   );
@@ -347,6 +340,7 @@ export function RelaySecurityPanel({
 }: {
   realm?: SecurityRealm;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const call = <T,>(path: string, method = 'GET', body?: unknown) =>
     securityRequest<T>(path, method, body, realm);
   const [status, setStatus] = useState<SecurityStatus | null>(null),
@@ -410,30 +404,27 @@ export function RelaySecurityPanel({
       setCodes(result.recoveryCodes);
     });
   }
-  const date = (value: number) => new Date(value).toLocaleDateString();
+  const date = (value: number) => new Date(value).toLocaleDateString(getLocale());
   return (
     <section className="grid gap-5 py-6 sm:grid-cols-[11rem_minmax(0,1fr)] sm:gap-8">
       <header>
         <h2 className="flex items-center gap-2 text-base font-semibold">
-          <ShieldCheck size={18} /> Security
-        </h2>
+          <ShieldCheck size={18} /> {translate("auth.security")}</h2>
         <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-          Protect your account and devices.
-        </p>
+          {translate("auth.protectYourAccountAndDevices")}</p>
       </header>
       <div className="min-w-0 space-y-5">
         <ErrorText error={error} />
         {!status && !error && (
           <p role="status" className="text-sm text-[var(--theme-fg-muted)]">
-            Loading security settings…
-          </p>
+            {translate("auth.loadingSecuritySettings")}</p>
         )}
         {status && (
           <>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h3 className="flex items-center gap-2 font-medium">
-                  <Smartphone size={17} /> Authenticator app{' '}
+                  <Smartphone size={17} /> {translate("auth.authenticatorApp")}{' '}
                   {status.authenticatorEnabled && (
                     <Check
                       size={15}
@@ -442,8 +433,7 @@ export function RelaySecurityPanel({
                   )}
                 </h3>
                 <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-                  Google Authenticator and compatible apps.
-                </p>
+                  {translate("auth.googleAuthenticatorAndCompatibleApps")}</p>
               </div>
               <button
                 className={secondary}
@@ -459,7 +449,7 @@ export function RelaySecurityPanel({
                   })
                 }
               >
-                {status.authenticatorEnabled ? 'Disable' : 'Set up'}
+                {status.authenticatorEnabled ? translate("auth.disable") : translate("auth.setUp")}
               </button>
             </div>
             {enrollment && (
@@ -468,24 +458,21 @@ export function RelaySecurityPanel({
                 className="space-y-4 rounded-lg border border-[var(--theme-border)] p-4"
               >
                 <p className="text-sm">
-                  Scan this code in your authenticator, then enter its six-digit
-                  code.
-                </p>
+                  {translate("auth.scanThisCodeInYourAuthenticatorThen")}</p>
                 <img
-                  alt="Authenticator setup QR code"
+                  alt={translate("auth.authenticatorSetupQRCode")}
                   className="h-44 w-44 rounded-md bg-white"
                   src={`data:image/svg+xml;base64,${btoa(enrollment.qrSvg)}`}
                 />
                 <details className="text-sm">
                   <summary className="cursor-pointer text-[var(--theme-fg-muted)]">
-                    Can’t scan the code?
-                  </summary>
+                    {translate("auth.canTScanTheCode")}</summary>
                   <code className="mt-2 block break-all select-all rounded bg-[var(--theme-bg)] p-2">
                     {enrollment.secret}
                   </code>
                 </details>
                 <input
-                  aria-label="Setup verification code"
+                  aria-label={translate("auth.setupVerificationCode")}
                   className={`${input} max-w-xs font-mono tracking-widest`}
                   inputMode="numeric"
                   autoComplete="one-time-code"
@@ -499,8 +486,7 @@ export function RelaySecurityPanel({
                     className="relay-button-primary min-h-10 px-4"
                     disabled={busy || code.length !== 6}
                   >
-                    Enable authenticator
-                  </button>
+                    {translate("auth.enableAuthenticator")}</button>
                   <button
                     className={secondary}
                     type="button"
@@ -509,8 +495,7 @@ export function RelaySecurityPanel({
                       setCode('');
                     }}
                   >
-                    Cancel
-                  </button>
+                    {translate("auth.cancel")}</button>
                 </div>
               </form>
             )}
@@ -520,8 +505,7 @@ export function RelaySecurityPanel({
             <div className="border-t border-[var(--theme-border)] pt-4">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="flex items-center gap-2 font-medium">
-                  <Fingerprint size={17} /> Passkeys
-                </h3>
+                  <Fingerprint size={17} /> {translate("auth.passkeys")}</h3>
                 {status.passkeyAvailable && (
                   <button
                     className={secondary}
@@ -531,14 +515,12 @@ export function RelaySecurityPanel({
                       setKeyName('');
                     }}
                   >
-                    Add passkey
-                  </button>
+                    {translate("auth.addPasskey")}</button>
                 )}
               </div>
               {!status.passkeyAvailable && (
                 <p className="mt-2 text-sm text-[var(--theme-fg-muted)]">
-                  Passkey setup is unavailable on this relay.
-                </p>
+                  {translate("auth.passkeySetupIsUnavailableOnThisRelay")}</p>
               )}
               {addingKey && (
                 <form
@@ -554,8 +536,8 @@ export function RelaySecurityPanel({
                   }}
                 >
                   <input
-                    aria-label="Passkey name"
-                    placeholder="e.g. My phone"
+                    aria-label={translate("auth.passkeyName")}
+                    placeholder={translate("auth.eGMyPhone")}
                     className={`${input} min-w-0 flex-1`}
                     maxLength={80}
                     value={keyName}
@@ -566,13 +548,12 @@ export function RelaySecurityPanel({
                     className={secondary}
                     disabled={busy || !keyName.trim()}
                   >
-                    Continue
-                  </button>
+                    {translate("auth.continue")}</button>
                   <button
                     type="button"
                     className={secondary}
                     onClick={() => setAddingKey(false)}
-                    aria-label="Cancel passkey setup"
+                    aria-label={translate("auth.cancelPasskeySetup")}
                   >
                     <X size={15} />
                   </button>
@@ -587,9 +568,9 @@ export function RelaySecurityPanel({
                     <div className="min-w-0">
                       <p className="break-words text-sm">{key.name}</p>
                       <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-                        Added {date(key.createdAt)}
+                        {translate("auth.added")} {date(key.createdAt)}
                         {key.lastUsedAt
-                          ? ` · Used ${date(key.lastUsedAt)}`
+                          ? translate("auth.used", { value1: date(key.lastUsedAt) })
                           : ''}
                       </p>
                     </div>
@@ -610,13 +591,13 @@ export function RelaySecurityPanel({
                           }}
                         >
                           <input
-                            aria-label="Rename passkey"
+                            aria-label={translate("auth.renamePasskey")}
                             className={input}
                             value={keyName}
                             maxLength={80}
                             onChange={(e) => setKeyName(e.target.value)}
                           />
-                          <button className={secondary}>Save</button>
+                          <button className={secondary}>{translate("auth.save")}</button>
                         </form>
                       ) : (
                         <button
@@ -626,12 +607,11 @@ export function RelaySecurityPanel({
                             setKeyName(key.name);
                           }}
                         >
-                          Rename
-                        </button>
+                          {translate("auth.rename")}</button>
                       )}
                       <button
                         className={secondary}
-                        aria-label={`Remove ${key.name}`}
+                        aria-label={translate("auth.remove", { value1: key.name })}
                         disabled={busy}
                         onClick={() =>
                           void run(async () => {
@@ -653,12 +633,9 @@ export function RelaySecurityPanel({
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--theme-border)] pt-4">
                 <div>
                   <h3 className="flex items-center gap-2 font-medium">
-                    <KeyRound size={17} /> Recovery codes
-                  </h3>
+                    <KeyRound size={17} /> {translate("auth.recoveryCodes")}</h3>
                   <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-                    {status.recoveryCodesRemaining} unused · New codes replace
-                    the previous set.
-                  </p>
+                    {status.recoveryCodesRemaining} {translate("auth.unusedNewCodesReplaceThePreviousSet")}</p>
                 </div>
                 <button
                   className={secondary}
@@ -673,19 +650,16 @@ export function RelaySecurityPanel({
                     })
                   }
                 >
-                  Generate new codes
-                </button>
+                  {translate("auth.generateNewCodes")}</button>
               </div>
             )}
             <div className="border-t border-[var(--theme-border)] pt-4">
-              <h3 className="font-medium">Trusted browsers</h3>
+              <h3 className="font-medium">{translate("auth.trustedBrowsers")}</h3>
               <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-                No repeated codes on trusted browsers for 30 days.
-              </p>
+                {translate("auth.noRepeatedCodesOnTrustedBrowsersFor")}</p>
               {status.trustedBrowsers.length === 0 && (
                 <p className="mt-2 text-sm text-[var(--theme-fg-muted)]">
-                  No trusted browsers yet.
-                </p>
+                  {translate("auth.noTrustedBrowsersYet")}</p>
               )}
               <ul className="divide-y divide-[var(--theme-border)]">
                 {status.trustedBrowsers.map((browser) => (
@@ -696,7 +670,7 @@ export function RelaySecurityPanel({
                     <div>
                       <p className="text-sm">{browser.name}</p>
                       <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-                        Expires {date(browser.expiresAt)}
+                        {translate("auth.expires")} {date(browser.expiresAt)}
                       </p>
                     </div>
                     <button
@@ -708,14 +682,13 @@ export function RelaySecurityPanel({
                         })
                       }
                     >
-                      Revoke
-                    </button>
+                      {translate("auth.revoke")}</button>
                   </li>
                 ))}
               </ul>
             </div>
             <div className="border-t border-[var(--theme-border)] pt-4">
-              <h3 className="font-medium">Active sessions</h3>
+              <h3 className="font-medium">{translate("auth.activeSessions")}</h3>
               <ul className="divide-y divide-[var(--theme-border)]">
                 {status.sessions.map((session) => (
                   <li
@@ -724,15 +697,14 @@ export function RelaySecurityPanel({
                   >
                     <div>
                       <p className="text-sm">
-                        {session.name || 'Browser'}
+                        {session.name || translate("auth.browser")}
                         {session.current && (
                           <span className="ml-2 text-xs text-[var(--theme-accent-strong)]">
-                            This session
-                          </span>
+                            {translate("auth.thisSession")}</span>
                         )}
                       </p>
                       <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-                        Signed in {date(session.createdAt)}
+                        {translate("auth.signedIn")} {date(session.createdAt)}
                       </p>
                     </div>
                     {!session.current && (
@@ -745,8 +717,7 @@ export function RelaySecurityPanel({
                           })
                         }
                       >
-                        Sign out
-                      </button>
+                        {translate("auth.signOut")}</button>
                     )}
                   </li>
                 ))}

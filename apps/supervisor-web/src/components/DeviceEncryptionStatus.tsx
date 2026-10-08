@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -32,6 +33,7 @@ export function DeviceEncryptionStatus({
     onConnect: () => void;
   };
 }) {
+  useI18n();
   const [status, setStatus] = useState<TransportStatus | undefined>(() =>
     deviceId ? getTransportStatus(deviceId) : undefined,
   );
@@ -66,13 +68,13 @@ export function DeviceEncryptionStatus({
   const encrypted = status?.state === 'encrypted',
     changed = status?.state === 'identity-changed';
   if (hideHealthy && !changed && connection?.loaded && connection.state === 'connected') return null;
-  const label = !deviceId ? 'Local device connection' : encrypted
-    ? 'Device connection encrypted'
+  const label = !deviceId ? translate("auth.localDeviceConnection") : encrypted
+    ? translate("auth.deviceConnectionEncrypted")
     : changed
-      ? 'Device identity changed'
+      ? translate("auth.deviceIdentityChanged")
       : status?.state === 'legacy'
-        ? 'Connection is not end-to-end encrypted'
-        : 'Device encryption not verified';
+        ? translate("auth.connectionIsNotEndToEndEncrypted")
+        : translate("auth.deviceEncryptionNotVerified");
   return (
     <span className="relative inline-flex">
       <button
@@ -83,8 +85,8 @@ export function DeviceEncryptionStatus({
           connection
             ? !connection.loaded && !changed
               ? connection.busy
-                ? 'Connecting thread'
-                : 'Connect thread'
+                ? translate("auth.connectingThread")
+                : translate("auth.connectThread")
               : `${connection.label} · ${label}`
             : label
         }
@@ -147,7 +149,7 @@ export function DeviceEncryptionStatus({
       {open && createPortal(
         <>
           <button
-            aria-label="Close connection information"
+            aria-label={translate("auth.closeConnectionInformation")}
             className="fixed inset-0 z-[99] cursor-default"
             onClick={() => setOpen(false)}
           />
@@ -160,17 +162,17 @@ export function DeviceEncryptionStatus({
             {connection && <span className="block device-connection-state">{connection.label}</span>}
             <span className="block text-[var(--theme-fg-muted)]">
               {encrypted
-                ? 'Private content is encrypted between this browser and the device. Routing metadata remains visible to the relay.'
+                ? translate("auth.privateContentIsEncryptedBetweenThisBrowser")
                 : changed
-                  ? 'This browser stopped the connection. Run remote-codex relay-fingerprint on the device and compare it before trusting a replacement identity.'
+                  ? translate("auth.thisBrowserStoppedTheConnectionRunRemote")
                   : !deviceId ? connection?.label
-                    : status?.state === 'legacy' ? 'This device uses legacy relay transport. Update remote-codex on the device to encrypt private content through the relay.'
-                    : 'Device encryption has not been verified. Reconnect to check the device identity and establish an encrypted connection.'}
+                    : status?.state === 'legacy' ? translate("auth.thisDeviceUsesLegacyRelayTransportUpdate")
+                    : translate("auth.deviceEncryptionHasNotBeenVerifiedReconnect")}
             </span>
             {status?.fingerprint && (
               <code
                 className="block break-all text-xs"
-                aria-label="Device fingerprint"
+                aria-label={translate("auth.deviceFingerprint")}
               >
                 SHA-256 {status.fingerprint}
               </code>
@@ -185,17 +187,16 @@ export function DeviceEncryptionStatus({
                   setConfirm(status);
                 }}
               >
-                Trust replacement identity…
-              </button>
+                {translate("auth.trustReplacementIdentity")}</button>
             )}
           </span>
         </>, document.body
       )}
       <ConfirmDialog
         open={Boolean(confirm)}
-        title="Trust the replacement device identity?"
-        description={`Compare SHA-256 ${confirm?.fingerprint ?? ""} with remote-codex relay-fingerprint on your device. Only this exact identity will be trusted.`}
-        confirmLabel="I verified the fingerprint"
+        title={translate("auth.trustTheReplacementDeviceIdentity")}
+        description={translate("auth.compareSHA256WithRemoteCodexRelay", { value1: confirm?.fingerprint ?? "" })}
+        confirmLabel={translate("auth.iVerifiedTheFingerprint")}
         onCancel={() => setConfirm(null)}
         onConfirm={async () => {
           try {
@@ -203,7 +204,7 @@ export function DeviceEncryptionStatus({
             await trustDeviceIdentity(deviceId, confirm.identityKey, confirm.fingerprint);
             location.reload();
           } catch (error) {
-            setTrustError(error instanceof Error ? error.message : 'Unable to save device identity.');
+            setTrustError(error instanceof Error ? error.message : translate("auth.unableToSaveDeviceIdentity"));
             setConfirm(null);
             setOpen(true);
           }

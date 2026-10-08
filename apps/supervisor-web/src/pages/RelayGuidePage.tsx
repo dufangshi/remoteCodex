@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { ArrowLeft, CheckCircle2 } from 'lucide-react';
 import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
@@ -11,47 +12,48 @@ const setupCommand = [
 
 const connectionModes = [
   {
-    title: 'Local mode',
-    detail: 'For the same machine, an emulator, LAN, or Tailscale network. No relay account is needed.',
+    get title() { return translate("devices.localMode"); },
+    get detail() { return translate("devices.forTheSameMachineAnEmulatorLAN"); },
   },
   {
-    title: 'Server mode',
-    detail: 'For a directly exposed supervisor protected by its own server login on a trusted private server.',
+    get title() { return translate("devices.serverMode"); },
+    get detail() { return translate("devices.forADirectlyExposedSupervisorProtectedBy"); },
   },
   {
-    title: 'Relay mode',
-    detail: 'For a machine that should accept no inbound connection. The supervisor opens an outbound tunnel.',
+    get title() { return translate("devices.relayMode"); },
+    get detail() { return translate("devices.forAMachineThatShouldAcceptNo"); },
   },
 ];
 
 const relaySteps = [
   {
-    title: 'Register or sign in',
-    detail: 'Open the relay portal, then create or enter your relay account.',
+    get title() { return translate("devices.registerOrSignIn"); },
+    get detail() { return translate("devices.openTheRelayPortalThenCreateOr"); },
   },
   {
-    title: 'Create a device',
-    detail: 'In Devices, choose a recognizable name for the private supervisor.',
+    get title() { return translate("devices.createADevice"); },
+    get detail() { return translate("devices.inDevicesChooseARecognizableNameFor"); },
   },
   {
-    title: 'Copy the setup command',
-    detail: 'Use Copy setup. The command contains this device’s permanent token and can be run again when the runtime needs to be installed or refreshed.',
+    get title() { return translate("devices.copyTheSetupCommand"); },
+    get detail() { return translate("devices.useCopySetupTheCommandContainsThis"); },
   },
   {
-    title: 'Start the supervisor',
-    detail: 'Run the command on the workspace host. It installs Node if needed, installs Remote Codex and configures a background service. Systems without a user service manager run detached.',
+    get title() { return translate("devices.startTheSupervisor"); },
+    get detail() { return translate("devices.runTheCommandOnTheWorkspaceHost"); },
   },
   {
-    title: 'Connect and work',
-    detail: 'Return to Devices and wait for Online. Open Settings to install harnesses, configure upstreams or import a device template.',
+    get title() { return translate("devices.connectAndWork"); },
+    get detail() { return translate("devices.returnToDevicesAndWaitForOnline"); },
   },
   {
-    title: 'Share when needed',
-    detail: 'From a thread, open sharing, enter a relay username, and choose thread and workspace permissions.',
+    get title() { return translate("devices.shareWhenNeeded"); },
+    get detail() { return translate("devices.fromAThreadOpenSharingEnterA"); },
   },
 ];
 
 export function RelayGuidePage() {
+  const { locale: i18nLocale } = useI18n();
   useEffect(() => {
     enableRelayMode();
   }, []);
@@ -62,22 +64,17 @@ export function RelayGuidePage() {
         <header className="border-b border-[var(--theme-border)] pb-6">
           <Link className="relay-button-secondary mb-6 inline-flex h-11 items-center gap-2" to="/">
             <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-            Relay home
-          </Link>
-          <p className="text-sm font-medium text-[var(--theme-accent-strong)]">Setup guide</p>
+            {translate("devices.relayHome")}</Link>
+          <p className="text-sm font-medium text-[var(--theme-accent-strong)]">{translate("devices.setupGuide")}</p>
           <h1 className="mt-2 text-2xl font-semibold tracking-normal text-[var(--theme-fg)] sm:text-3xl">
-            Connect a private supervisor
-          </h1>
+            {translate("devices.connectAPrivateSupervisor")}</h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-[var(--theme-fg-soft)]">
-            Pick the mode that matches your network, then follow the relay steps when the private machine should only
-            connect outward.
-          </p>
+            {translate("devices.pickTheModeThatMatchesYourNetwork")}</p>
         </header>
 
         <section className="py-8" aria-labelledby="connection-modes-heading">
           <h2 id="connection-modes-heading" className="text-lg font-semibold text-[var(--theme-fg)]">
-            Connection modes
-          </h2>
+            {translate("devices.connectionModes")}</h2>
           <dl className="mt-4 divide-y divide-[var(--theme-border)] border-y border-[var(--theme-border)]">
             {connectionModes.map((mode) => (
               <div className="grid gap-1 py-4 sm:grid-cols-[9rem_minmax(0,1fr)] sm:gap-5" key={mode.title}>
@@ -90,8 +87,7 @@ export function RelayGuidePage() {
 
         <section className="border-t border-[var(--theme-border)] py-8" aria-labelledby="relay-steps-heading">
           <h2 id="relay-steps-heading" className="text-lg font-semibold text-[var(--theme-fg)]">
-            Relay setup
-          </h2>
+            {translate("devices.relaySetup")}</h2>
           <ol className="mt-4 divide-y divide-[var(--theme-border)] border-y border-[var(--theme-border)]">
             {relaySteps.map((step, index) => (
               <li className="grid grid-cols-[2.75rem_minmax(0,1fr)] gap-3 py-4" key={step.title}>
@@ -112,11 +108,9 @@ export function RelayGuidePage() {
 
         <section className="min-w-0 border-t border-[var(--theme-border)] py-8" aria-labelledby="example-command-heading">
           <h2 id="example-command-heading" className="text-lg font-semibold text-[var(--theme-fg)]">
-            Example supervisor command
-          </h2>
+            {translate("devices.exampleSupervisorCommand")}</h2>
           <p className="mt-2 text-sm leading-6 text-[var(--theme-fg-muted)]">
-            Devices generates the real command. Keep its device token private.
-          </p>
+            {translate("devices.devicesGeneratesTheRealCommandKeepIts")}</p>
           <pre className="mt-4 block w-full min-w-0 max-w-full overflow-x-auto rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] p-3 text-xs leading-5 text-[var(--theme-fg)]">
             <code className="block min-w-max">{setupCommand}</code>
           </pre>
@@ -124,12 +118,11 @@ export function RelayGuidePage() {
 
         <section className="border-t border-[var(--theme-border)] py-8" aria-labelledby="after-setup-heading">
           <h2 id="after-setup-heading" className="text-lg font-semibold text-[var(--theme-fg)]">
-            After setup
-          </h2>
+            {translate("devices.afterSetup")}</h2>
           <ul className="mt-4 space-y-3 text-sm leading-6 text-[var(--theme-fg-muted)]">
-            <GuideOutcome>Use Devices to switch between supervisor machines.</GuideOutcome>
-            <GuideOutcome>Use Shared with me to open sessions other users shared.</GuideOutcome>
-            <GuideOutcome>Use Shared by me to review access, change permissions, or revoke a share.</GuideOutcome>
+            <GuideOutcome>{translate("devices.useDevicesToSwitchBetweenSupervisorMachines")}</GuideOutcome>
+            <GuideOutcome>{translate("devices.useSharedWithMeToOpenSessions")}</GuideOutcome>
+            <GuideOutcome>{translate("devices.useSharedByMeToReviewAccess")}</GuideOutcome>
           </ul>
         </section>
       </article>
@@ -138,6 +131,7 @@ export function RelayGuidePage() {
 }
 
 function GuideOutcome({ children }: { children: React.ReactNode }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <li className="flex gap-3">
       <CheckCircle2

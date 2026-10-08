@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Download, RefreshCw, RotateCw } from 'lucide-react';
@@ -58,30 +59,30 @@ const active = (job?: Job) =>
     'verifying',
   ].includes(job?.state ?? job?.phase ?? '');
 function supervisorJobText(job: Job) {
-  const operation = job.action === 'restart' ? 'Restart' : 'Update';
+  const operation = job.action === 'restart' ? translate("devices.restart_b134bd") : translate("devices.update");
   if (job.rollingBack && active(job))
-    return `${operation} failed; restoring the previous service…`;
+    return translate("devices.failedRestoringThePreviousService", { value1: operation });
   switch (job.phase) {
     case 'scheduled':
       return `${operation} requested…`;
     case 'preparing':
       return `Preparing ${operation.toLowerCase()}: saving active tasks…`;
     case 'installing':
-      return 'Installing Supervisor update…';
+      return translate("devices.installingSupervisorUpdate");
     case 'restarting':
-      return 'Restarting Supervisor…';
+      return translate("devices.restartingSupervisor");
     case 'verifying':
-      return 'Supervisor started; verifying its connection…';
+      return translate("devices.supervisorStartedVerifyingItsConnection");
     case 'completed':
       return `${operation} completed`;
     case 'recovered':
-      return 'Supervisor recovered';
+      return translate("devices.supervisorRecovered");
     case 'failed':
-      return `Last ${operation.toLowerCase()} failed: ${job.error ?? 'Check the device logs.'}`;
+      return `Last ${operation.toLowerCase()} failed: ${job.error ?? translate("devices.checkTheDeviceLogs")}`;
     case 'rolled-back':
       return `Last ${operation.toLowerCase()} failed; previous service restored. ${job.error ?? ''}`;
     case 'rollback-failed':
-      return `Last ${operation.toLowerCase()} and recovery failed: ${job.error ?? 'Check the device logs.'}`;
+      return `Last ${operation.toLowerCase()} and recovery failed: ${job.error ?? translate("devices.checkTheDeviceLogs")}`;
     default:
       return job.error ?? job.phase;
   }
@@ -93,15 +94,15 @@ export function RuntimeManagement({
 }: {
   view?: 'all' | 'device' | 'harnesses';
 }) {
+  const { locale: i18nLocale } = useI18n();
   const { pathname } = useLocation();
   const deviceId = relayDeviceIdFromPath(pathname);
   if (relayModeActive() && !deviceId) {
     return (
-      <section className="py-5" aria-label="Runtime management">
-        <h3 className="text-sm font-semibold">Device runtimes</h3>
+      <section className="py-5" aria-label={translate("devices.runtimeManagement")}>
+        <h3 className="text-sm font-semibold">{translate("devices.deviceRuntimes")}</h3>
         <p className="mt-2 text-xs leading-5 text-[var(--theme-fg-muted)]">
-          Open a device to view and manage its Supervisor and harness versions.
-        </p>
+          {translate("devices.openADeviceToViewAndManage")}</p>
       </section>
     );
   }
@@ -125,6 +126,7 @@ function DeviceRuntimeManagement({
   apiRoot: string;
   view: 'all' | 'device' | 'harnesses';
 }) {
+  const { locale: i18nLocale } = useI18n();
   const [selectedHarness, setSelectedHarness] = useState('codex');
   const api = <T,>(path: string, action?: unknown) =>
     request<T>(
@@ -190,7 +192,7 @@ function DeviceRuntimeManagement({
         runningVersion: current.version,
         canUpdate: false,
         reason:
-          'Upgrade this device to 0.12.17 or later with its existing installer to enable runtime management.',
+          translate("devices.upgradeThisDeviceTo01217"),
       });
       setHarnesses([]);
     }
@@ -242,7 +244,7 @@ function DeviceRuntimeManagement({
       setJobs((prev) => ({ ...prev, [id]: { state: 'running', action } }));
       setConfirm(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to manage harness');
+      setError(e instanceof Error ? e.message : translate("devices.unableToManageHarness"));
     } finally {
       setBusy(false);
     }
@@ -263,7 +265,7 @@ function DeviceRuntimeManagement({
       )
         setConfirm(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to update Supervisor');
+      setError(e instanceof Error ? e.message : translate("devices.unableToUpdateSupervisor"));
     } finally {
       setBusy(false);
     }
@@ -283,7 +285,7 @@ function DeviceRuntimeManagement({
       await load();
     } catch (error) {
       setError(
-        `${error instanceof Error ? error.message : 'Adapter installation failed'}. Older Supervisors install through the system npm prefix; update the Supervisor to use managed adapter installation.`,
+        translate("devices.olderSupervisorsInstallThroughTheSystemNpm", { value1: error instanceof Error ? error.message : translate("devices.adapterInstallationFailed") }),
       );
     } finally {
       setBusy(false);
@@ -294,16 +296,16 @@ function DeviceRuntimeManagement({
       <div className="mt-2 min-w-0 text-xs text-[var(--theme-fg-muted)]">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span>
-            {component === 'adapter' ? 'ACP adapter · ' : ''}
+            {component === 'adapter' ? translate("devices.aCPAdapter") : ''}
             {data.installed === false
-              ? 'Not installed'
-              : `${data.version ?? 'Version unavailable'} · ${data.manager ?? 'managed'}`}
+              ? translate("devices.notInstalled")
+              : `${data.version ?? translate("devices.versionUnavailable")} · ${data.manager ?? 'managed'}`}
           </span>
           {(data.canUpdate || data.canInstall) && (
             <button
               className={button}
               disabled={busy || active(jobs[row.id])}
-              aria-label={`${data.installed === false ? 'Install' : 'Update'} ${row.name}${component === 'adapter' ? ' adapter' : ''}`}
+              aria-label={`${data.installed === false ? translate("devices.install") : translate("devices.update")} ${row.name}${component === 'adapter' ? ' adapter' : ''}`}
               onClick={() =>
                 setConfirm({
                   id: row.id,
@@ -316,14 +318,13 @@ function DeviceRuntimeManagement({
               }
             >
               <Download size={13} />
-              {data.installed === false ? 'Install' : 'Update'}
+              {data.installed === false ? translate("devices.install") : translate("devices.update")}
             </button>
           )}
         </div>
         <details className="mt-2">
           <summary className="cursor-pointer text-[11px]">
-            Installation details
-          </summary>
+            {translate("devices.installationDetails")}</summary>
           <p
             className="mt-1 break-all font-mono text-[11px]"
             title={data.resolvedPath}
@@ -349,28 +350,25 @@ function DeviceRuntimeManagement({
             disabled={
               busy || !h.base || h.base.installed === false || active(job)
             }
-            title="Reload this harness's configuration. Other harnesses stay connected."
-            aria-label={`Restart ${h.name}`}
+            title={translate("devices.reloadThisHarnessSConfigurationOtherHarnesses")}
+            aria-label={translate("devices.restart", { value1: h.name })}
             onClick={() => void act(h.id, 'restart')}
           >
             <RotateCw size={13} />
-            Restart
-          </button>
+            {translate("devices.restart_b134bd")}</button>
         </div>
         {h.base ? (
           installation(h, h.base, 'base')
         ) : (
           <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-            Not installed
-          </p>
+            {translate("devices.notInstalled")}</p>
         )}
         {(h.adapter || h.transport === 'adapter') && (
           <details className="settings-detail">
             <summary className="cursor-pointer text-xs text-[var(--theme-fg-muted)]">
-              ACP adapter
-              {!h.adapter || h.adapter.installed === false
-                ? ' · Installation required'
-                : ' · Installed'}
+              {translate("devices.aCPAdapter_7d3feb")}{!h.adapter || h.adapter.installed === false
+                ? translate("devices.installationRequired")
+                : translate("devices.installed")}
             </summary>
             <div>
               {installation(
@@ -384,7 +382,7 @@ function DeviceRuntimeManagement({
                   manager: '',
                   canUpdate: false,
                   reason:
-                    'Adapter not detected. This older Supervisor uses its existing npm installer; update the Supervisor for user-owned dependency management.',
+                    translate("devices.adapterNotDetectedThisOlderSupervisorUses"),
                 },
                 'adapter',
               )}
@@ -398,10 +396,10 @@ function DeviceRuntimeManagement({
           >
             {job.error ??
               (active(job)
-                ? `${job.action === 'install' ? 'Installing' : job.action === 'update' ? 'Updating' : 'Restarting'}…`
+                ? `${job.action === 'install' ? translate("devices.installing") : job.action === 'update' ? translate("devices.updating") : translate("devices.restarting")}…`
                 : job.connectionVerified
-                  ? 'ACP connection verified'
-                  : `${job.action === 'update' && job.component === 'base' ? 'Base component update completed' : 'Completed'} · configuration reloads on the next turn`)}
+                  ? translate("devices.aCPConnectionVerified")
+                  : translate("devices.configurationReloadsOnTheNextTurn", { value1: job.action === 'update' && job.component === 'base' ? translate("devices.baseComponentUpdateCompleted") : translate("devices.completed") }))}
           </p>
         )}
       </div>
@@ -409,11 +407,10 @@ function DeviceRuntimeManagement({
   }
   if (ownerDenied)
     return (
-      <section className="py-5" aria-label="Runtime management">
+      <section className="py-5" aria-label={translate("devices.runtimeManagement")}>
         <h3 className="text-sm font-semibold">Supervisor</h3>
         <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">
-          Only the device owner can manage or restart this Supervisor.
-        </p>
+          {translate("devices.onlyTheDeviceOwnerCanManageOr")}</p>
       </section>
     );
   const seconds =
@@ -437,7 +434,7 @@ function DeviceRuntimeManagement({
       ? null
       : `${Math.floor(seconds / 86400)}d ${Math.floor(seconds / 3600) % 24}h ${Math.floor(seconds / 60) % 60}m ${seconds % 60}s`;
   return (
-    <section className="py-1" aria-label="Runtime management">
+    <section className="py-1" aria-label={translate("devices.runtimeManagement")}>
       {view !== 'harnesses' && (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -445,10 +442,10 @@ function DeviceRuntimeManagement({
               <h3 className="text-sm font-semibold">Supervisor</h3>
               <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
                 {supervisor?.runningVersion
-                  ? `${active(supervisor.job) ? 'Version' : 'Running'} ${supervisor.runningVersion}`
-                  : 'Loading version…'}
+                  ? `${active(supervisor.job) ? translate("devices.version") : translate("devices.running_73989d")} ${supervisor.runningVersion}`
+                  : translate("devices.loadingVersion")}
                 {supervisor?.latestVersion &&
-                  ` · Latest ${supervisor.latestVersion}`}
+                  translate("devices.latest", { value1: supervisor.latestVersion })}
               </p>
             </div>
             <div className="flex gap-2">
@@ -460,8 +457,7 @@ function DeviceRuntimeManagement({
                     setConfirm({ name: 'Supervisor', action: 'restart' })
                   }
                 >
-                  <RotateCw size={13} /> Restart Supervisor
-                </button>
+                  <RotateCw size={13} /> {translate("devices.restartSupervisor")}</button>
               )}
               <button
                 className={button}
@@ -471,8 +467,7 @@ function DeviceRuntimeManagement({
                 onClick={() => void supervisorAction('check')}
               >
                 <RefreshCw size={13} />
-                Check updates
-              </button>
+                {translate("devices.checkUpdates")}</button>
               {supervisor?.latestVersion &&
                 (supervisor.latestVersion !== supervisor.runningVersion ||
                   (supervisor.installedVersion &&
@@ -485,23 +480,20 @@ function DeviceRuntimeManagement({
                     onClick={() => setConfirm({ name: 'Supervisor' })}
                   >
                     <Download size={13} />
-                    Update
-                  </button>
+                    {translate("devices.update")}</button>
                 )}
             </div>
           </div>
           {uptime && (
             <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">
-              Uptime {uptime}
+              {translate("devices.uptime")} {uptime}
             </p>
           )}
           {supervisor?.installedVersion &&
             supervisor.installedVersion !== supervisor.runningVersion && (
               <p className="mt-2 text-xs">
-                Installed {supervisor.installedVersion}; running{' '}
-                {supervisor.runningVersion}. Check updates to bring the
-                installation and running service to the same version.
-              </p>
+                {translate("devices.installed_7bb440")} {supervisor.installedVersion}{translate("devices.running")}{' '}
+                {supervisor.runningVersion}{translate("devices.checkUpdatesToBringTheInstallationAnd")}</p>
             )}
           {supervisor?.reason && (
             <p
@@ -514,21 +506,15 @@ function DeviceRuntimeManagement({
           {supervisor?.job && (
             <p role="status" className="mt-2 text-xs">
               {reconnectSince
-                ? 'Waiting for the device to reconnect…'
+                ? translate("devices.waitingForTheDeviceToReconnect")
                 : supervisorJobText(supervisor.job)}
               {reconnectSince && clock - reconnectSince > 30_000 && (
                 <span className="mt-1 block text-[var(--status-warning-fg)]">
-                  The device has not returned yet. Installation may have
-                  finished, but restart has not been verified. Check the
-                  Supervisor update and launch logs on the device. This page
-                  will keep checking automatically.
-                </span>
+                  {translate("devices.theDeviceHasNotReturnedYetInstallation")}</span>
               )}
               {active(supervisor.job) && (
                 <span className="mt-1 block text-[var(--theme-fg-muted)]">
-                  Controls are temporarily disabled until this operation
-                  finishes.
-                </span>
+                  {translate("devices.controlsAreTemporarilyDisabledUntilThisOperation")}</span>
               )}
             </p>
           )}
@@ -539,7 +525,7 @@ function DeviceRuntimeManagement({
           <div
             className="flex flex-wrap gap-2 pb-4"
             role="group"
-            aria-label="Choose harness"
+            aria-label={translate("devices.chooseHarness")}
           >
             {[
               ...new Map(
@@ -574,8 +560,7 @@ function DeviceRuntimeManagement({
             />
           ) : (
             <p className="mt-4 rounded-xl border border-dashed border-[var(--theme-border)] p-4 text-xs text-[var(--theme-fg-muted)]">
-              Use this harness's native configuration to manage upstreams.
-            </p>
+              {translate("devices.useThisHarnessSNativeConfigurationTo")}</p>
           )}
         </>
       )}
@@ -594,17 +579,17 @@ function DeviceRuntimeManagement({
       )}
       {confirm && (
         <FormDialog
-          title={`${confirm.action === 'restart' ? 'Restart' : confirm.installing ? 'Install' : 'Update'} ${confirm.name}`}
+          title={`${confirm.action === 'restart' ? translate("devices.restart_b134bd") : confirm.installing ? translate("devices.install") : translate("devices.update")} ${confirm.name}`}
           busy={busy}
           onClose={() => setConfirm(null)}
           description={
             confirm.action === 'restart'
-              ? 'The device will briefly disconnect. Running tasks will be paused and continued in their existing sessions after restart; queued messages will be preserved.'
+              ? translate("devices.theDeviceWillBrieflyDisconnectRunningTasks")
               : confirm.id
                 ? confirm.installing
-                  ? 'Install this component on the selected device. Required ACP adapters are included with a harness installation.'
-                  : 'Update the selected installation, then reload its configuration. Running turns must finish first.'
-                : 'The Supervisor will briefly disconnect. An independent system job will install, verify and restart it, and roll back if startup fails. Running tasks will be paused and continued after restart.'
+                  ? translate("devices.installThisComponentOnTheSelectedDevice")
+                  : translate("devices.updateTheSelectedInstallationThenReloadIts")
+                : translate("devices.theSupervisorWillBrieflyDisconnectAnIndependent")
           }
         >
           {confirm.command && (
@@ -633,12 +618,12 @@ function DeviceRuntimeManagement({
             }
           >
             {busy
-              ? 'Starting…'
+              ? translate("devices.starting")
               : confirm.action === 'restart'
-                ? 'Restart'
+                ? translate("devices.restart_b134bd")
                 : confirm.installing
-                  ? 'Install'
-                  : 'Update'}
+                  ? translate("devices.install")
+                  : translate("devices.update")}
           </button>
         </FormDialog>
       )}

@@ -1,3 +1,5 @@
+import { LanguageSwitcher } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { LoginVerification, usePendingLogin } from '../components/RelaySecurity';
 import { ArrowLeft, BookOpen, Eye, EyeOff } from 'lucide-react';
 import {
@@ -102,6 +104,7 @@ function forgetReturnTo() {
 }
 
 export function RelayPortalPage() {
+  const { locale: i18nLocale } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
   const returnTo = useMemo(
@@ -134,7 +137,7 @@ export function RelayPortalPage() {
       }
     } catch (caught) {
       setSession(null);
-      setError(errorMessage(caught, 'Unable to load the relay portal.'));
+      setError(errorMessage(caught, translate("auth.unableToLoadTheRelayPortal")));
     } finally {
       setLoading(false);
     }
@@ -151,7 +154,7 @@ export function RelayPortalPage() {
     if (nextSession.user?.role === 'admin') {
       const signedOutSession = await relayLogout();
       setSession(signedOutSession);
-      throw new Error('This portal accepts relay user accounts only.');
+      throw new Error(translate("auth.thisPortalAcceptsRelayUserAccountsOnly"));
     }
     continueToRequestedPage();
   }
@@ -164,8 +167,7 @@ export function RelayPortalPage() {
           className="w-full max-w-md py-12 text-sm text-[var(--theme-fg-muted)]"
           role="status"
         >
-          Checking relay session...
-        </div>
+          {translate("auth.checkingRelaySession")}</div>
       </RelayFrame>
     );
   }
@@ -179,7 +181,7 @@ export function RelayPortalPage() {
           oauthError={searchParams.get('oauthError')}
           oauthNotice={
             searchParams.has('oauthPending')
-              ? 'OAuth registration received. An admin must approve it before you can sign in.'
+              ? translate("auth.oAuthRegistrationReceivedAnAdminMustApprove")
               : null
           }
           onAuthenticated={handleAuthenticated}
@@ -198,8 +200,7 @@ export function RelayPortalPage() {
         className="w-full max-w-md py-12 text-sm text-[var(--theme-fg-muted)]"
         role="status"
       >
-        Opening your relay workspace...
-      </div>
+        {translate("auth.openingYourRelayWorkspace")}</div>
     </RelayFrame>
   );
 }
@@ -221,6 +222,7 @@ function RelayAuthPanel({
   onAuthenticated: () => Promise<void>;
   onRetry: (() => Promise<void>) | undefined;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const loginTabId = useId();
   const registerTabId = useId();
   const panelId = useId();
@@ -291,11 +293,11 @@ function RelayAuthPanel({
         }
       } else {
         if (password.length < 8) {
-          setError('Password must be at least 8 characters.');
+          setError(translate("auth.passwordMustBeAtLeast8Characters"));
           return;
         }
         if (username.trim().length < 3) {
-          setError('Username must be at least 3 characters.');
+          setError(translate("auth.usernameMustBeAtLeast3Characters"));
           return;
         }
         const code = registrationPassword.trim();
@@ -307,7 +309,7 @@ function RelayAuthPanel({
         });
         if (result.pendingApproval) {
           setNotice(
-            'Registration request sent. An admin must approve it before you can sign in.',
+            translate("auth.registrationRequestSentAnAdminMustApprove"),
           );
           setMode('login');
           return;
@@ -315,7 +317,7 @@ function RelayAuthPanel({
       }
       await onAuthenticated();
     } catch (caught) {
-      setError(errorMessage(caught, 'Unable to authenticate with the relay.'));
+      setError(errorMessage(caught, translate("auth.unableToAuthenticateWithTheRelay")));
     } finally {
       setSubmitting(false);
     }
@@ -325,20 +327,20 @@ function RelayAuthPanel({
 
   return (
     <section className="w-full max-w-md rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-[var(--theme-shadow)] sm:p-6">
+      <LanguageSwitcher className="mb-4" />
       <p className="text-sm font-medium text-[var(--theme-accent-strong)]">
-        Relay access
-      </p>
+        {translate("auth.relayAccess")}</p>
       <h1 className="mt-2 text-2xl font-semibold text-[var(--theme-fg)]">
-        {mode === 'login' ? 'Welcome back' : 'Create your account'}
+        {mode === 'login' ? translate("auth.welcomeBack") : translate("auth.createYourAccount")}
       </h1>
       <p className="mt-2 text-sm leading-6 text-[var(--theme-fg-muted)]">
         {mode === 'login'
-          ? 'Sign in to open your devices and shared work.'
-          : 'Create a relay user account for private supervisor access.'}
+          ? translate("auth.signInToOpenYourDevicesAnd")
+          : translate("auth.createARelayUserAccountForPrivate")}
       </p>
 
       <div
-        aria-label="Account access"
+        aria-label={translate("auth.accountAccess")}
         className="mt-5 grid grid-cols-2 rounded-lg bg-[var(--theme-muted)] p-1"
         role="tablist"
       >
@@ -358,8 +360,7 @@ function RelayAuthPanel({
           tabIndex={mode === 'login' ? 0 : -1}
           type="button"
         >
-          Sign in
-        </button>
+          {translate("auth.signIn")}</button>
         <button
           aria-controls={panelId}
           aria-selected={mode === 'register'}
@@ -374,10 +375,10 @@ function RelayAuthPanel({
           onClick={() => selectMode('register')}
           role="tab"
           tabIndex={mode === 'register' ? 0 : -1}
-          title={registrationEnabled ? undefined : 'Registration is disabled'}
+          title={registrationEnabled ? undefined : translate("auth.registrationIsDisabled")}
           type="button"
         >
-          {registrationEnabled ? 'Create account' : 'Registration closed'}
+          {registrationEnabled ? translate("auth.createAccount") : translate("auth.registrationClosed")}
         </button>
       </div>
 
@@ -388,20 +389,18 @@ function RelayAuthPanel({
               className="relay-button-secondary flex h-11 items-center justify-center"
               href="/relay/auth/oauth/google/start"
             >
-              Continue with Google
-            </a>
+              {translate("auth.continueWithGoogle")}</a>
           ) : null}
           {settings.githubAuthEnabled ? (
             <a
               className="relay-button-secondary flex h-11 items-center justify-center"
               href="/relay/auth/oauth/github/start"
             >
-              Continue with GitHub
-            </a>
+              {translate("auth.continueWithGitHub")}</a>
           ) : null}
           <div className="flex items-center gap-3 py-1 text-xs text-[var(--theme-fg-muted)]">
             <span className="h-px flex-1 bg-[var(--theme-border)]" />
-            <span>or use a password</span>
+            <span>{translate("auth.orUseAPassword")}</span>
             <span className="h-px flex-1 bg-[var(--theme-border)]" />
           </div>
         </div>
@@ -418,7 +417,7 @@ function RelayAuthPanel({
           <RelayInput
             autoComplete="username"
             disabled={submitting}
-            label="Email or username"
+            label={translate("auth.emailOrUsername")}
             name="identifier"
             onChange={setIdentifier}
             required
@@ -429,7 +428,7 @@ function RelayAuthPanel({
             <RelayInput
               autoComplete="email"
               disabled={submitting}
-              label="Email"
+              label={translate("auth.email")}
               name="email"
               onChange={setEmail}
               required
@@ -439,7 +438,7 @@ function RelayAuthPanel({
             <RelayInput
               autoComplete="username"
               disabled={submitting}
-              label="Username"
+              label={translate("auth.username")}
               minLength={3}
               name="username"
               onChange={setUsername}
@@ -451,13 +450,13 @@ function RelayAuthPanel({
               disabled={submitting}
               description={
                 registrationPasswordRequired
-                  ? 'Required by this relay.'
-                  : 'Enter the invite code if this relay requires one.'
+                  ? translate("auth.requiredByThisRelay")
+                  : translate("auth.enterTheInviteCodeIfThisRelay")
               }
               label={
                 registrationPasswordRequired
-                  ? 'Registration code'
-                  : 'Registration code (if required)'
+                  ? translate("auth.registrationCode")
+                  : translate("auth.registrationCodeIfRequired")
               }
               name="registrationCode"
               onChange={setRegistrationPassword}
@@ -470,14 +469,14 @@ function RelayAuthPanel({
         <RelayInput
           autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
           disabled={submitting}
-          label="Password"
+          label={translate("auth.password")}
           name="password"
           onChange={setPassword}
           required
           type="password"
           value={password}
           {...(mode === 'register'
-            ? { description: 'Use at least 8 characters.', minLength: 8 }
+            ? { description: translate("auth.useAtLeast8Characters"), minLength: 8 }
             : {})}
         />
 
@@ -490,8 +489,7 @@ function RelayAuthPanel({
                 onClick={() => void onRetry()}
                 type="button"
               >
-                Retry connection
-              </button>
+                {translate("auth.retryConnection")}</button>
             ) : null}
           </RelayNotice>
         ) : null}
@@ -503,10 +501,10 @@ function RelayAuthPanel({
           type="submit"
         >
           {submitting
-            ? 'Working...'
+            ? translate("auth.working")
             : mode === 'login'
-              ? 'Sign in'
-              : 'Create account'}
+              ? translate("auth.signIn")
+              : translate("auth.createAccount")}
         </button>
       </form>
     </section>
@@ -514,6 +512,7 @@ function RelayAuthPanel({
 }
 
 function RelayFrame({ children }: { children: React.ReactNode }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <main className="min-h-screen bg-[var(--app-bg)] px-4 py-5 text-[var(--app-fg)] sm:px-6 sm:py-6">
       <header className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 border-b border-[var(--theme-border)] pb-4">
@@ -525,15 +524,14 @@ function RelayFrame({ children }: { children: React.ReactNode }) {
           <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--theme-accent-soft)] text-xs text-[var(--theme-accent-strong)]">
             RC
           </span>
-          <span className="truncate">Relay home</span>
+          <span className="truncate">{translate("auth.relayHome")}</span>
         </Link>
         <Link
           className="relay-button-secondary inline-flex h-11 shrink-0 items-center gap-2"
           to="/relay-guide"
         >
           <BookOpen aria-hidden="true" className="h-4 w-4" />
-          Guide
-        </Link>
+          {translate("auth.guide")}</Link>
       </header>
       <div className="mx-auto flex w-full max-w-5xl justify-center py-8 sm:py-12">
         {children}
@@ -565,6 +563,7 @@ function RelayInput({
   minLength?: number;
   required?: boolean;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const descriptionId = useId();
   const inputId = useId();
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -590,8 +589,8 @@ function RelayInput({
           <button
             aria-label={
               passwordVisible
-                ? `Hide ${label.toLowerCase()}`
-                : `Show ${label.toLowerCase()}`
+                ? translate("auth.hide", { value1: label.toLowerCase() })
+                : translate("auth.show", { value1: label.toLowerCase() })
             }
             className="absolute inset-y-0 right-0 inline-flex w-11 items-center justify-center text-[var(--theme-fg-muted)] hover:text-[var(--theme-fg)]"
             disabled={disabled}
@@ -625,6 +624,7 @@ function RelayNotice({
   tone: 'accent' | 'danger';
   children: React.ReactNode;
 }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <div
       aria-live={tone === 'danger' ? 'assertive' : 'polite'}

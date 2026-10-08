@@ -1,3 +1,5 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { LanguageSwitcher } from '@remote-codex/thread-ui/i18n';
 import { FormDialog } from './FormDialog';
 import { useFontSize } from '../lib/fontSize';
 import { RuntimeManagement } from './RuntimeManagement';
@@ -64,6 +66,7 @@ export function AppShellSettingsDialog({
   embedded?: boolean;
   section?: string;
 } = {}) {
+  useI18n();
   const shellNav = useAppShellNav();
   const plugins = usePlugins();
   const [pluginImportDraft, setPluginImportDraft] = useState('');
@@ -182,7 +185,7 @@ export function AppShellSettingsDialog({
       setPluginImportDraft('');
       setPluginImportState({
         busy: false,
-        message: 'Plugin manifest imported.',
+        message: translate("files.pluginManifestImported"),
         error: null,
       });
     } catch (error) {
@@ -192,7 +195,7 @@ export function AppShellSettingsDialog({
         error:
           error instanceof Error
             ? error.message
-            : 'Unable to import plugin manifest.',
+            : translate("files.unableToImportPluginManifest"),
       });
     }
   }
@@ -206,7 +209,7 @@ export function AppShellSettingsDialog({
     (plugin) => plugin.enabled,
   ).length;
   const pluginCountLabel = plugins.loading
-    ? 'Loading...'
+    ? translate("files.loading")
     : `${enabledPluginCount}/${plugins.plugins.length} enabled`;
   const activeBackend =
     backends.find((backend) => backend.provider === selectedBackend) ??
@@ -258,7 +261,7 @@ export function AppShellSettingsDialog({
           error:
             error instanceof ApiError
               ? error.message
-              : 'Unable to load backend settings.',
+              : translate("files.unableToLoadBackendSettings"),
         }));
       });
 
@@ -304,7 +307,7 @@ export function AppShellSettingsDialog({
           error:
             error instanceof ApiError
               ? error.message
-              : 'Unable to load workspace settings.',
+              : translate("files.unableToLoadWorkspaceSettings"),
         }));
       });
 
@@ -376,7 +379,7 @@ export function AppShellSettingsDialog({
           const message =
             result.reason instanceof ApiError
               ? result.reason.message
-              : 'Unable to load the file.';
+              : translate("files.unableToLoadTheFile");
           const failedName =
             editableFiles[results.indexOf(result)]?.name ??
             editableFiles[0]?.name;
@@ -449,7 +452,7 @@ export function AppShellSettingsDialog({
           error:
             error instanceof ApiError
               ? error.message
-              : 'Unable to load config archives.',
+              : translate("files.unableToLoadConfigArchives"),
         }));
       }
     }
@@ -488,7 +491,7 @@ export function AppShellSettingsDialog({
         ...current,
         devHomeDraft: updated.devHome,
         saving: false,
-        message: 'Workspace defaults saved.',
+        message: translate("files.workspaceDefaultsSaved"),
       }));
     } catch (error) {
       setWorkspaceSettingsState((current) => ({
@@ -497,7 +500,7 @@ export function AppShellSettingsDialog({
         error:
           error instanceof ApiError
             ? error.message
-            : 'Unable to save workspace settings.',
+            : translate("files.unableToSaveWorkspaceSettings"),
       }));
     }
   }
@@ -538,7 +541,7 @@ export function AppShellSettingsDialog({
           loading: false,
           saving: false,
           error: null,
-          saveMessage: 'Saved',
+          saveMessage: translate("files.saved_c0ae8f"),
         },
       }));
     } catch (error) {
@@ -551,7 +554,7 @@ export function AppShellSettingsDialog({
           error:
             error instanceof ApiError
               ? error.message
-              : 'Unable to save the file.',
+              : translate("files.unableToSaveTheFile"),
           saveMessage: null,
         },
       }));
@@ -582,7 +585,7 @@ export function AppShellSettingsDialog({
       setArchivesState((current) => ({
         ...current,
         creating: false,
-        message: 'Backup created.',
+        message: translate("files.backupCreated"),
       }));
     } catch (error) {
       setArchivesState((current) => ({
@@ -591,7 +594,7 @@ export function AppShellSettingsDialog({
         error:
           error instanceof ApiError
             ? error.message
-            : 'Unable to create a config backup.',
+            : translate("files.unableToCreateAConfigBackup"),
       }));
     }
   }
@@ -622,8 +625,8 @@ export function AppShellSettingsDialog({
         applyingId: null,
         message:
           result.status.state === 'ready'
-            ? `Applied "${result.archive.label}" and restarted ${activeBackend.displayName}.`
-            : `Applied "${result.archive.label}". ${activeBackend.displayName} state: ${result.status.state}.`,
+            ? translate("files.appliedAndRestarted", { value1: result.archive.label, value2: activeBackend.displayName })
+            : translate("files.appliedState", { value1: result.archive.label, value2: activeBackend.displayName, value3: result.status.state }),
       }));
     } catch (error) {
       setArchivesState((current) => ({
@@ -632,7 +635,7 @@ export function AppShellSettingsDialog({
         error:
           error instanceof ApiError
             ? error.message
-            : 'Unable to apply the config archive.',
+            : translate("files.unableToApplyTheConfigArchive"),
       }));
     }
   }
@@ -670,7 +673,7 @@ export function AppShellSettingsDialog({
         renamingId: null,
         renamingBusyId: null,
         renameDraft: '',
-        message: 'Backup renamed.',
+        message: translate("files.backupRenamed"),
       }));
     } catch (error) {
       setArchivesState((current) => ({
@@ -679,7 +682,7 @@ export function AppShellSettingsDialog({
         error:
           error instanceof ApiError
             ? error.message
-            : 'Unable to rename the config backup.',
+            : translate("files.unableToRenameTheConfigBackup"),
       }));
     }
   }
@@ -709,12 +712,12 @@ export function AppShellSettingsDialog({
                   ...plugin.capabilities.threadPanels.map(
                     (panel) => panel.kind ?? panel.id,
                   ),
-                ].join(', ') || 'utility'}
+                ].join(', ') || translate("files.utility")}
               </span>
               <span className="mt-0.5 block text-[11px] leading-5 text-[var(--theme-fg-muted)]">
                 {plugin.source === 'imported'
-                  ? 'Imported manifest'
-                  : 'Built-in module'}
+                  ? translate("files.importedManifest")
+                  : translate("files.builtInModule")}
               </span>
               {unavailablePluginReason(plugin) ? (
                 <span className="mt-1 block text-xs leading-5 text-[var(--status-warning-fg)]">
@@ -726,7 +729,7 @@ export function AppShellSettingsDialog({
               className="mt-1 h-5 w-5 shrink-0 accent-[var(--theme-accent-solid)] disabled:cursor-not-allowed disabled:opacity-50"
               checked={plugin.enabled}
               disabled={unavailablePluginReason(plugin) !== null}
-              aria-label={`${plugin.name} enabled`}
+              aria-label={translate("files.enabled", { value1: plugin.name })}
               onChange={(event) =>
                 void plugins.setPluginEnabled(
                   plugin.id,
@@ -739,14 +742,12 @@ export function AppShellSettingsDialog({
         ))}
         {plugins.plugins.length === 0 && (
           <p className="py-4 text-xs text-[var(--theme-fg-muted)]">
-            No plugins are registered.
-          </p>
+            {translate("files.noPluginsAreRegistered")}</p>
         )}
       </div>
       <div className="mt-3 border-t border-[var(--theme-border)] pt-3">
         <label className="block text-xs font-medium text-[var(--theme-fg)]">
-          Import manifest JSON
-        </label>
+          {translate("files.importManifestJSON")}</label>
         <textarea
           disabled={pluginImportState.busy}
           value={pluginImportDraft}
@@ -766,16 +767,14 @@ export function AppShellSettingsDialog({
         />
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
           <p className="max-w-[42rem] text-xs leading-5 text-[var(--theme-fg-muted)]">
-            Imports register manifest-declared artifact types. Rendering code
-            still needs a trusted built-in frontend module.
-          </p>
+            {translate("files.importsRegisterManifestDeclaredArtifactTypesRendering")}</p>
           <button
             type="button"
             onClick={() => void handleImportPlugin()}
             disabled={!pluginImportDraft.trim() || pluginImportState.busy}
             className="host-secondary-button min-h-11 shrink-0 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {pluginImportState.busy ? 'Importing...' : 'Import'}
+            {pluginImportState.busy ? translate("files.importing") : translate("files.import")}
           </button>
         </div>
         {pluginImportState.error && (
@@ -812,14 +811,14 @@ export function AppShellSettingsDialog({
         className={`min-h-0 flex-1 overflow-y-auto ${embedded ? '!overflow-visible !flex-none p-0' : 'px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-5'}`}
       >
         <div className="divide-y divide-[var(--theme-border)]">
+          {section === 'preferences' && <fieldset className="py-5"><LanguageSwitcher /><p className="mt-1 text-xs text-[var(--theme-fg-muted)]">{translate("files.chooseTheInterfaceLanguageForThisBrowser")}</p></fieldset>}
           {section === 'preferences' && <ComposerShortcutSettings />}
           {section === 'preferences' ? (
             <fieldset className="py-5">
               <legend className="text-sm font-semibold text-[var(--theme-fg)]">
-                Appearance
-              </legend>
+                {translate("files.appearance")}</legend>
               <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                Choose a theme for this browser. The active display is{' '}
+                {translate("files.chooseAThemeForThisBrowserThe")}{' '}
                 {effectiveTheme}.
               </p>
               <div className="product-segmented mt-3 grid w-full grid-cols-3 sm:w-auto">
@@ -854,12 +853,12 @@ export function AppShellSettingsDialog({
 
           {section === 'preferences' && (
             <section className="py-5">
-              <label htmlFor="settings-font-size" className="block text-sm font-semibold">Text size</label>
-              <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">Adjust conversation, composer and activity text. Changes apply immediately and are saved on this device.</p>
+              <label htmlFor="settings-font-size" className="block text-sm font-semibold">{translate("files.textSize")}</label>
+              <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">{translate("files.adjustConversationComposerAndActivityTextChanges")}</p>
               <div className="mt-3 flex items-center gap-4">
-                <input id="settings-font-size" aria-label="Text size" type="range" min="12" max="22" step="1" value={fontSize} onChange={(event) => setFontSize(Number(event.currentTarget.value))} className="w-48 accent-[var(--theme-accent-solid)]" />
+                <input id="settings-font-size" aria-label={translate("files.textSize")} type="range" min="12" max="22" step="1" value={fontSize} onChange={(event) => setFontSize(Number(event.currentTarget.value))} className="w-48 accent-[var(--theme-accent-solid)]" />
                 <output htmlFor="settings-font-size" className="text-sm tabular-nums">{fontSize}px</output>
-                <button type="button" onClick={() => setFontSize(16)} className="relay-button-secondary">Reset</button>
+                <button type="button" onClick={() => setFontSize(16)} className="relay-button-secondary">{translate("files.reset")}</button>
               </div>
             </section>
           )}
@@ -869,16 +868,13 @@ export function AppShellSettingsDialog({
                 <label className="flex min-h-11 items-center justify-between gap-4">
                   <span>
                     <span className="block text-sm font-semibold">
-                      Thread timeline
-                    </span>
+                      {translate("files.threadTimeline")}</span>
                     <span className="mt-1 block text-xs text-[var(--theme-fg-muted)]">
-                      Collapse completed turns to keep conversations easy to
-                      scan.
-                    </span>
+                      {translate("files.collapseCompletedTurnsToKeepConversationsEasy")}</span>
                   </span>
                   <input
                     type="checkbox"
-                    aria-label="Auto collapse"
+                    aria-label={translate("files.autoCollapse")}
                     checked={autoCollapseCompletedTurns}
                     onChange={(e) =>
                       shellNav.setAutoCollapseCompletedTurns?.(
@@ -898,8 +894,7 @@ export function AppShellSettingsDialog({
                   className="host-secondary-button rounded-md border px-3 py-2"
                   onClick={() => void plugins.refresh()}
                 >
-                  Refresh plugins
-                </button>
+                  {translate("files.refreshPlugins")}</button>
               </div>
               {pluginsManagementNode}
             </section>
@@ -909,12 +904,9 @@ export function AppShellSettingsDialog({
               <label className="flex min-h-11 items-center justify-between gap-4">
                 <span>
                   <span className="block text-sm font-semibold">
-                    Show agent status summaries
-                  </span>
+                    {translate("files.showAgentStatusSummaries")}</span>
                   <span className="mt-1 block text-xs text-[var(--theme-fg-muted)]">
-                    Show intermediate thinking summaries with their own
-                    timestamps. Off by default.
-                  </span>
+                    {translate("files.showIntermediateThinkingSummariesWithTheirOwn")}</span>
                 </span>
                 <input
                   type="checkbox"
@@ -931,7 +923,7 @@ export function AppShellSettingsDialog({
           )}
           {section === 'preferences' && (
             <details className="settings-detail">
-              <summary>Model pricing</summary>
+              <summary>{translate("files.modelPricing")}</summary>
               <div>
                 <ModelPricingSettings />
               </div>
@@ -943,29 +935,25 @@ export function AppShellSettingsDialog({
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h3 className="text-sm font-semibold text-[var(--theme-fg)]">
-                    Workspace defaults
-                  </h3>
+                    {translate("files.workspaceDefaults")}</h3>
                   <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                    Git projects clone into dev home. New workspace directories
-                    can create one missing child under this path.
-                  </p>
+                    {translate("files.gitProjectsCloneIntoDevHomeNew")}</p>
                 </div>
               </div>
               <div className="mt-3 grid gap-4">
                 <div className="border-y border-[var(--theme-border)] py-3">
                   <p className="text-xs font-medium text-[var(--theme-fg-muted)]">
-                    Workspace root
-                  </p>
+                    {translate("files.workspaceRoot")}</p>
                   <p
                     title={
                       workspaceSettings?.workspaceRoot ??
-                      'Loading workspace root'
+                      translate("files.loadingWorkspaceRoot")
                     }
                     className="mt-1 truncate font-mono text-xs leading-5 text-[var(--theme-fg-soft)]"
                   >
                     {workspaceSettingsState.loading && !workspaceSettings
-                      ? 'Loading...'
-                      : (workspaceSettings?.workspaceRoot ?? 'Unavailable')}
+                      ? translate("files.loading")
+                      : (workspaceSettings?.workspaceRoot ?? translate("files.unavailable"))}
                   </p>
                 </div>
                 <div>
@@ -973,8 +961,7 @@ export function AppShellSettingsDialog({
                     htmlFor="settings-dev-home"
                     className="text-xs font-medium text-[var(--theme-fg-soft)]"
                   >
-                    Dev home
-                  </label>
+                    {translate("files.devHome")}</label>
                   <div className="mt-1 flex flex-col gap-2 sm:flex-row">
                     <input
                       disabled={
@@ -996,7 +983,7 @@ export function AppShellSettingsDialog({
                     />
                     <button
                       type="button"
-                      aria-label="Save workspace defaults"
+                      aria-label={translate("files.saveWorkspaceDefaults")}
                       onClick={() => void handleSaveWorkspaceSettings()}
                       disabled={
                         workspaceSettingsState.loading ||
@@ -1005,7 +992,7 @@ export function AppShellSettingsDialog({
                       }
                       className="relay-button-primary min-h-11 shrink-0 rounded-md px-4"
                     >
-                      {workspaceSettingsState.saving ? 'Saving...' : 'Save'}
+                      {workspaceSettingsState.saving ? translate("files.saving") : translate("files.save")}
                     </button>
                   </div>
                 </div>
@@ -1034,8 +1021,7 @@ export function AppShellSettingsDialog({
           {section === 'advanced' && (
             <>
               <label className="block text-xs font-medium">
-                Harness configuration
-                <select
+                {translate("files.harnessConfiguration")}<select
                   className="host-input mt-2 w-full rounded-lg border p-3 text-sm"
                   value={selectedBackend}
                   onChange={(event) => {
@@ -1057,12 +1043,9 @@ export function AppShellSettingsDialog({
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <h3 className="text-sm font-semibold text-[var(--theme-fg)]">
-                      Provider host files
-                    </h3>
+                      {translate("files.providerHostFiles")}</h3>
                     <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                      {activeBackend.displayName} exposes these editable files
-                      through its backend schema.
-                    </p>
+                      {activeBackend.displayName} {translate("files.exposesTheseEditableFilesThroughItsBackend")}</p>
                   </div>
                 </div>
                 <div className="mt-3 divide-y divide-[var(--theme-border)] border-y border-[var(--theme-border)]">
@@ -1106,20 +1089,16 @@ export function AppShellSettingsDialog({
                           <div className="shrink-0">
                             {state.loading ? (
                               <span className="text-[11px] font-medium text-[var(--theme-fg-muted)]">
-                                Loading
-                              </span>
+                                {translate("files.loading_8f26c6")}</span>
                             ) : dirty ? (
                               <span className="text-[11px] font-medium text-[var(--theme-accent-strong)]">
-                                Unsaved
-                              </span>
+                                {translate("files.unsaved")}</span>
                             ) : state.exists ? (
                               <span className="text-[11px] font-medium text-[var(--status-success-fg)]">
-                                Ready
-                              </span>
+                                {translate("files.ready")}</span>
                             ) : (
                               <span className="text-[11px] font-medium text-[var(--status-info-fg)]">
-                                New
-                              </span>
+                                {translate("files.new")}</span>
                             )}
                           </div>
                         </div>
@@ -1128,25 +1107,21 @@ export function AppShellSettingsDialog({
                   })}
                   {editableFiles.length === 0 ? (
                     <p className="py-4 text-xs text-[var(--theme-fg-muted)]">
-                      This backend does not expose editable host files.
-                    </p>
+                      {translate("files.thisBackendDoesNotExposeEditableHost")}</p>
                   ) : null}
                 </div>
               </section>
 
               {activeManagementSchema.configArchives ? (
                 <details className="settings-detail">
-                  <summary>Configuration backups</summary>
+                  <summary>{translate("files.configurationBackups")}</summary>
                   <div>
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div className="min-w-0">
                         <h3 className="text-sm font-semibold text-[var(--theme-fg)]">
-                          Config archives
-                        </h3>
+                          {translate("files.configArchives")}</h3>
                         <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                          Backup the selected backend host files, then apply a
-                          saved archive with a backend restart.
-                        </p>
+                          {translate("files.backupTheSelectedBackendHostFilesThen")}</p>
                       </div>
                       <button
                         type="button"
@@ -1159,8 +1134,8 @@ export function AppShellSettingsDialog({
                         className="host-secondary-button min-h-11 shrink-0 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {archivesState.creating
-                          ? 'Creating...'
-                          : 'Create backup'}
+                          ? translate("files.creating")
+                          : translate("files.createBackup")}
                       </button>
                     </div>
                     {archivesState.error ? (
@@ -1184,12 +1159,10 @@ export function AppShellSettingsDialog({
                           className="py-4 text-xs text-[var(--theme-fg-muted)]"
                           role="status"
                         >
-                          Loading backups...
-                        </p>
+                          {translate("files.loadingBackups")}</p>
                       ) : archives.length === 0 ? (
                         <p className="py-4 text-xs text-[var(--theme-fg-muted)]">
-                          No config backups yet.
-                        </p>
+                          {translate("files.noConfigBackupsYet")}</p>
                       ) : (
                         archives.map((archive) => {
                           const renaming =
@@ -1201,7 +1174,7 @@ export function AppShellSettingsDialog({
                                   {renaming ? (
                                     <div className="flex max-w-xl flex-col gap-2 sm:flex-row">
                                       <input
-                                        aria-label={`Rename ${archive.label}`}
+                                        aria-label={translate("files.rename", { value1: archive.label })}
                                         disabled={
                                           archivesState.renamingBusyId ===
                                           archive.id
@@ -1219,7 +1192,7 @@ export function AppShellSettingsDialog({
                                       />
                                       <button
                                         type="button"
-                                        aria-label={`Save archive name ${archive.label}`}
+                                        aria-label={translate("files.saveArchiveName", { value1: archive.label })}
                                         onClick={() =>
                                           void handleRenameArchive(archive)
                                         }
@@ -1232,8 +1205,8 @@ export function AppShellSettingsDialog({
                                       >
                                         {archivesState.renamingBusyId ===
                                         archive.id
-                                          ? 'Saving...'
-                                          : 'Save'}
+                                          ? translate("files.saving")
+                                          : translate("files.save")}
                                       </button>
                                       <button
                                         type="button"
@@ -1250,8 +1223,7 @@ export function AppShellSettingsDialog({
                                         }
                                         className="host-secondary-button min-h-11 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
                                       >
-                                        Cancel
-                                      </button>
+                                        {translate("files.cancel")}</button>
                                     </div>
                                   ) : (
                                     <p className="truncate text-sm font-medium text-[var(--theme-fg)]">
@@ -1260,7 +1232,7 @@ export function AppShellSettingsDialog({
                                   )}
                                   <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--theme-fg-muted)]">
                                     <span>
-                                      Created{' '}
+                                      {translate("files.created")}{' '}
                                       {formatArchiveDate(archive.createdAt)}
                                     </span>
                                     {editableFiles.map((file) => (
@@ -1272,8 +1244,8 @@ export function AppShellSettingsDialog({
                                         {archive.files[
                                           file.name as keyof typeof archive.files
                                         ]?.exists
-                                          ? 'saved'
-                                          : 'missing'}
+                                          ? translate("files.saved")
+                                          : translate("files.missing")}
                                       </span>
                                     ))}
                                   </div>
@@ -1298,8 +1270,7 @@ export function AppShellSettingsDialog({
                                     }
                                     className="host-secondary-button min-h-11 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
                                   >
-                                    Rename
-                                  </button>
+                                    {translate("files.rename_d3f4cb")}</button>
                                   <button
                                     type="button"
                                     onClick={() =>
@@ -1313,8 +1284,8 @@ export function AppShellSettingsDialog({
                                     className="host-secondary-button min-h-11 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-50"
                                   >
                                     {archivesState.applyingId === archive.id
-                                      ? 'Applying...'
-                                      : 'Apply'}
+                                      ? translate("files.applying")
+                                      : translate("files.apply")}
                                   </button>
                                 </div>
                               </div>
@@ -1351,7 +1322,7 @@ export function AppShellSettingsDialog({
               {selectedFile.path}
             </p>
             <textarea
-              aria-label={`Edit ${selectedFileName}`}
+              aria-label={translate("files.edit", { value1: selectedFileName })}
               disabled={selectedFile.loading || selectedFile.saving}
               spellCheck={false}
               className="host-input my-3 min-h-64 w-full rounded-lg border p-3 font-mono text-xs"
@@ -1379,8 +1350,7 @@ export function AppShellSettingsDialog({
               }
               onClick={() => void handleSave(selectedFileName)}
             >
-              Save file
-            </button>
+              {translate("files.saveFile")}</button>
           </FormDialog>
         )}
       </div>
@@ -1405,7 +1375,7 @@ export function AppShellSettingsDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle>Settings</DialogTitle>
+          <DialogTitle>{translate("files.settings")}</DialogTitle>
         </DialogHeader>
         <SettingsPanels sections={appSettingsSections()} />
       </DialogContent>
@@ -1417,34 +1387,34 @@ export function appSettingsSections(): SettingsSection[] {
   return [
     {
       id: 'preferences',
-      label: 'Preferences',
-      description: 'Appearance and conversation display, tailored to you.',
+      label: translate("files.preferences"),
+      description: translate("files.appearanceAndConversationDisplayTailoredToYou"),
     },
     {
       id: 'harnesses',
-      label: 'Harnesses',
+      label: translate("files.harnesses"),
       description:
-        'Manage agents and switch their upstream providers on this device.',
+        translate("files.manageAgentsAndSwitchTheirUpstreamProviders"),
     },
     {
       id: 'device',
-      label: 'Device',
-      description: 'Supervisor maintenance and reusable device templates.',
+      label: translate("files.device"),
+      description: translate("files.supervisorMaintenanceAndReusableDeviceTemplates"),
     },
     {
       id: 'workspace',
-      label: 'Workspace',
-      description: 'Default locations for projects on this device.',
+      label: translate("files.workspace"),
+      description: translate("files.defaultLocationsForProjectsOnThisDevice"),
     },
     {
       id: 'plugins',
-      label: 'Plugins',
-      description: 'Renderers and extensions for your workspace.',
+      label: translate("files.plugins"),
+      description: translate("files.renderersAndExtensionsForYourWorkspace"),
     },
     {
       id: 'advanced',
-      label: 'Advanced',
-      description: 'Native configuration files and recovery backups.',
+      label: translate("files.advanced"),
+      description: translate("files.nativeConfigurationFilesAndRecoveryBackups"),
     },
   ].map((section) => ({
     ...section,

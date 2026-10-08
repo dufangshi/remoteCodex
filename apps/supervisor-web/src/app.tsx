@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { installNotificationRouteResponder } from './lib/relayPush';
 import { PublicThreadPage } from './pages/PublicThreadPage';
 import {
@@ -62,6 +63,7 @@ const AUTO_COLLAPSE_COMPLETED_TURNS_STORAGE_KEY =
   'remote-codex-auto-collapse-completed-turns';
 
 function RoutePluginProvider({ children }: { children: ReactNode }) {
+  const { locale: i18nLocale } = useI18n();
   const adapter = useMemo(
     () => ({
       fetchPlugins,
@@ -116,70 +118,78 @@ function formatDocumentTitle(pageTitle?: string | null) {
 
 function routeDocumentTitle(pathname: string) {
   if (pathname === '/' || pathname === '/relay-portal') {
-    return 'Relay Portal';
+    return translate("workbench.relayPortal");
   }
   if (pathname === '/relay-guide') {
-    return 'Relay Setup';
+    return translate("workbench.relaySetup");
   }
   if (pathname === '/relay-admin') {
-    return 'Relay Admin';
+    return translate("workbench.relayAdmin");
   }
   if (pathname === '/relay-account') {
-    return 'Account';
+    return translate("workbench.account");
   }
   if (pathname === '/relay-devices') {
-    return 'Devices and Shared Sessions';
+    return translate("workbench.devicesAndSharedSessions");
   }
   if (pathname === '/relay-settings') {
-    return 'Settings';
+    return translate("workbench.settings");
   }
   if (
     pathname === '/workspaces' ||
     /^\/devices\/[^/]+\/workspaces$/.test(pathname)
   ) {
-    return 'Workspaces';
+    return translate("workbench.workspaces");
   }
   if (
     pathname === '/workspaces/new' ||
     /^\/devices\/[^/]+\/workspaces\/new$/.test(pathname)
   ) {
-    return 'New Workspace';
+    return translate("workbench.newWorkspace");
   }
   if (
     pathname === '/threads' ||
     /^\/devices\/[^/]+\/threads$/.test(pathname)
   ) {
-    return 'Threads';
+    return translate("workbench.threads");
   }
   if (
     pathname === '/threads/import' ||
     /^\/devices\/[^/]+\/threads\/import$/.test(pathname)
   ) {
-    return 'Import Thread';
+    return translate("workbench.importThread");
   }
   if (
     pathname === '/threads/new' ||
     /^\/devices\/[^/]+\/threads\/new$/.test(pathname)
   ) {
-    return 'New Thread';
+    return translate("workbench.newThread");
   }
   if (
     /^\/threads\/[^/]+$/.test(pathname) ||
     /^\/devices\/[^/]+\/threads\/[^/]+$/.test(pathname)
   ) {
-    return 'Thread';
+    return translate("workbench.thread");
   }
 
   return null;
 }
 
 function DocumentTitleUpdater() {
+  const { locale: i18nLocale } = useI18n();
   useEffect(installNotificationRouteResponder, []);
+  useEffect(() => {
+    if (!navigator.serviceWorker) return;
+    const sync = () => navigator.serviceWorker.controller?.postMessage({ type: 'remote-codex-locale', locale: i18nLocale });
+    sync();
+    navigator.serviceWorker.addEventListener('controllerchange', sync);
+    return () => navigator.serviceWorker.removeEventListener('controllerchange', sync);
+  }, [i18nLocale]);
   const location = useLocation();
 
   useEffect(() => {
     document.title = formatDocumentTitle(routeDocumentTitle(location.pathname));
-  }, [location.pathname]);
+  }, [location.pathname, i18nLocale]);
 
   return null;
 }
@@ -205,6 +215,7 @@ function AppShell({
   setThemeMode: (mode: ThemeMode) => void;
   effectiveTheme: 'light' | 'dark';
 }) {
+  const { locale: i18nLocale } = useI18n();
   const [navOpen, setNavOpen] = useState(false);
   const composerPreferences = useComposerPreferences();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -326,14 +337,12 @@ function AppShell({
             <div className="flex items-center justify-between gap-4 px-4 py-3">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-[var(--theme-fg)]">
-                  Starting hosted VM
-                </p>
+                  {translate("workbench.startingHostedVM")}</p>
                 <p className="truncate text-xs text-[var(--theme-fg-muted)]">
-                  Waiting for the supervisor. Pages will resume automatically.
-                </p>
+                  {translate("workbench.waitingForTheSupervisorPagesWillResume")}</p>
               </div>
               <span className="shrink-0 text-xs tabular-nums text-[var(--theme-fg-muted)]">
-                Check {hostedVmWake.attempt}
+                {translate("workbench.check")} {hostedVmWake.attempt}
               </span>
             </div>
             <div className="h-1 overflow-hidden bg-[var(--theme-muted)]">
@@ -383,6 +392,7 @@ function AppShell({
 }
 
 function AuthGate({ children }: { children: React.ReactNode }) {
+  const { locale: i18nLocale } = useI18n();
   const [state, setState] = useState<
     | { status: 'checking' }
     | { status: 'authenticated' }
@@ -421,7 +431,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       }
       setState({
         status: 'unavailable',
-        error: caught instanceof Error ? caught.message : 'Unable to check supervisor access.',
+        error: caught instanceof Error ? caught.message : translate("workbench.unableToCheckSupervisorAccess"),
       });
     }
   }
@@ -447,8 +457,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   if (state.status === 'checking') {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-4 text-sm text-[var(--theme-fg-muted)]">
-        Checking supervisor access...
-      </main>
+        {translate("workbench.checkingSupervisorAccess")}</main>
     );
   }
 
@@ -457,11 +466,9 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       <main className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-4 text-[var(--app-fg)]">
         <section className="w-full max-w-md rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-[var(--theme-shadow)] sm:p-6">
           <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--theme-fg-muted)]">
-            Supervisor Access
-          </p>
+            {translate("workbench.supervisorAccess")}</p>
           <h1 className="mt-2 text-2xl font-semibold tracking-normal text-[var(--theme-fg)]">
-            Unable to reach supervisor
-          </h1>
+            {translate("workbench.unableToReachSupervisor")}</h1>
           <p className="mt-3 text-sm leading-6 text-[var(--theme-fg-muted)]">
             {state.error}
           </p>
@@ -470,8 +477,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
             onClick={handleRetry}
             type="button"
           >
-            Retry
-          </button>
+            {translate("workbench.retry")}</button>
         </section>
       </main>
     );
@@ -494,6 +500,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 }
 
 function RelayGate({ children }: { children: React.ReactNode }) {
+  const { locale: i18nLocale } = useI18n();
   const location = useLocation();
   const [state, setState] = useState<
     | { status: 'checking' }
@@ -527,8 +534,7 @@ function RelayGate({ children }: { children: React.ReactNode }) {
   if (state.status === 'checking') {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] px-4 text-sm text-[var(--theme-fg-muted)]">
-        Checking relay access...
-      </main>
+        {translate("workbench.checkingRelayAccess")}</main>
     );
   }
 
@@ -546,10 +552,12 @@ function RelayGate({ children }: { children: React.ReactNode }) {
 }
 
 function SupervisorAccessGate({ children }: { children: React.ReactNode }) {
+  const { locale: i18nLocale } = useI18n();
   return relayModeActive() ? <RelayGate>{children}</RelayGate> : <AuthGate>{children}</AuthGate>;
 }
 
 function RootRoute() {
+  const { locale: i18nLocale } = useI18n();
   return relayModeActive() ? <RelayHomePage /> : <Navigate to="/workspaces" replace />;
 }
 
@@ -562,6 +570,7 @@ function SupervisorRoutes({
   setThemeMode: (mode: ThemeMode) => void;
   effectiveTheme: 'light' | 'dark';
 }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <Routes>
       <Route
@@ -604,6 +613,7 @@ function SupervisorRoutes({
 }
 
 export function App() {
+  const { locale: i18nLocale } = useI18n();
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => readInitialThemeMode());
   const [systemTheme, setSystemTheme] = useState<'light' | 'dark'>(() =>
     systemThemePreference(),

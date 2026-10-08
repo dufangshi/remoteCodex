@@ -1,4 +1,5 @@
 /// <reference lib="webworker" />
+import { translate } from '@remote-codex/thread-ui/i18n';
 const threadPath = /^\/devices\/[0-9a-f-]{36}\/threads\/[0-9a-f-]{36}\/?$/i;
 export function notificationThreadUrl(
   raw: unknown,
@@ -79,7 +80,7 @@ export function installPushHandlers(worker: ServiceWorkerGlobalScope) {
           body:
             typeof payload.body === 'string'
               ? payload.body
-              : 'A thread has an update.',
+              : translate('workbench.threadUpdateFallback'),
           tag: typeof payload.tag === 'string' ? payload.tag : '',
           icon: '/icon-192.png',
           badge: '/favicon-48x48.png',

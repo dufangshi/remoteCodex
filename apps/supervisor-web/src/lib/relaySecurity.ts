@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { request } from './api';
 
 export interface SecurityStatus {
@@ -136,7 +137,7 @@ export async function registerPasskey(
       })),
     },
   })) as PublicKeyCredential | null;
-  if (!credential) throw new Error('Passkey setup was cancelled.');
+  if (!credential) throw new Error(translate("workbench.passkeySetupWasCancelled"));
   return securityRequest<{ recoveryCodes?: string[] }>(
     '/passkeys/register/finish',
     'POST',
@@ -168,7 +169,7 @@ export async function authenticatePasskey(
       })),
     },
   })) as PublicKeyCredential | null;
-  if (!credential) throw new Error('Passkey verification was cancelled.');
+  if (!credential) throw new Error(translate("workbench.passkeyVerificationWasCancelled"));
   return request<{ verificationToken?: string }>(
     '/relay/auth/passkey/finish',
     {
@@ -185,8 +186,8 @@ export async function authenticatePasskey(
 }
 export function securityError(error: unknown) {
   if (error instanceof DOMException && error.name === 'NotAllowedError')
-    return 'Passkey verification was cancelled. You can try again or use a code.';
+    return translate("workbench.passkeyVerificationWasCancelledYouCanTry");
   return error instanceof Error
     ? error.message
-    : 'Unable to update security settings.';
+    : translate("workbench.unableToUpdateSecuritySettings");
 }

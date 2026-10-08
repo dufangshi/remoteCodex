@@ -1,3 +1,5 @@
+import { getLocale } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import {
@@ -33,10 +35,10 @@ export async function loadExportSnapshot(
   const selected = input.mode === 'selected' ? new Set(input.turnIds) : null;
   const limit = Math.min(100, Math.max(1, input.limit ?? 10));
   if (selected && (!selected.size || selected.size > 10_000))
-    throw new Error('Select between 1 and 10,000 turns.');
+    throw new Error(translate("sharing.selectBetween1And10000Turns"));
   let turns: ThreadTurnDto[] = [];
   let cursor: string | undefined;
-  let title = 'Thread';
+  let title = translate("sharing.thread");
   const seen = new Set<string>();
   do {
     const page = await fetchThreadDetail(id, {
@@ -52,7 +54,7 @@ export async function loadExportSnapshot(
       ...turns,
     ];
     cursor = fresh[0]?.id;
-    if (turns.length > 10000) throw new Error('The transcript is too large to share. Export selected turns instead.');
+    if (turns.length > 10000) throw new Error(translate("sharing.theTranscriptIsTooLargeToShare"));
     if (
       (!selected && !all) ||
       (selected && turns.length === selected.size) ||
@@ -61,7 +63,7 @@ export async function loadExportSnapshot(
       break;
   } while (cursor);
   if (selected && turns.length !== selected.size)
-    throw new Error('One or more selected turns are no longer available.');
+    throw new Error(translate("sharing.oneOrMoreSelectedTurnsAreNo"));
   const theme =
     document.documentElement.getAttribute('data-theme-effective') === 'dark'
       ? 'dark'
@@ -90,7 +92,7 @@ export async function loadExportSnapshot(
   for (const path of paths) {
     const blob = await downloadThreadImage(id, path);
     imageBytes += blob.size;
-    if (imageBytes > 10 * 1024 * 1024) throw new Error('Attachments exceed the 10 MB public snapshot limit.');
+    if (imageBytes > 10 * 1024 * 1024) throw new Error(translate("sharing.attachmentsExceedThe10MBPublicSnapshot"));
     snapshot.images[path] = await dataUrl(blob);
   }
   return snapshot;
@@ -105,7 +107,7 @@ async function standaloneCss() {
         fetch(url).then(async (response) => {
           if (!response.ok)
             throw new Error(
-              'An export font or style resource could not be loaded.',
+              translate("sharing.anExportFontOrStyleResourceCould"),
             );
           return dataUrl(await response.blob());
         }),
@@ -186,7 +188,7 @@ export async function renderStandaloneTranscript(
       button.append(img);
     });
     const theme = snapshot.theme ?? 'dark';
-    return `<!doctype html><html lang="en" class="${theme}" data-theme-effective="${theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="${theme}"><title>${escape(snapshot.title)}</title><style>${css.replaceAll('</style', '<\\/style')}</style><style>html,body{margin:0;background:${theme === 'dark' ? '#11110d' : '#f5f6f5'}}a{overflow-wrap:anywhere}</style></head><body>${clone.outerHTML}${standaloneImageViewer}</body></html>`;
+    return `<!doctype html><html lang="${getLocale()}" class="${theme}" data-theme-effective="${theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="${theme}"><title>${escape(snapshot.title)}</title><style>${css.replaceAll('</style', '<\\/style')}</style><style>html,body{margin:0;background:${theme === 'dark' ? '#11110d' : '#f5f6f5'}}a{overflow-wrap:anywhere}</style></head><body>${clone.outerHTML}${standaloneImageViewer()}</body></html>`;
   } finally {
     root.unmount();
     host.remove();

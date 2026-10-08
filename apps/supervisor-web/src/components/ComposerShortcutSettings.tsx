@@ -1,30 +1,30 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useAppShellNav } from './AppShellNavContext';
 
 export function ComposerShortcutSettings() {
+  useI18n();
   const nav = useAppShellNav();
   const disabled =
     !nav?.setSendShortcut || nav.sendShortcutLoading || nav.sendShortcutSaving;
   return (
     <fieldset className="py-5">
-      <legend className="text-sm font-semibold">Message shortcuts</legend>
+      <legend className="text-sm font-semibold">{translate("settings.messageShortcuts")}</legend>
       <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-        Saved to your account and applied across devices and browsers. On Mac,
-        Command also works in place of Ctrl.
-      </p>
+        {translate("settings.savedToYourAccountAndAppliedAcross")}</p>
       <div className="mt-3 space-y-2">
         {(
           [
             {
               value: 'ctrlEnter',
-              label: 'Ctrl+Enter to send',
+              label: translate("settings.ctrlEnterToSend"),
               description:
-                'Enter inserts a new line. Ctrl+Shift+Enter sends directly as steer.',
+                translate("settings.enterInsertsANewLineCtrlShift"),
             },
             {
               value: 'enter',
-              label: 'Enter to send',
+              label: translate("settings.enterToSend"),
               description:
-                'Shift+Enter inserts a new line. Ctrl+Enter sends directly as steer.',
+                translate("settings.shiftEnterInsertsANewLineCtrl"),
             },
           ] as const
         ).map((option) => (
@@ -54,12 +54,12 @@ export function ComposerShortcutSettings() {
       </div>
       <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">
         {nav?.sendShortcutSaving
-          ? 'Saving...'
+          ? translate("settings.saving")
           : nav?.sendShortcutLoading
-            ? 'Loading...'
+            ? translate("settings.loading")
             : !nav?.setSendShortcut
-              ? 'Sign in through Relay to change your account shortcuts.'
-              : 'Steer delivers to the running turn immediately. When idle, it starts a new turn.'}
+              ? translate("settings.signInThroughRelayToChangeYour")
+              : translate("settings.steerDeliversToTheRunningTurnImmediately")}
       </p>
       {nav?.sendShortcutError ? (
         <div className="mt-2 text-xs">
@@ -73,8 +73,7 @@ export function ComposerShortcutSettings() {
               void nav.refreshSendShortcut?.();
             }}
           >
-            Retry
-          </button>
+            {translate("settings.retry")}</button>
         </div>
       ) : null}
     </fieldset>

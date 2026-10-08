@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useMemo, type Dispatch, type SetStateAction } from 'react';
 
 import type { ThreadWorkspaceAdapter } from '@remote-codex/thread-ui';
@@ -30,6 +31,7 @@ export function useThreadWorkspaceAdapter({
   access = 'write',
   allowLinkedFiles = false,
 }: UseThreadWorkspaceAdapterInput): ThreadWorkspaceAdapter | null {
+  const { locale: i18nLocale } = useI18n();
   return useMemo<ThreadWorkspaceAdapter | null>(() => {
     if (!workspaceId || access === 'none') {
       return null;
@@ -48,7 +50,7 @@ export function useThreadWorkspaceAdapter({
           const { blob } = isLinked(input.path) && allowLinkedFiles
             ? await downloadLinkedFile(input.threadId, input.path)
             : await downloadWorkspaceFile(workspaceId, { path: input.path });
-          if (blob.size > 8 * 1024 * 1024) throw new Error('Diagram preview supports files up to 8 MiB. Download this file to view it locally.');
+          if (blob.size > 8 * 1024 * 1024) throw new Error(translate("files.diagramPreviewSupportsFilesUpTo8"));
           return { path: input.path, name: input.path.replace(/\\/g, '/').split('/').pop() ?? input.path,
             content: await blob.text(), language: 'xml', size: blob.size, truncated: false, nextOffset: blob.size };
         }
@@ -67,7 +69,7 @@ export function useThreadWorkspaceAdapter({
             renameNode: async (input) => { await renameWorkspaceNode(workspaceId, input); },
             deleteNode: async (input) => { await deleteWorkspaceNode(workspaceId, input.path); },
             writeFile: async (input) => {
-              if (isLinked(input.path)) throw new Error('Linked files are read-only previews.');
+              if (isLinked(input.path)) throw new Error(translate("files.linkedFilesAreReadOnlyPreviews"));
               await writeWorkspaceFile(workspaceId, {
                 path: input.path,
                 content: input.content,
@@ -78,7 +80,7 @@ export function useThreadWorkspaceAdapter({
       downloadNode: async (input) => {
         setError(null);
         try {
-          if (isLinked(input.path) && !allowLinkedFiles) throw new Error('Linked file access is unavailable.');
+          if (isLinked(input.path) && !allowLinkedFiles) throw new Error(translate("files.linkedFileAccessIsUnavailable"));
           const result = isLinked(input.path)
             ? await downloadLinkedFile(input.threadId, input.path)
             : await downloadWorkspaceFile(workspaceId, { path: input.path });
@@ -96,10 +98,10 @@ export function useThreadWorkspaceAdapter({
               ? caught.payload.message
               : caught instanceof Error
                 ? caught.message
-                : 'Workspace download failed.',
+                : translate("files.workspaceDownloadFailed"),
           );
         }
       },
     };
-  }, [access, allowLinkedFiles, setError, workspaceId]);
+  }, [access, allowLinkedFiles, setError, workspaceId, i18nLocale]);
 }

@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import {
   useCallback,
   useEffect,
@@ -66,6 +67,7 @@ export function useThreadAuxiliaryActions({
   setError,
   setThreads,
 }: UseThreadAuxiliaryActionsInput) {
+  useI18n();
   const [skillsState, setSkillsState] = useState<SlashPanelState<ThreadSkillsDto>>(
     idlePanelState,
   );
@@ -126,7 +128,7 @@ export function useThreadAuxiliaryActions({
       const message =
         requestError instanceof ApiError
           ? requestError.payload.message
-          : 'Unable to load export turns.';
+          : translate("workbench.unableToLoadExportTurns");
       setExportTurnsState((current) => ({
         status: 'failed',
         data: current.data,
@@ -166,7 +168,7 @@ export function useThreadAuxiliaryActions({
           ? requestError.payload.message
           : requestError instanceof Error
             ? requestError.message
-            : 'Unable to export transcript.';
+            : translate("workbench.unableToExportTranscript");
       setError(message);
     } finally {
       setExportBusy(false);
@@ -212,7 +214,7 @@ export function useThreadAuxiliaryActions({
         error:
           requestError instanceof ApiError
             ? requestError.payload.message
-            : 'Unable to load goal.',
+            : translate("workbench.unableToLoadGoal"),
       }));
     }
   }
@@ -260,7 +262,7 @@ export function useThreadAuxiliaryActions({
         error:
           requestError instanceof ApiError
             ? requestError.payload.message
-            : 'Unable to update goal.',
+            : translate("workbench.unableToUpdateGoal"),
       }));
       throw requestError;
     }
@@ -305,7 +307,7 @@ export function useThreadAuxiliaryActions({
         error:
           requestError instanceof ApiError
             ? requestError.payload.message
-            : 'Unable to clear goal.',
+            : translate("workbench.unableToClearGoal"),
       }));
       throw requestError;
     }
@@ -356,7 +358,7 @@ export function useThreadAuxiliaryActions({
         error:
           requestError instanceof ApiError
             ? requestError.payload.message
-            : 'Unable to load skills.',
+            : translate("workbench.unableToLoadSkills"),
       }));
     }
   }
@@ -386,7 +388,7 @@ export function useThreadAuxiliaryActions({
         error:
           requestError instanceof ApiError
             ? requestError.payload.message
-            : 'Unable to load MCP servers.',
+            : translate("workbench.unableToLoadMCPServers"),
       }));
     }
   }
@@ -416,7 +418,7 @@ export function useThreadAuxiliaryActions({
         error:
           requestError instanceof ApiError
             ? requestError.payload.message
-            : 'Unable to load hooks.',
+            : translate("workbench.unableToLoadHooks"),
       }));
     }
   }
@@ -446,7 +448,7 @@ export function useThreadAuxiliaryActions({
         error:
           requestError instanceof ApiError
             ? requestError.payload.message
-            : 'Unable to create hook.',
+            : translate("workbench.unableToCreateHook"),
       }));
       throw requestError;
     }
@@ -477,7 +479,7 @@ export function useThreadAuxiliaryActions({
         error:
           requestError instanceof ApiError
             ? requestError.payload.message
-            : 'Unable to update hook.',
+            : translate("workbench.unableToUpdateHook"),
       }));
       throw requestError;
     }
@@ -508,7 +510,7 @@ export function useThreadAuxiliaryActions({
         error:
           requestError instanceof ApiError
             ? requestError.payload.message
-            : 'Unable to trust hook.',
+            : translate("workbench.unableToTrustHook"),
       }));
       throw requestError;
     }
@@ -539,7 +541,7 @@ export function useThreadAuxiliaryActions({
         error:
           requestError instanceof ApiError
             ? requestError.payload.message
-            : 'Unable to untrust hook.',
+            : translate("workbench.unableToUntrustHook"),
       }));
       throw requestError;
     }
@@ -570,7 +572,7 @@ export function useThreadAuxiliaryActions({
         error:
           requestError instanceof ApiError
             ? requestError.payload.message
-            : 'Unable to load turns for forking.',
+            : translate("workbench.unableToLoadTurnsForForking"),
       }));
     }
   }

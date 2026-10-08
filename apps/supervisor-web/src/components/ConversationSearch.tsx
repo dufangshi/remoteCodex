@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
 import {
@@ -23,6 +24,7 @@ export function ConversationSearch({ threadId, turns, open, onOpen, onClose, onS
   onClose: () => void;
   onSelect: (turns: ThreadTurnDto[], turnId: string, itemId: string) => void;
 }) {
+  useI18n();
   const root = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -102,7 +104,7 @@ export function ConversationSearch({ threadId, turns, open, onOpen, onClose, onS
         cache.current.set(normalized, { result, at: Date.now() });
         setRemote({ query: normalized, result });
       } catch (e) {
-        if (!controller.signal.aborted) setError(e instanceof Error ? e.message : 'Search failed.');
+        if (!controller.signal.aborted) setError(e instanceof Error ? e.message : translate("chat.conversationSearch_searchFailed"));
       } finally { if (!controller.signal.aborted) setLoading(false); }
     }, 250);
     return () => { window.clearTimeout(timer); controller.abort(); };
@@ -130,17 +132,17 @@ export function ConversationSearch({ threadId, turns, open, onOpen, onClose, onS
       onSelect([turn], match.turnId, match.itemId);
       close();
     } catch (e) {
-      if (!controller.signal.aborted) setError(e instanceof Error ? e.message : 'Could not open this message.');
+      if (!controller.signal.aborted) setError(e instanceof Error ? e.message : translate("chat.conversationSearch_couldNotOpenThisMessage"));
     } finally { if (!controller.signal.aborted) setSelecting(false); }
   };
 
   return <div ref={root} className={`workbench-search ${open ? 'is-open' : ''}`}>
-    {!open ? <button ref={trigger} className="matter-search-trigger" aria-label="Search conversation" onClick={onOpen}>
-      <Search /><span>Search conversation</span>
+    {!open ? <button ref={trigger} className="matter-search-trigger" aria-label={translate("chat.conversationSearch_searchConversation")} onClick={onOpen}>
+      <Search /><span>{translate("chat.conversationSearch_searchConversation")}</span>
     </button> : <>
       <div className="workbench-search-field">
         <Search size={16} aria-hidden="true" />
-        <input ref={input} role="combobox" aria-label="Search messages" placeholder="Search conversation…"
+        <input ref={input} role="combobox" aria-label={translate("chat.conversationSearch_searchMessages")} placeholder={translate("chat.conversationSearch_searchConversation_b2cb99")}
           aria-autocomplete="list" aria-expanded={!!normalized} aria-controls={normalized ? listId : undefined}
           aria-activedescendant={normalized && matches[active] ? `${listId}-${active}` : undefined}
           value={query} maxLength={200} onChange={event => setQuery(event.target.value)}
@@ -153,14 +155,14 @@ export function ConversationSearch({ threadId, turns, open, onOpen, onClose, onS
               event.preventDefault(); void select(matches[active]);
             }
           }} />
-        <button type="button" aria-label="Close search" onClick={close}><X size={16} /></button>
+        <button type="button" aria-label={translate("chat.conversationSearch_closeSearch")} onClick={close}><X size={16} /></button>
       </div>
-      {(normalized || error) && <div className="workbench-search-dropdown" aria-label="Conversation search results">
-        <p role="status">{selecting ? 'Opening message…' : loading
-          ? `${matches.length ? `${matches.length} matches · ` : ''}Searching older messages…`
-          : `${matches.length}${remote?.query === normalized && remote.result.hasMore ? '+' : ''} matching messages`}</p>
+      {(normalized || error) && <div className="workbench-search-dropdown" aria-label={translate("chat.conversationSearch_conversationSearchResults")}>
+        <p role="status">{selecting ? translate("chat.conversationSearch_openingMessage") : loading
+          ? translate("chat.conversationSearch_searchingOlderMessages", { value1: matches.length ? translate("chat.matches", { value1: matches.length }) : '' })
+          : translate("chat.conversationSearch_matchingMessages", { value1: matches.length, value2: remote?.query === normalized && remote.result.hasMore ? '+' : '' })}</p>
         {error && <p role="alert">{error}</p>}
-        <div id={listId} className="workbench-search-results" role="listbox" aria-label="Matching messages">
+        <div id={listId} className="workbench-search-results" role="listbox" aria-label={translate("chat.conversationSearch_matchingMessages_f5412f")}>
           {matches.map((match, index) => {
             const found = match.text.toLowerCase().indexOf(normalized);
             const start = Math.max(0, found - 80);
@@ -169,14 +171,14 @@ export function ConversationSearch({ threadId, turns, open, onOpen, onClose, onS
               aria-selected={index === active} disabled={selecting}
               onMouseEnter={() => setActive(index)} onMouseDown={event => event.preventDefault()}
               onClick={() => void select(match)}>
-              <strong>{match.role}</strong><p>{start > 0 ? '…' : ''}{match.text.slice(start, found)}
+              <strong>{match.role === 'You' || match.role === 'user' ? translate('chat.searchUserRole') : match.role === 'Assistant' || match.role === 'assistant' ? translate('chat.searchAssistantRole') : match.role}</strong><p>{start > 0 ? '…' : ''}{match.text.slice(start, found)}
                 <mark>{match.text.slice(found, finish)}</mark>{match.text.slice(finish, finish + 180)}
                 {match.text.length > finish + 180 ? '…' : ''}</p>
             </button>;
           })}
         </div>
-        {!loading && !error && !matches.length && <p>No matching messages.</p>}
-        {remote?.query === normalized && remote.result.hasMore && <p>Showing the first 50 matches. Refine your search for more.</p>}
+        {!loading && !error && !matches.length && <p>{translate("chat.conversationSearch_noMatchingMessages")}</p>}
+        {remote?.query === normalized && remote.result.hasMore && <p>{translate("chat.conversationSearch_showingTheFirst50MatchesRefineYour")}</p>}
       </div>}
     </>}
   </div>;

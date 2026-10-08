@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useEffect, useRef } from 'react';
 import { MonitorSmartphone, Menu, Settings, X } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -8,6 +9,7 @@ import { relayModeActive } from '../lib/api';
 export { AppShellSettingsDialog } from './AppShellSettingsDialog';
 
 export function AppShellMenuButton({ className = '' }: { className?: string }) {
+  const { locale: i18nLocale } = useI18n();
   const shellNav = useAppShellNav();
 
   if (!shellNav) {
@@ -17,7 +19,7 @@ export function AppShellMenuButton({ className = '' }: { className?: string }) {
   return (
     <button
       type="button"
-      aria-label={shellNav.navOpen ? 'Close Navigation' : 'Open Navigation'}
+      aria-label={shellNav.navOpen ? translate("files.closeNavigation") : translate("files.openNavigation")}
       aria-expanded={shellNav.navOpen}
       aria-controls="app-shell-navigation-menu"
       onClick={shellNav.toggleNav}
@@ -37,6 +39,7 @@ export function AppShellNavigationMenu({
 }: {
   className?: string;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const shellNav = useAppShellNav();
   const location = useLocation();
   const navigate = useNavigate();
@@ -114,7 +117,7 @@ export function AppShellNavigationMenu({
       className={`w-64 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-2 shadow-[var(--theme-shadow)] ${className}`.trim()}
     >
       <nav
-        aria-label="Supervisor navigation"
+        aria-label={translate("files.supervisorNavigation")}
         className="flex flex-col gap-0.5 text-sm"
       >
         {relayModeActive() && (
@@ -129,8 +132,7 @@ export function AppShellNavigationMenu({
             )}
           >
             <MonitorSmartphone aria-hidden="true" className="h-4 w-4" />
-            Device management
-          </button>
+            {translate("files.deviceManagement")}</button>
         )}
         <button
           type="button"
@@ -140,8 +142,7 @@ export function AppShellNavigationMenu({
           className={menuItemClassName()}
         >
           <Settings aria-hidden="true" className="h-4 w-4" />
-          Settings
-        </button>
+          {translate("files.settings")}</button>
       </nav>
     </div>
   );

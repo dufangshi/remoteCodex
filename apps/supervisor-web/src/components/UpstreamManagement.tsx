@@ -1,3 +1,5 @@
+import { getLocale } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useEffect, useRef, useState } from 'react';
 import {
   Plus,
@@ -59,7 +61,7 @@ function snapshot(value: Snapshot) {
     !value?.active
   )
     throw Error(
-      'Update this Supervisor to enable upstream and template management.',
+      translate("settings.updateThisSupervisorToEnableUpstreamAnd"),
     );
   return value;
 }
@@ -85,6 +87,7 @@ export function UpstreamManagement({
   harness?: string;
   templatesOnly?: boolean;
 }) {
+  useI18n();
   const [deleting, setDeleting] = useState<Profile | null>(null);
   const [data, setData] = useState<Snapshot>({
     profiles: [],
@@ -137,7 +140,7 @@ export function UpstreamManagement({
       .catch(() => {
         if (alive)
           setError(
-            'Update this Supervisor to enable upstream and template management.',
+            translate("settings.updateThisSupervisorToEnableUpstreamAnd"),
           );
       });
     return () => {
@@ -175,7 +178,7 @@ export function UpstreamManagement({
       await action();
     } catch (e) {
       setError(
-        e instanceof Error ? e.message : 'Unable to save upstream settings',
+        e instanceof Error ? e.message : translate("settings.unableToSaveUpstreamSettings"),
       );
     } finally {
       setBusy(false);
@@ -207,7 +210,7 @@ export function UpstreamManagement({
     a.click();
     URL.revokeObjectURL(url);
     setNotice(
-      'Template exported without API keys. Fill them in before importing on another device.',
+      translate("settings.templateExportedWithoutAPIKeysFillThem"),
     );
   }
   function openImport(next: 'config' | 'template') {
@@ -220,19 +223,17 @@ export function UpstreamManagement({
   return (
     <section
       className="mt-6 border-t border-[var(--theme-border)] pt-5"
-      aria-label={templatesOnly ? 'Device templates' : 'Upstream management'}
+      aria-label={templatesOnly ? translate("settings.deviceTemplates") : translate("settings.upstreamManagement")}
     >
       {!templatesOnly && (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-semibold">
-                {harness ? `${labels[harness]} upstreams` : 'Upstreams'}
+                {harness ? translate("settings.upstreams", { value1: labels[harness] }) : translate("settings.upstreams_8b39d6")}
               </h3>
               <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-                Saved on this device. Switch providers without opening its
-                terminal.
-              </p>
+                {translate("settings.savedOnThisDeviceSwitchProvidersWithout")}</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <button
@@ -241,8 +242,7 @@ export function UpstreamManagement({
                 onClick={() => openImport('config')}
               >
                 <Upload size={14} />
-                Import config
-              </button>
+                {translate("settings.importConfig")}</button>
               <button
                 className={button}
                 disabled={!loaded || disabled}
@@ -251,16 +251,13 @@ export function UpstreamManagement({
                 }
               >
                 <Plus size={14} />
-                Add upstream
-              </button>
+                {translate("settings.addUpstream")}</button>
             </div>
           </div>
           {loaded &&
             !data.profiles.some((p) => !harness || p.harness === harness) && (
               <p className="my-5 rounded-lg border border-dashed border-[var(--theme-border)] p-4 text-sm text-[var(--theme-fg-muted)]">
-                Add an API provider or import an existing configuration to get
-                started.
-              </p>
+                {translate("settings.addAnAPIProviderOrImportAn")}</p>
             )}
           <div className="mt-3 space-y-3">
             {data.profiles
@@ -277,8 +274,7 @@ export function UpstreamManagement({
                         {data.active[p.harness] === p.id && (
                           <span className="inline-flex items-center gap-1 text-xs text-[var(--theme-accent-strong)]">
                             <Check size={13} />
-                            Active
-                          </span>
+                            {translate("settings.active")}</span>
                         )}
                       </h4>
                       <p className="mt-1 break-all text-xs text-[var(--theme-fg-muted)]">
@@ -291,7 +287,7 @@ export function UpstreamManagement({
                     <button
                       className={button}
                       disabled={disabled}
-                      aria-label={`Duplicate ${p.name}`}
+                      aria-label={translate("settings.duplicate", { value1: p.name })}
                       onClick={() => setEditor({ ...p, id: '', apiKey: '' })}
                     >
                       <Copy size={13} />
@@ -308,17 +304,16 @@ export function UpstreamManagement({
                           });
                           await load();
                           setNotice(
-                            `${labels[p.harness]} configuration applied. Idle sessions were restarted; the next turn uses this upstream.`,
+                            translate("settings.configurationAppliedIdleSessionsWereRestartedThe", { value1: labels[p.harness] }),
                           );
                         })
                       }
                     >
-                      Use upstream
-                    </button>
+                      {translate("settings.useUpstream")}</button>
                     <button
                       className={button}
                       disabled={disabled}
-                      title="Sends a small request using this model; API charges may apply"
+                      title={translate("settings.sendsASmallRequestUsingThisModel")}
                       onClick={() =>
                         void perform(async () => {
                           const r = await api<{ latencyMs: number }>(
@@ -326,25 +321,23 @@ export function UpstreamManagement({
                             { action: 'test' },
                           );
                           setNotice(
-                            `${p.name}: connection succeeded (${r.latencyMs} ms).`,
+                            translate("settings.connectionSucceededMs", { value1: p.name, value2: r.latencyMs }),
                           );
                         })
                       }
                     >
                       <FlaskConical size={13} />
-                      Test connection
-                    </button>
+                      {translate("settings.testConnection")}</button>
                     <button
                       className={button}
                       disabled={disabled || data.active[p.harness] === p.id}
                       onClick={() => setEditor({ ...p, apiKey: '' })}
                     >
-                      Edit
-                    </button>
+                      {translate("settings.edit")}</button>
                     <button
                       className={button}
                       disabled={disabled}
-                      aria-label={`Delete ${p.name}`}
+                      aria-label={translate("settings.delete", { value1: p.name })}
                       onClick={() => setDeleting(p)}
                     >
                       <Trash2 size={13} />
@@ -354,15 +347,11 @@ export function UpstreamManagement({
               ))}
           </div>
           <p className="mt-3 text-xs leading-5 text-[var(--theme-fg-muted)]">
-            Switch after current tasks finish. Existing MCP and skill settings
-            are preserved. Connection tests send a small model request and may
-            incur API charges.
-          </p>
+            {translate("settings.switchAfterCurrentTasksFinishExistingMCP")}</p>
           {!!data.backups.length && (
             <details className="mt-3 text-xs">
               <summary className="cursor-pointer py-2">
-                Configuration backups
-              </summary>
+                {translate("settings.configurationBackups")}</summary>
               {Object.keys(labels)
                 .filter((h) => !harness || h === harness)
                 .map((h) => {
@@ -376,7 +365,7 @@ export function UpstreamManagement({
                         className="flex flex-wrap items-center justify-between gap-2 py-2"
                       >
                         <span>
-                          {labels[h]} · {new Date(b.createdAt).toLocaleString()}
+                          {labels[h]} · {new Date(b.createdAt).toLocaleString(getLocale())}
                         </span>
                         <button
                           className={button}
@@ -388,14 +377,13 @@ export function UpstreamManagement({
                               });
                               await load();
                               setNotice(
-                                'Previous configuration restored. The next turn reloads it.',
+                                translate("settings.previousConfigurationRestoredTheNextTurnReloads"),
                               );
                             })
                           }
                         >
                           <RotateCcw size={13} />
-                          Restore previous
-                        </button>
+                          {translate("settings.restorePrevious")}</button>
                       </div>
                     )
                   );
@@ -407,10 +395,9 @@ export function UpstreamManagement({
       {templatesOnly && (
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-semibold">Device templates</h3>
+            <h3 className="text-sm font-semibold">{translate("settings.deviceTemplates")}</h3>
             <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-              Install harnesses and configure their upstreams together.
-            </p>
+              {translate("settings.installHarnessesAndConfigureTheirUpstreamsTogether")}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button
@@ -419,16 +406,14 @@ export function UpstreamManagement({
               onClick={() => openImport('template')}
             >
               <Upload size={14} />
-              Import template
-            </button>
+              {translate("settings.importTemplate")}</button>
             <button
               className={button}
               disabled={!loaded || disabled || !Object.keys(data.active).length}
               onClick={download}
             >
               <Download size={14} />
-              Export template
-            </button>
+              {translate("settings.exportTemplate")}</button>
           </div>
         </div>
       )}
@@ -436,16 +421,16 @@ export function UpstreamManagement({
         <FormDialog
           title={
             data.active[deleting.harness] === deleting.id
-              ? 'Deactivate and delete upstream'
-              : 'Delete upstream'
+              ? translate("settings.deactivateAndDeleteUpstream")
+              : translate("settings.deleteUpstream")
           }
           onClose={() => setDeleting(null)}
           busy={busy}
         >
           <p className="text-sm leading-6">
             {data.active[deleting.harness] === deleting.id
-              ? 'This restores the native configuration from before managed upstreams were enabled. Running tasks must finish first. Other saved upstreams remain available.'
-              : 'Remove this saved upstream from the device.'}
+              ? translate("settings.thisRestoresTheNativeConfigurationFromBefore")
+              : translate("settings.removeThisSavedUpstreamFromTheDevice")}
           </p>
           <p className="my-3 text-sm font-medium">{deleting.name}</p>
           {error && (
@@ -464,11 +449,11 @@ export function UpstreamManagement({
                 await api(`upstreams/${deleting.id}`, undefined, 'DELETE');
                 await load();
                 setDeleting(null);
-                setNotice('Upstream removed.');
+                setNotice(translate("settings.upstreamRemoved"));
               })
             }
           >
-            {busy ? 'Removing…' : 'Delete upstream'}
+            {busy ? translate("settings.removing") : translate("settings.deleteUpstream")}
           </button>
         </FormDialog>
       )}
@@ -476,8 +461,8 @@ export function UpstreamManagement({
         <div role={job.error ? 'alert' : 'status'} className="mt-3 text-xs">
           <p>
             {job.state === 'running'
-              ? 'Installing and configuring this device…'
-              : (job.error ?? 'Template applied. This device is ready.')}
+              ? translate("settings.installingAndConfiguringThisDevice")
+              : (job.error ?? translate("settings.templateAppliedThisDeviceIsReady"))}
           </p>
           {job.completed?.map((v) => (
             <p key={v}>{v}</p>
@@ -499,7 +484,7 @@ export function UpstreamManagement({
       )}
       {editor && (
         <FormDialog
-          title={editor.id ? 'Edit upstream' : 'Add upstream'}
+          title={editor.id ? translate("settings.editUpstream") : translate("settings.addUpstream")}
           onClose={() => setEditor(null)}
           busy={busy}
         >
@@ -520,8 +505,7 @@ export function UpstreamManagement({
             }}
           >
             <label className="block text-sm">
-              Name
-              <input
+              {translate("settings.name")}<input
                 className={field}
                 required
                 value={editor.name}
@@ -545,8 +529,7 @@ export function UpstreamManagement({
               </select>
             </label>
             <label className="block text-sm">
-              Base URL
-              <input
+              {translate("settings.baseURL")}<input
                 className={field}
                 type="url"
                 required
@@ -558,14 +541,13 @@ export function UpstreamManagement({
               />
             </label>
             <label className="block text-sm">
-              API key
-              <input
+              {translate("settings.aPIKey")}<input
                 className={field}
                 type="password"
                 autoComplete="off"
                 placeholder={
                   editor.id && editor.hasApiKey
-                    ? 'Leave empty to keep the saved key'
+                    ? translate("settings.leaveEmptyToKeepTheSavedKey")
                     : ''
                 }
                 required={!editor.id || !editor.hasApiKey}
@@ -591,8 +573,7 @@ export function UpstreamManagement({
             />
             {editor.harness === 'claude' && (
               <label className="block text-sm">
-                Authentication
-                <select
+                {translate("settings.authentication")}<select
                   className={field}
                   value={editor.authType ?? 'api_key'}
                   onChange={(e) =>
@@ -603,16 +584,15 @@ export function UpstreamManagement({
                     })
                   }
                 >
-                  <option value="api_key">API key (x-api-key)</option>
-                  <option value="bearer">Bearer token</option>
+                  <option value="api_key">{translate("settings.aPIKeyXApiKey")}</option>
+                  <option value="bearer">{translate("settings.bearerToken")}</option>
                 </select>
               </label>
             )}
             {editor.harness === 'grok' && (
               <>
                 <label className="block text-sm">
-                  API format
-                  <select
+                  {translate("settings.aPIFormat")}<select
                     className={field}
                     value={editor.apiType}
                     onChange={(e) =>
@@ -620,12 +600,11 @@ export function UpstreamManagement({
                     }
                   >
                     <option value="responses">Responses</option>
-                    <option value="chat_completions">Chat completions</option>
+                    <option value="chat_completions">{translate("settings.chatCompletions")}</option>
                   </select>
                 </label>
                 <label className="block text-sm">
-                  Context window
-                  <input
+                  {translate("settings.contextWindow")}<input
                     type="number"
                     min="1"
                     className={field}
@@ -653,7 +632,7 @@ export function UpstreamManagement({
               disabled={busy || !editor.model}
               type="submit"
             >
-              {busy ? 'Saving…' : 'Save upstream'}
+              {busy ? translate("settings.saving_56a228") : translate("settings.saveUpstream")}
             </button>
           </form>
         </FormDialog>
@@ -662,8 +641,8 @@ export function UpstreamManagement({
         <FormDialog
           title={
             mode === 'config'
-              ? 'Import upstream configuration'
-              : 'Import device template'
+              ? translate("settings.importUpstreamConfiguration")
+              : translate("settings.importDeviceTemplate")
           }
           onClose={() => setMode(null)}
           busy={busy}
@@ -686,16 +665,14 @@ export function UpstreamManagement({
                   </select>
                 </label>
                 <label className="block text-sm">
-                  Name
-                  <input
+                  {translate("settings.name")}<input
                     className={field}
                     value={importName}
                     onChange={(e) => setImportName(e.target.value)}
                   />
                 </label>
                 <label className="block text-sm">
-                  API key (if absent from the file)
-                  <input
+                  {translate("settings.aPIKeyIfAbsentFromTheFile")}<input
                     type="password"
                     autoComplete="off"
                     className={field}
@@ -704,9 +681,7 @@ export function UpstreamManagement({
                   />
                 </label>
                 <p className="text-xs text-[var(--theme-fg-muted)]">
-                  Paste native TOML/JSON or a CC Switch provider settingsConfig.
-                  Only provider fields are imported.
-                </p>
+                  {translate("settings.pasteNativeTOMLJSONOrACC")}</p>
               </>
             )}
             <input
@@ -718,7 +693,7 @@ export function UpstreamManagement({
                 const f = e.target.files?.[0];
                 if (f) {
                   if (f.size > 256000) {
-                    setError('Configuration must be smaller than 256 KB.');
+                    setError(translate("settings.configurationMustBeSmallerThan256KB"));
                     return;
                   }
                   void f.text().then((v) => {
@@ -730,10 +705,9 @@ export function UpstreamManagement({
             />
             <button className={button} onClick={() => file.current?.click()}>
               <Upload size={14} />
-              Choose file
-            </button>
+              {translate("settings.chooseFile")}</button>
             <textarea
-              aria-label="Configuration JSON or TOML"
+              aria-label={translate("settings.configurationJSONOrTOML")}
               className={`${field} min-h-56 font-mono text-xs`}
               value={text}
               onChange={(e) => {
@@ -744,19 +718,17 @@ export function UpstreamManagement({
             {preview && (
               <div className="rounded-md border border-[var(--theme-border)] p-3 text-xs">
                 <p>
-                  Install if missing: {preview.harnesses.join(', ') || 'none'}
+                  {translate("settings.installIfMissing")} {preview.harnesses.join(', ') || translate("settings.none")}
                 </p>
                 {preview.profiles.map((p) => (
                   <p className="mt-2 break-all" key={p.harness}>
-                    {p.name} · {labels[p.harness]} · {p.model || '自动探测模型'}
+                    {p.name} · {labels[p.harness]} · {p.model || translate("settings.message")}
                     <br />
                     {p.baseUrl}
                   </p>
                 ))}
                 <p className="mt-2">
-                  Each completed step is retained if a later step fails.
-                  Existing configuration is backed up before switching.
-                </p>
+                  {translate("settings.eachCompletedStepIsRetainedIfA")}</p>
               </div>
             )}
             {error && (
@@ -800,12 +772,12 @@ export function UpstreamManagement({
               }
             >
               {busy
-                ? 'Working…'
+                ? translate("settings.working")
                 : mode === 'config'
-                  ? 'Import upstream'
+                  ? translate("settings.importUpstream")
                   : preview
-                    ? 'Apply template'
-                    : 'Preview template'}
+                    ? translate("settings.applyTemplate")
+                    : translate("settings.previewTemplate")}
             </button>
           </div>
         </FormDialog>

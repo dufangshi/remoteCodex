@@ -1,3 +1,5 @@
+import { LanguageSwitcher } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {
@@ -6,6 +8,7 @@ import {
 } from '@remote-codex/thread-ui';
 
 export function PublicThreadPage() {
+  useI18n();
   const { id } = useParams();
   const [snapshot, setSnapshot] = useState<PublicTranscriptSnapshot | null>(
     null,
@@ -30,8 +33,8 @@ export function PublicThreadPage() {
         if (!response.ok)
           throw new Error(
             response.status === 404
-              ? 'This share link is unavailable or has been revoked.'
-              : 'Unable to load this shared thread.',
+              ? translate("sharing.thisShareLinkIsUnavailableOrHas")
+              : translate("sharing.unableToLoadThisSharedThread"),
           );
         const value: PublicTranscriptSnapshot = await response.json();
         if (controller.signal.aborted) return;
@@ -41,7 +44,7 @@ export function PublicThreadPage() {
       } catch (error) {
         if (!controller.signal.aborted) {
           setSnapshot(null);
-          setError(error instanceof Error ? error.message : 'Unable to load this shared thread.');
+          setError(error instanceof Error ? error.message : translate("sharing.unableToLoadThisSharedThread"));
           timer = setTimeout(refresh, 5000);
         }
       }
@@ -70,11 +73,12 @@ export function PublicThreadPage() {
   }, [snapshot]);
   return (
     <div className="thread-ui-shell public-thread-page min-h-screen bg-[var(--theme-bg)] text-[var(--theme-fg)]">
+      <div className="px-4 py-3"><LanguageSwitcher /></div>
       {snapshot ? (
         <PublicTranscript snapshot={snapshot} />
       ) : (
         <p role="status" className="p-8 text-center">
-          {error || 'Loading shared thread…'}
+          {error || translate("sharing.loadingSharedThread")}
         </p>
       )}
     </div>

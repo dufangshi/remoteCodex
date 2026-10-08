@@ -1,3 +1,4 @@
+import { getLocale, translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import workerUrl from './relayServiceWorker.ts?worker&url';
 import {
   exchange,
@@ -26,7 +27,7 @@ export function probeDeviceEncryption(deviceId: string): Promise<void> {
         new URL(`/relay/devices/${encodeURIComponent(deviceId)}/api/version`, window.location.href),
         { credentials: 'same-origin', signal: controller.signal },
       ));
-      if (!response.ok) throw new Error('Device encryption check failed');
+      if (!response.ok) throw new Error(translate("workbench.deviceEncryptionCheckFailed"));
     } catch {
       // report() preserves identity-change warnings, including those emitted
       // by the handshake. Unreachable devices must never be called plaintext.
@@ -68,7 +69,7 @@ let workerReady: Promise<void> | undefined;
 export async function ensureRelayWorker() {
   if (!navigator.serviceWorker || !window.isSecureContext)
     throw new Error(
-      'HTTPS and service worker support are required for encrypted device files.',
+      translate("workbench.hTTPSAndServiceWorkerSupportAreRequired"),
     );
   workerReady ??= (async () => {
     await navigator.serviceWorker.register(workerUrl, {
@@ -85,7 +86,7 @@ export async function ensureRelayWorker() {
           );
           fail(
             new Error(
-              'Encrypted file routing could not start. Reload this page.',
+              translate("workbench.encryptedFileRoutingCouldNotStartReload"),
             ),
           );
         }, 10000);
@@ -102,6 +103,7 @@ export async function ensureRelayWorker() {
   })();
   try {
     await workerReady;
+    navigator.serviceWorker.controller?.postMessage({ type: 'remote-codex-locale', locale: getLocale() });
     return await navigator.serviceWorker.ready;
   } catch (e) {
     workerReady = undefined;
@@ -136,7 +138,7 @@ class EncryptedRelaySocket extends EventTarget {
     try {
       const url = new URL(this.url),
         deviceId = url.pathname.match(/\/devices\/([^/]+)\/ws$/)?.[1];
-      if (!deviceId) throw new Error('Select a device before connecting.');
+      if (!deviceId) throw new Error(translate("workbench.selectADeviceBeforeConnecting"));
       const threadId = url.searchParams.get('threadId');
       const prefix = `/relay/devices/${deviceId}/api${threadId ? `/threads/${encodeURIComponent(threadId)}` : ''}`;
       const request = new Request(
@@ -156,7 +158,7 @@ class EncryptedRelaySocket extends EventTarget {
       );
       if (result.sendKey && result.receiveKey) {
         if (!result.response.ok)
-          throw new Error('Encrypted session could not start.');
+          throw new Error(translate("workbench.encryptedSessionCouldNotStart"));
         const { channelId } = (await result.response.json()) as {
           channelId: string;
         };
@@ -169,7 +171,7 @@ class EncryptedRelaySocket extends EventTarget {
       } else if (
         getTransportStatus(decodeURIComponent(deviceId))?.state !== 'legacy'
       )
-        throw new Error('Encrypted session could not start.');
+        throw new Error(translate("workbench.encryptedSessionCouldNotStart"));
       if (this.readyState !== WebSocket.CONNECTING) return;
       const socket = new WebSocket(url);
       this.socket = socket;
@@ -199,11 +201,11 @@ class EncryptedRelaySocket extends EventTarget {
               : event.data;
             this.dispatchEvent(new MessageEvent('message', { data }));
           })
-          .catch(() => this.fail('Encrypted event could not be verified.'));
+          .catch(() => this.fail(translate("workbench.eventVerificationFailed")));
       });
     } catch (error) {
       this.fail(
-        error instanceof Error ? error.message : 'Encrypted connection failed.',
+        error instanceof Error ? error.message : translate("workbench.encryptedConnectionFailed"),
       );
     }
   }
@@ -220,7 +222,7 @@ class EncryptedRelaySocket extends EventTarget {
         if (this.socket?.readyState === WebSocket.OPEN)
           this.socket.send(payload);
       })
-      .catch(() => this.fail('Encrypted event could not be sent.'));
+      .catch(() => this.fail(translate("workbench.eventSendFailed")));
   }
   close(code = 1000, reason = '') {
     if (this.readyState === WebSocket.CLOSED) return;

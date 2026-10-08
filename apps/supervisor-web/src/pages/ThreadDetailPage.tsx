@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { DeviceMonitor } from '../components/DeviceMonitor';
 import { HarnessSettingsDialog } from '../components/HarnessSettingsDialog';
 import { ConversationSearch } from '../components/ConversationSearch';
@@ -215,18 +216,18 @@ function actionErrorMessage(caught: unknown, fallback: string) {
 }
 
 function relayThreadAccessLabel(access: RelayEffectiveAccessDto['threadAccess']) {
-  return access === 'read' ? 'View only' : 'Collaborator';
+  return access === 'read' ? translate("workbench.viewOnly") : translate("workbench.collaborator");
 }
 
 function relayWorkspaceAccessLabel(access: RelayEffectiveAccessDto['workspaceAccess']) {
   switch (access) {
     case 'write':
-      return 'Workspace write';
+      return translate("workbench.workspaceWrite");
     case 'read':
-      return 'Workspace read';
+      return translate("workbench.workspaceRead");
     case 'none':
     default:
-      return 'No workspace';
+      return translate("workbench.noWorkspace");
   }
 }
 
@@ -349,6 +350,7 @@ function relativeWorkspaceLinkPath(path: string, workspaceAbsPath: string) {
 }
 
 function CopyIcon() {
+  const { locale: i18nLocale } = useI18n();
   return (
     <svg
       aria-hidden="true"
@@ -362,22 +364,23 @@ function CopyIcon() {
 
 function threadConnectionSummary(isLoaded: boolean, connection: RealtimeConnectionSnapshot) {
   if (!isLoaded) {
-    return 'Thread disconnected';
+    return translate("workbench.threadDisconnected");
   }
 
   switch (connection.status) {
     case 'connected':
-      return 'Realtime updates connected';
+      return translate("workbench.realtimeUpdatesConnected");
     case 'reconnecting':
-      return 'Realtime updates reconnecting';
+      return translate("workbench.realtimeUpdatesReconnecting");
     case 'offline':
-      return 'Browser offline';
+      return translate("workbench.browserOffline");
     case 'checking':
-      return 'Checking realtime connection';
+      return translate("workbench.checkingRealtimeConnection");
   }
 }
 
 export function ThreadDetailPage() {
+  const { locale: i18nLocale } = useI18n();
   const { id = '' } = useParams();
   const activeThreadIdRef = useRef(id);
   activeThreadIdRef.current = id;
@@ -701,7 +704,7 @@ export function ThreadDetailPage() {
       setThreadShareState((current) => ({
         ...current,
         status: 'failed',
-        error: actionErrorMessage(caught, 'Unable to load active shares.'),
+        error: actionErrorMessage(caught, translate("workbench.unableToLoadActiveShares")),
       }));
     }
   }, [detailRef]);
@@ -713,7 +716,7 @@ export function ThreadDetailPage() {
         setThreadShareState((current) => ({
           ...current,
           status: 'failed',
-          error: 'Relay sharing is only available from a relay device route.',
+          error: translate("workbench.relaySharingIsOnlyAvailableFromA"),
         }));
         return;
       }
@@ -728,7 +731,7 @@ export function ThreadDetailPage() {
         setThreadShareState((current) => ({
           ...current,
           status: 'failed',
-          error: 'This thread is not attached to a workspace.',
+          error: translate("workbench.thisThreadIsNotAttachedToA"),
         }));
         return;
       }
@@ -756,7 +759,7 @@ export function ThreadDetailPage() {
         });
         await loadThreadShares();
       } catch (caught) {
-        const message = actionErrorMessage(caught, 'Unable to create share.');
+        const message = actionErrorMessage(caught, translate("workbench.unableToCreateShare"));
         setThreadShareState((current) => ({
           ...current,
           status: 'failed',
@@ -786,7 +789,7 @@ export function ThreadDetailPage() {
       });
       await loadThreadShares();
     } catch (caught) {
-      setThreadShareState(current => ({...current, status:'failed', error:actionErrorMessage(caught, 'Unable to update permissions.')}));
+      setThreadShareState(current => ({...current, status:'failed', error:actionErrorMessage(caught, translate("workbench.unableToUpdatePermissions"))}));
       throw caught;
     } finally {setShareBusy(false);}
   }, [detailRef, loadThreadShares]);
@@ -801,7 +804,7 @@ export function ThreadDetailPage() {
       else await revokeRelayShare(shareId);
       await loadThreadShares();
     } catch (caught) {
-      const message = actionErrorMessage(caught, 'Unable to revoke share.');
+      const message = actionErrorMessage(caught, translate("workbench.unableToRevokeShare"));
       setThreadShareState((current) => ({
         ...current,
         status: 'failed',
@@ -856,7 +859,7 @@ export function ThreadDetailPage() {
         setRelayAccessState({
           status: 'failed',
           access: null,
-          error: actionErrorMessage(caught, 'Unable to verify relay permissions.'),
+          error: actionErrorMessage(caught, translate("workbench.unableToVerifyRelayPermissions")),
         });
       });
 
@@ -1329,7 +1332,7 @@ export function ThreadDetailPage() {
         setError(
           caught instanceof Error
             ? caught.message
-            : 'Unable to load thread detail.',
+            : translate("workbench.unableToLoadThreadDetail"),
         );
       } finally {
         if (loadRequestIdRef.current === requestId) {
@@ -1407,7 +1410,7 @@ export function ThreadDetailPage() {
     let cancelled = false;
     setAutoConnectingRoute(routeKey);
     void pending.catch((caught) => {
-      if (!cancelled) setError(caught instanceof Error ? caught.message : 'Unable to connect to this thread.');
+      if (!cancelled) setError(caught instanceof Error ? caught.message : translate("workbench.unableToConnectToThisThread"));
     }).finally(() => {
       if (!cancelled) setAutoConnectingRoute(null);
     });
@@ -1744,7 +1747,7 @@ export function ThreadDetailPage() {
       }
 
       if (event.type === 'thread.persistence.failed') {
-        setError(String(event.payload.message ?? 'Unable to save output.'));
+        setError(String(event.payload.message ?? translate("workbench.unableToSaveOutput")));
       }
       if (event.type === 'thread.updated' && Array.isArray(event.payload.pendingSteers)) {
         const pendingSteers = event.payload.pendingSteers as ThreadDetailDto['pendingSteers'];
@@ -1870,7 +1873,7 @@ export function ThreadDetailPage() {
               typeof event.payload.error === 'string'
                 ? event.payload.error
                 : event.type === 'thread.turn.failed'
-                  ? 'Unable to complete the turn.'
+                  ? translate("workbench.unableToCompleteTheTurn")
                   : null;
             setDetail((current) =>
               current
@@ -2220,7 +2223,7 @@ export function ThreadDetailPage() {
       setError(
         caught instanceof Error
           ? caught.message
-          : 'Unable to load earlier turns.',
+          : translate("workbench.unableToLoadEarlierTurns"),
       );
     } finally {
       setLoadingEarlier(false);
@@ -2246,7 +2249,7 @@ export function ThreadDetailPage() {
           attemptedShellConnection = true;
         }
         if (shellControlState?.isConnecting === true) {
-          setError('Connecting to the shell. Try again after it attaches.');
+          setError(translate("workbench.connectingToTheShellTryAgainAfter"));
           return false;
         }
       }
@@ -2255,8 +2258,8 @@ export function ThreadDetailPage() {
       if (!sent) {
         setError(
           attemptedShellConnection
-            ? 'Shell is still attaching. Try again after it connects.'
-            : 'Connect the shell before sending commands.',
+            ? translate("workbench.shellIsStillAttachingTryAgainAfter")
+            : translate("workbench.connectTheShellBeforeSendingCommands"),
         );
         return false;
       } else {
@@ -2270,12 +2273,12 @@ export function ThreadDetailPage() {
       return false;
     }
     if ((input.attachments?.length ?? 0) > 10) {
-      setError('A prompt can include at most 10 attachments. Remove extra attachments and try again. Your draft has been kept.');
+      setError(translate("workbench.aPromptCanIncludeAtMost10"));
       return false;
     }
     if (input.delivery === 'steer' && detailRef.current?.thread.status === 'running'
       && backendCapabilities?.turns.steer === false) {
-      setError('This backend does not support steering an active turn. Send the message normally to queue it.');
+      setError(translate("workbench.thisBackendDoesNotSupportSteeringAn"));
       return false;
     }
 
@@ -2496,7 +2499,7 @@ export function ThreadDetailPage() {
         } catch (caught) {
           // Acceptance succeeded. Keep the durable message and clear the draft,
           // rather than inviting a second submission of the same prompt.
-          setError(`Message saved, but steer could not be confirmed: ${caught instanceof Error ? caught.message : 'Try the queued message after reconnecting.'}`);
+          setError(translate("workbench.messageSavedButSteerCouldNotBe", { value1: caught instanceof Error ? caught.message : translate("workbench.tryTheQueuedMessageAfterReconnecting") }));
         }
       }
       setChatDraft({
@@ -2510,7 +2513,7 @@ export function ThreadDetailPage() {
           ? caught.payload.message
           : caught instanceof Error
             ? caught.message
-            : 'Unable to send prompt.';
+            : translate("workbench.unableToSendPrompt");
       if (caught instanceof ApiError) {
         setError(caught.payload.message);
       } else {
@@ -2549,7 +2552,7 @@ export function ThreadDetailPage() {
   async function ensureThreadConnectedForGoal() {
     const currentDetail = detailRef.current;
     if (!currentDetail) {
-      setError('Thread detail is still loading.');
+      setError(translate("workbench.threadDetailIsStillLoading"));
       return false;
     }
 
@@ -2589,7 +2592,7 @@ export function ThreadDetailPage() {
       setError(
         caught instanceof Error
           ? caught.message
-          : 'Unable to connect this thread before setting its goal.',
+          : translate("workbench.unableToConnectThisThreadBeforeSetting"),
       );
       return false;
     } finally {
@@ -2655,7 +2658,7 @@ export function ThreadDetailPage() {
           ? caught.payload.message
           : caught instanceof Error
             ? caught.message
-            : 'Unable to set goal.';
+            : translate("workbench.unableToSetGoal");
       setError(message);
       if (optimisticTurnId) {
         setOptimisticTurn((current) =>
@@ -2749,7 +2752,7 @@ export function ThreadDetailPage() {
       }
     } catch (caught) {
       setError(
-        caught instanceof Error ? caught.message : 'Unable to change connection state.',
+        caught instanceof Error ? caught.message : translate("workbench.unableToChangeConnectionState"),
       );
     } finally {
         setBusy(false);
@@ -2760,7 +2763,7 @@ export function ThreadDetailPage() {
     if (activeView === 'shell') {
       const sent = shellPanelRef.current?.sendControl('ctrl_c') ?? false;
       if (!sent) {
-        setError('Connect the shell before sending Ctrl-C.');
+        setError(translate("workbench.connectTheShellBeforeSendingCtrlC"));
       } else {
         setError(null);
       }
@@ -2784,7 +2787,7 @@ export function ThreadDetailPage() {
       setLiveOutput('');
     } catch (caught) {
       setError(
-        caught instanceof Error ? caught.message : 'Unable to interrupt turn.',
+        caught instanceof Error ? caught.message : translate("workbench.unableToInterruptTurn"),
       );
     } finally {
       interruptingRef.current = false;
@@ -2883,7 +2886,7 @@ export function ThreadDetailPage() {
       setError(
         caught instanceof Error
           ? caught.message
-          : 'Unable to update thread settings.',
+          : translate("workbench.unableToUpdateThreadSettings"),
       );
     } finally {
       setSettingsBusy(false);
@@ -2895,7 +2898,7 @@ export function ThreadDetailPage() {
     input: { answers: Record<string, { answers: string[] }> },
   ) => {
     if (relayAccess?.kind === 'shared' && relayAccess.threadAccess === 'read') {
-      setError('This shared session is view only.');
+      setError(translate("workbench.thisSharedSessionIsViewOnly"));
       return;
     }
     setRespondingRequestId(requestId);
@@ -2911,7 +2914,7 @@ export function ThreadDetailPage() {
       setError(
         caught instanceof Error
           ? caught.message
-          : 'Unable to answer this request.',
+          : translate("workbench.unableToAnswerThisRequest"),
       );
     } finally {
       setRespondingRequestId(null);
@@ -2939,7 +2942,7 @@ export function ThreadDetailPage() {
         setError(
           caught instanceof Error
             ? caught.message
-            : 'Unable to cancel queued prompt.',
+            : translate("workbench.unableToCancelQueuedPrompt"),
         );
         throw caught;
       }
@@ -2958,7 +2961,7 @@ export function ThreadDetailPage() {
         setError(
           caught instanceof Error
             ? caught.message
-            : 'Unable to steer queued prompt.',
+            : translate("workbench.unableToSteerQueuedPrompt"),
         );
         throw caught;
       }
@@ -2991,7 +2994,7 @@ export function ThreadDetailPage() {
       setError(
         caught instanceof Error
           ? caught.message
-          : 'Unable to compact this thread context.',
+          : translate("workbench.unableToCompactThisThreadContext"),
       );
     } finally {
       setCompactBusy(false);
@@ -3025,7 +3028,7 @@ export function ThreadDetailPage() {
           : current,
       );
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to rename thread.');
+      setError(caught instanceof Error ? caught.message : translate("workbench.unableToRenameThread"));
       throw caught;
     }
   }
@@ -3048,7 +3051,7 @@ export function ThreadDetailPage() {
         navigate(currentThreadsHref(deletingThread.workspaceId), { replace: true });
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to delete thread.');
+      setError(caught instanceof Error ? caught.message : translate("workbench.unableToDeleteThread"));
     } finally {
       setDeletingThreadBusy(false);
     }
@@ -3067,7 +3070,7 @@ export function ThreadDetailPage() {
   async function handleShellCopy() {
     const copied = await shellPanelRef.current?.copyLastCommandOutput();
     if (!copied) {
-      setError('Unable to copy the last shell command output.');
+      setError(translate("workbench.unableToCopyTheLastShellCommand"));
     } else {
       setError(null);
     }
@@ -3081,7 +3084,7 @@ export function ThreadDetailPage() {
         ? (shellPanelRef.current?.sendCommand('clear') ?? false)
         : (shellPanelRef.current?.sendControl(action) ?? false);
     if (!sent) {
-      setError('Connect the shell before sending control input.');
+      setError(translate("workbench.connectTheShellBeforeSendingControlInput"));
     } else {
       setError(null);
     }
@@ -3129,13 +3132,13 @@ export function ThreadDetailPage() {
 
   const promptDisabledReason = detail
     ? detail.workspacePathStatus === 'missing'
-      ? 'Restore this workspace path on the current machine before continuing.'
+      ? translate("workbench.restoreThisWorkspacePathOnTheCurrent")
       : relayDeviceRouteActive && relayAccessState.status === 'loading'
-        ? 'Checking relay permissions...'
+        ? translate("workbench.checkingRelayPermissions")
       : relayDeviceRouteActive && relayAccessState.status === 'failed'
-        ? relayAccessState.error ?? 'Unable to verify relay permissions.'
+        ? relayAccessState.error ?? translate("workbench.unableToVerifyRelayPermissions")
       : relayAccess?.kind === 'shared' && relayAccess.threadAccess === 'read'
-        ? 'This shared session is view only.'
+        ? translate("workbench.thisSharedSessionIsViewOnly")
       : null
     : null;
   const {
@@ -3151,24 +3154,24 @@ export function ThreadDetailPage() {
   const metaContent = detail ? (
     <dl className="space-y-4 text-sm">
       <div>
-        <dt className="text-[var(--theme-fg-muted)]">Remote Codex session ID</dt>
+        <dt className="text-[var(--theme-fg-muted)]">{translate("workbench.remoteCodexSessionID")}</dt>
         <dd className="mt-1 break-all text-[var(--theme-fg)]">{detail.thread.id}</dd>
       </div>
       <div className="relative pr-9">
-        <dt className="text-[var(--theme-fg-muted)]">Harness session ID</dt>
+        <dt className="text-[var(--theme-fg-muted)]">{translate("workbench.harnessSessionID")}</dt>
         <dd className="mt-1 break-all text-[var(--theme-fg)]">
-          {detail.thread.providerSessionId ?? 'Unavailable'}
+          {detail.thread.providerSessionId ?? translate("workbench.unavailable")}
         </dd>
         {(detail.thread.providerSessionId) && (
           <button
             type="button"
-            aria-label="Copy harness session ID"
+            aria-label={translate("workbench.copyHarnessSessionID")}
             title={
               metaSessionCopyState === 'copied'
-                ? 'Copied'
+                ? translate("workbench.copied")
                 : metaSessionCopyState === 'failed'
-                  ? 'Copy failed'
-                  : 'Copy harness session ID'
+                  ? translate("workbench.copyFailed")
+                  : translate("workbench.copyHarnessSessionID")
             }
             onClick={() => void handleCopyMetaSessionId()}
             className={`thread-mobile-hit-target absolute bottom-0 right-0 inline-flex h-5 w-5 items-center justify-center rounded-full border shadow-sm backdrop-blur transition ${
@@ -3186,41 +3189,41 @@ export function ThreadDetailPage() {
         )}
       </div>
       <div>
-        <dt className="text-[var(--theme-fg-muted)]">Source</dt>
+        <dt className="text-[var(--theme-fg-muted)]">{translate("workbench.source")}</dt>
         <dd className="mt-1 text-[var(--theme-fg)]">
           {detail.thread.source === 'supervisor'
-            ? `${detail.thread.provider} supervisor thread`
-            : `Imported local ${detail.thread.provider} session`}
+            ? translate("workbench.supervisorThread", { value1: detail.thread.provider })
+            : translate("workbench.importedLocalSession", { value1: detail.thread.provider })}
         </dd>
       </div>
       <div>
-        <dt className="text-[var(--theme-fg-muted)]">Status</dt>
+        <dt className="text-[var(--theme-fg-muted)]">{translate("workbench.status")}</dt>
         <dd className="mt-1 text-[var(--theme-fg)]">
           {threadStatusLabel(detail.thread.status)}
         </dd>
       </div>
       <div>
-        <dt className="text-[var(--theme-fg-muted)]">Created</dt>
+        <dt className="text-[var(--theme-fg-muted)]">{translate("workbench.created")}</dt>
         <dd className="mt-1 text-[var(--theme-fg)]">
           {formatLongTimestamp(detail.thread.createdAt)}
         </dd>
       </div>
       <div>
-        <dt className="text-[var(--theme-fg-muted)]">Workspace</dt>
+        <dt className="text-[var(--theme-fg-muted)]">{translate("workbench.workspace")}</dt>
         <dd className="mt-1 break-words text-[var(--theme-fg)]">
           {detail.workspace.absPath}
         </dd>
       </div>
       <div>
-        <dt className="text-[var(--theme-fg-muted)]">Workspace path</dt>
+        <dt className="text-[var(--theme-fg-muted)]">{translate("workbench.workspacePath")}</dt>
         <dd className="mt-1 text-[var(--theme-fg)]">
-          {detail.workspacePathStatus === 'present' ? 'Present' : 'Missing on this machine'}
+          {detail.workspacePathStatus === 'present' ? translate("workbench.present") : translate("workbench.missingOnThisMachine")}
         </dd>
       </div>
       <div>
-        <dt className="text-[var(--theme-fg-muted)]">Active turn</dt>
+        <dt className="text-[var(--theme-fg-muted)]">{translate("workbench.activeTurn")}</dt>
         <dd className="mt-1 text-[var(--theme-fg)]">
-          {detail.thread.activeTurnId ?? 'None'}
+          {detail.thread.activeTurnId ?? translate("workbench.none")}
         </dd>
       </div>
     </dl>
@@ -3270,7 +3273,7 @@ export function ThreadDetailPage() {
       loaded: threadLoaded && detail?.thread.status !== 'recovering',
       busy: busy || !detail,
       state: realtimeConnection.status,
-      label: detail?.thread.status === 'recovering' ? 'Status unconfirmed · Reconnect to verify' : realtimeConnectionLabel,
+      label: detail?.thread.status === 'recovering' ? translate("workbench.statusUnconfirmedReconnectToVerify") : realtimeConnectionLabel,
       onConnect: () => void handleThreadConnectionToggle(),
     }} />
   );
@@ -3297,10 +3300,10 @@ export function ThreadDetailPage() {
     [relayAccess],
   );
   const threadActionsButton = <div>
-    {relayThreadIsOwner && relayRouteDeviceId && <button aria-label="Port mappings" title="Port mappings" onClick={() => setPortsOpen(true)}><Network /></button>}
-    <button aria-label="Share as link" title="Create and copy read-only link" onClick={() => { setActionMode('link'); setExportDialogOpen(true); }}><Link2 /></button>
-    <button aria-label="Sharing permissions" title="Sharing permissions" onClick={() => { setActionMode('share'); setExportDialogOpen(true); }}><Users /></button>
-    <button aria-label="Download transcript" title="Download transcript" disabled={!detail} onClick={() => { setActionMode('html'); setExportDialogOpen(true); }}><Download /></button>
+    {relayThreadIsOwner && relayRouteDeviceId && <button aria-label={translate("workbench.portMappings")} title={translate("workbench.portMappings")} onClick={() => setPortsOpen(true)}><Network /></button>}
+    <button aria-label={translate("workbench.shareAsLink")} title={translate("workbench.createAndCopyReadOnlyLink")} onClick={() => { setActionMode('link'); setExportDialogOpen(true); }}><Link2 /></button>
+    <button aria-label={translate("workbench.sharingPermissions")} title={translate("workbench.sharingPermissions")} onClick={() => { setActionMode('share'); setExportDialogOpen(true); }}><Users /></button>
+    <button aria-label={translate("workbench.downloadTranscript")} title={translate("workbench.downloadTranscript")} disabled={!detail} onClick={() => { setActionMode('html'); setExportDialogOpen(true); }}><Download /></button>
   </div>;
   const mobileSessionConnectionButton = useMemo(
     () => (
@@ -3586,12 +3589,12 @@ export function ThreadDetailPage() {
           initialMode={actionMode}
           linkContent={relayThreadCanShare && relayRouteDeviceId && id
             ? <ThreadPublicLinks deviceId={relayRouteDeviceId} threadId={id} />
-            : <p className="matter-sharing-unavailable" role="status"><Link2 size={20} />{relayDeviceRouteActive ? 'Only the owner can create a public link for this thread.' : 'Open this device through your Relay account to create a read-only share link.'}</p>}
+            : <p className="matter-sharing-unavailable" role="status"><Link2 size={20} />{relayDeviceRouteActive ? translate("workbench.onlyTheOwnerCanCreateAPublic") : translate("workbench.openThisDeviceThroughYourRelayAccount")}</p>}
           open={exportDialogOpen}
           busy={exportBusy || shareBusy}
           turnsState={exportTurnsState}
           shareAvailable={relayThreadCanShare}
-          shareUnavailableMessage={relayDeviceRouteActive ? 'Only the owner can share this session.' : 'Open this device through your Relay account to invite other users.'}
+          shareUnavailableMessage={relayDeviceRouteActive ? translate("workbench.onlyTheOwnerCanShareThisSession") : translate("workbench.openThisDeviceThroughYourRelayAccount_7bd037")}
           shareState={threadShareState}
           onCancel={() => {
             if (!exportBusy && !shareBusy) {
@@ -3611,13 +3614,13 @@ export function ThreadDetailPage() {
         />
         <ConfirmDialog
           open={deletingThread !== null}
-          title="Delete Thread"
+          title={translate("workbench.deleteThread_114337")}
           description={
             deletingThread
-              ? `Delete ${truncateAutoThreadTitle(deletingThread.title)} from supervisor. The backend session id will no longer appear in this workspace list.`
+              ? translate("workbench.deleteFromSupervisorTheBackendSessionId", { value1: truncateAutoThreadTitle(deletingThread.title) })
               : ''
           }
-          confirmLabel="Delete Thread"
+          confirmLabel={translate("workbench.deleteThread_114337")}
           busy={deletingThreadBusy}
           onCancel={() => {
             if (!deletingThreadBusy) {
@@ -3644,7 +3647,7 @@ export function ThreadDetailPage() {
       shareBusy,
       handleUpdateThreadShare, relayRouteDeviceId, id,
       threadShareState,
-    ],
+    , i18nLocale],
   );
 
   return (
@@ -3695,13 +3698,11 @@ export function ThreadDetailPage() {
       onShellStateChange={setShellControlState}
       loadingContent={
         <div className="host-muted flex flex-1 items-center justify-center px-6 py-12 text-center">
-          Loading thread detail...
-        </div>
+          {translate("workbench.loadingThreadDetail")}</div>
       }
       emptyContent={
         <div className="host-muted flex flex-1 items-center justify-center px-6 py-12 text-center">
-          Unable to resolve this thread.
-        </div>
+          {translate("workbench.unableToResolveThisThread")}</div>
       }
       dialogs={<>{dialogs}{harnessSettingsOpen && detail && <HarnessSettingsDialog
         key={detail.thread.id} thread={detail.thread} models={modelOptions} busy={settingsBusy}

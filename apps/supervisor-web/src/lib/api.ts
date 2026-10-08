@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { encryptedBrowserFetch, encryptedRelaySocket } from './relayTransport';
 import type {
   ApplyProviderHostConfigArchiveResultDto,
@@ -317,16 +318,16 @@ function fallbackErrorMessage(status: number, statusText?: string) {
   const suffix = label ? `${status} ${label}` : `${status}`;
 
   if (status === 429) {
-    return `Too many requests (${suffix}).`;
+    return translate("workbench.tooManyRequests", { value1: suffix });
   }
 
-  if (status === 504) return 'The request timed out before delivery could be confirmed (504).';
+  if (status === 504) return translate("workbench.theRequestTimedOutBeforeDeliveryCould");
 
   if (status === 503) {
-    return `Upstream service unavailable (${suffix}).`;
+    return translate("workbench.upstreamServiceUnavailable", { value1: suffix });
   }
 
-  return `Request failed (${suffix}).`;
+  return translate("workbench.requestFailed", { value1: suffix });
 }
 
 function normalizedApiErrorPayload(
@@ -1584,7 +1585,7 @@ export async function steerPendingPrompt(id: string, pendingSteerId: string) {
           || delivery.turns.some(turn=>turn.items.some(item=>item.id===`steer:${pendingSteerId}`))) return delivery;
       } catch { /* The connection can recover between confirmation reads. */ }
     }
-    throw new Error('Steer delivery is not yet confirmed. Check again after reconnecting; the message may already have been delivered.');
+    throw new Error(translate("workbench.steerDeliveryIsNotYetConfirmedCheck"));
   }
 }
 
@@ -1600,7 +1601,7 @@ export async function steerSubmittedPrompt(
     return delivery;
   }
   const pending = delivery.pendingSteers.find(item => item.clientRequestId === clientRequestId);
-  if (!pending) throw new Error('The saved message is not available to steer. Check its delivery after reconnecting.');
+  if (!pending) throw new Error(translate("workbench.theSavedMessageIsNotAvailableTo"));
   if (pending.delivery === 'steer') return delivery;
   return steerPendingPrompt(id, pending.id);
 }

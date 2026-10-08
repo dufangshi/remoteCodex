@@ -1,3 +1,5 @@
+import { getLocale } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { LoginVerification, RelaySecurityPanel, usePendingLogin } from '../components/RelaySecurity';
 import {
   FormEvent,
@@ -111,7 +113,7 @@ function errorMessage(caught: unknown) {
     ? caught.payload.message
     : caught instanceof Error
       ? caught.message
-      : 'Unable to update relay admin state.';
+      : translate("devices.unableToUpdateRelayAdminState");
 }
 
 function adminTabFromSearch(search: string): AdminTab {
@@ -132,6 +134,7 @@ function unsupportedAdminStatus(caught: unknown) {
 }
 
 export function RelayAdminPage() {
+  const { locale: i18nLocale } = useI18n();
   const location = useLocation();
   const navigate = useNavigate();
   const [summary, setSummary] = useState<RelayAdminSummaryDto | null>(null);
@@ -237,8 +240,8 @@ export function RelayAdminPage() {
         } else {
           setError(
             caught instanceof Error
-              ? `Unable to verify the relay admin session: ${caught.message}`
-              : 'Unable to verify the relay admin session.',
+              ? translate("devices.unableToVerifyTheRelayAdminSession", { value1: caught.message })
+              : translate("devices.unableToVerifyTheRelayAdminSession_f228be"),
           );
         }
         setLoading(false);
@@ -446,7 +449,7 @@ export function RelayAdminPage() {
     const result = await relayAdminLogin(input);
     if(result.challengeRequired){setChallenge({challengeRequired:true,authenticator:Boolean(result.authenticator),passkey:Boolean(result.passkey)});return;}
     if (!result.session.authenticated || result.session.user?.role !== 'admin') {
-      throw new Error('This account does not have relay admin access.');
+      throw new Error(translate("devices.thisAccountDoesNotHaveRelayAdmin"));
     }
     setAdminSession(result.session);
     setLoginRequired(false);
@@ -493,8 +496,8 @@ export function RelayAdminPage() {
   if (loginRequired) {
     return (
       <LoginPage
-        description="Use the relay admin credentials for this server. This does not replace your normal relay account."
-        eyebrow="Relay Admin"
+        description={translate("devices.useTheRelayAdminCredentialsForThis")}
+        eyebrow={translate("devices.relayAdmin")}
         onLogin={handleAdminLogin}
       />
     );
@@ -506,37 +509,32 @@ export function RelayAdminPage() {
         <header className="product-page-header !items-start max-lg:flex-col">
           <div>
             <p className="product-eyebrow">
-              Relay Admin
-            </p>
+              {translate("devices.relayAdmin")}</p>
             <h1 className="product-title mt-1">
-              Administration
-            </h1>
+              {translate("devices.administration")}</h1>
             <p className="product-description mt-1">
-              Manage relay access, connected devices, and registration policy.
-            </p>
+              {translate("devices.manageRelayAccessConnectedDevicesAndRegistration")}</p>
           </div>
           <div className="flex w-full flex-wrap items-end gap-2 lg:w-auto lg:justify-end">
             <label className="flex items-center gap-2 text-sm text-[var(--theme-fg-muted)]">
-              Usage window
-              <select
+              {translate("devices.usageWindow")}<select
                 className="relay-input h-11 w-24"
                 onChange={(event) => void load(Number(event.target.value))}
                 value={days}
               >
-                <option value={1}>1 day</option>
-                <option value={7}>7 days</option>
-                <option value={30}>30 days</option>
-                <option value={90}>90 days</option>
+                <option value={1}>{translate("devices.1Day")}</option>
+                <option value={7}>{translate("devices.7Days")}</option>
+                <option value={30}>{translate("devices.30Days")}</option>
+                <option value={90}>{translate("devices.90Days")}</option>
               </select>
             </label>
             <Link className="relay-button-secondary" to="/">
-              Relay home
-            </Link>
+              {translate("devices.relayHome")}</Link>
             <button
-              aria-label="Refresh admin data"
+              aria-label={translate("devices.refreshAdminData")}
               className="product-icon-button"
               onClick={() => void load(days)}
-              title="Refresh admin data"
+              title={translate("devices.refreshAdminData")}
               type="button"
             >
               <RefreshCw className="h-4 w-4" />
@@ -563,13 +561,12 @@ export function RelayAdminPage() {
               onClick={() => setError(null)}
               type="button"
             >
-              Dismiss
-            </button>
+              {translate("devices.dismiss")}</button>
           </div>
         ) : null}
 
         {loading ? (
-          <section className="product-panel" aria-busy="true" aria-label="Loading relay administration">
+          <section className="product-panel" aria-busy="true" aria-label={translate("devices.loadingRelayAdministration")}>
             <div className="product-row min-h-24">
               <div className="min-w-0 flex-1 space-y-3">
                 <div className="product-skeleton h-4 w-40" />
@@ -586,8 +583,7 @@ export function RelayAdminPage() {
           <section className="product-panel" role="alert">
             <div className="p-5 sm:p-6">
               <p className="text-base font-semibold text-[var(--theme-fg)]">
-                Admin data is unavailable
-              </p>
+                {translate("devices.adminDataIsUnavailable")}</p>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--status-danger-fg)]">
                 {error}
               </p>
@@ -597,43 +593,41 @@ export function RelayAdminPage() {
                   onClick={() => void load(days)}
                   type="button"
                 >
-                  Retry
-                </button>
+                  {translate("devices.retry")}</button>
                 <Link className="relay-button-secondary" to="/">
-                  Relay home
-                </Link>
+                  {translate("devices.relayHome")}</Link>
               </div>
             </div>
           </section>
         ) : summary ? (
           <>
-            <section className="product-panel" aria-label="Relay summary">
+            <section className="product-panel" aria-label={translate("devices.relaySummary")}>
               <dl className="grid grid-cols-2 sm:grid-cols-4">
                 <MetricStat
-                  label="Users"
+                  label={translate("devices.users")}
                   value={totals.users}
-                  detail={`${totals.enabledUsers} enabled`}
+                  detail={translate("devices.enabled_5cd672", { value1: totals.enabledUsers })}
                 />
                 <MetricStat
-                  label="Devices"
+                  label={translate("devices.devices")}
                   value={totals.devices}
-                  detail={`${totals.onlineDevices} online`}
+                  detail={translate("devices.online", { value1: totals.onlineDevices })}
                 />
                 <MetricStat
-                  label={`Conversations, ${summary.conversationWindowDays}d`}
+                  label={translate("devices.conversationsD", { value1: summary.conversationWindowDays })}
                   value={totals.conversations}
-                  detail="Prompt and start events"
+                  detail={translate("devices.promptAndStartEvents")}
                 />
                 <MetricStat
-                  label="Active shares"
+                  label={translate("devices.activeShares")}
                   value={totals.shares}
-                  detail={`${summary.pendingRegistrations.length} registrations pending`}
+                  detail={translate("devices.registrationsPending", { value1: summary.pendingRegistrations.length })}
                 />
               </dl>
             </section>
 
             <div
-              aria-label="Relay administration sections"
+              aria-label={translate("devices.relayAdministrationSections")}
               aria-orientation="horizontal"
               className="product-segmented w-full"
               role="tablist"
@@ -731,6 +725,7 @@ function HostedSandboxesPanel({
   sandboxes: RelayHostedSandboxDto[];
   users: RelayAdminSummaryDto['users'];
 }) {
+  const { locale: i18nLocale } = useI18n();
   const eligibleUsers = users.filter(
     (user) => user.role === 'user' && user.enabled,
   );
@@ -776,7 +771,7 @@ function HostedSandboxesPanel({
       : 'neutral';
 
   return (
-    <section className="space-y-4" aria-label="Hosted supervisor VMs">
+    <section className="space-y-4" aria-label={translate("devices.hostedSupervisorVMs")}>
       <div className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)]">
         <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-start gap-3">
@@ -786,36 +781,32 @@ function HostedSandboxesPanel({
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-base font-semibold text-[var(--theme-fg)]">
-                  Hosted supervisor VMs
-                </h2>
+                  {translate("devices.hostedSupervisorVMs")}</h2>
                 <HostedStatusPill tone={capabilityTone}>
                   {capability?.available
-                    ? 'Available'
+                    ? translate("devices.available")
                     : capability?.configured
-                      ? 'Unavailable'
-                      : 'Disabled'}
+                      ? translate("devices.unavailable")
+                      : translate("devices.disabled")}
                 </HostedStatusPill>
               </div>
               <p className="mt-1 max-w-3xl text-sm text-[var(--theme-fg-muted)]">
                 {capability?.reason ??
-                  'Incus VMs run one isolated relay supervisor per assigned user.'}
+                  translate("devices.incusVMsRunOneIsolatedRelaySupervisor")}
               </p>
               {capability?.capacity && capability.limits ? (
                 <p className="mt-1 text-xs text-[var(--theme-fg-soft)]">
                   {capability.capacity.runningInstances}/
-                  {capability.limits.maxRunningInstances} running ·{' '}
+                  {capability.limits.maxRunningInstances} {translate("devices.running_b3c980")}{' '}
                   {capability.capacity.totalInstances}/
-                  {capability.limits.maxInstances} total
-                </p>
+                  {capability.limits.maxInstances} {translate("devices.total")}</p>
               ) : null}
               {capability?.metrics ? (
                 <p className="mt-1 text-xs text-[var(--theme-fg-soft)]">
-                  {capability.metrics.cpuCount} CPU · load{' '}
+                  {capability.metrics.cpuCount} {translate("devices.cPULoad")}{' '}
                   {capability.metrics.load1.toFixed(2)} ·{' '}
-                  {Math.round(capability.metrics.memoryAvailableMiB / 1024)} GiB
-                  RAM free · {capability.metrics.diskAvailableGiB.toFixed(1)}{' '}
-                  GiB disk free
-                </p>
+                  {Math.round(capability.metrics.memoryAvailableMiB / 1024)} {translate("devices.giBRAMFree")}{capability.metrics.diskAvailableGiB.toFixed(1)}{' '}
+                  {translate("devices.giBDiskFree")}</p>
               ) : null}
               {capability?.alerts?.map((alert) => (
                 <p
@@ -835,8 +826,7 @@ function HostedSandboxesPanel({
             type="button"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            Check host
-          </button>
+            {translate("devices.checkHost")}</button>
         </div>
 
         {error ? (
@@ -860,14 +850,13 @@ function HostedSandboxesPanel({
         >
           <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-medium text-[var(--theme-fg)] hover:bg-[var(--theme-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--theme-accent-ring)]">
             <Plus className="h-4 w-4" />
-            Create hosted VM
-          </summary>
+            {translate("devices.createHostedVM")}</summary>
           <form
             className="grid gap-4 border-t border-[var(--theme-border)] p-4 lg:grid-cols-2"
             onSubmit={submitCreate}
           >
             <fieldset className="text-sm text-[var(--theme-fg-soft)]">
-              <legend>Assigned users</legend>
+              <legend>{translate("devices.assignedUsers")}</legend>
               <div className="mt-2 max-h-48 overflow-y-auto rounded-md border border-[var(--theme-border)] bg-[var(--theme-surface)]">
                 {eligibleUsers.length ? (
                   eligibleUsers.map((user) => (
@@ -876,7 +865,7 @@ function HostedSandboxesPanel({
                       key={user.id}
                     >
                       <input
-                        aria-label={`Assign ${user.username} (${user.email})`}
+                        aria-label={translate("devices.assign", { value1: user.username, value2: user.email })}
                         checked={assignedUserIds.includes(user.id)}
                         disabled={!capability?.available}
                         onChange={(event) =>
@@ -900,17 +889,14 @@ function HostedSandboxesPanel({
                   ))
                 ) : (
                   <p className="px-3 py-3 text-xs text-[var(--theme-fg-muted)]">
-                    Create and enable a user account before assigning a VM.
-                  </p>
+                    {translate("devices.createAndEnableAUserAccountBefore")}</p>
                 )}
               </div>
               <span className="mt-1 block text-xs text-[var(--theme-fg-muted)]">
-                {assignedUserIds.length} selected · all receive full VM access
-              </span>
+                {assignedUserIds.length} {translate("devices.selectedAllReceiveFullVMAccess")}</span>
             </fieldset>
             <label className="text-sm text-[var(--theme-fg-soft)]">
-              Device name
-              <input
+              {translate("devices.deviceName")}<input
                 className="relay-input mt-2 w-full"
                 maxLength={120}
                 onChange={(event) => setDeviceName(event.target.value)}
@@ -919,8 +905,7 @@ function HostedSandboxesPanel({
               />
             </label>
             <label className="text-sm text-[var(--theme-fg-soft)]">
-              Resources
-              <select
+              {translate("devices.resources")}<select
                 className="relay-input mt-2 w-full"
                 onChange={(event) =>
                   setResourcePreset(event.target.value as 'standard' | 'large')
@@ -928,23 +913,20 @@ function HostedSandboxesPanel({
                 value={resourcePreset}
               >
                 <option value="standard">
-                  Standard, 1 CPU · 1.5 GiB · 10 GiB
-                </option>
-                <option value="large">Large, 2 CPU · 2 GiB · 12 GiB</option>
+                  {translate("devices.standard1CPU15GiB10")}</option>
+                <option value="large">{translate("devices.large2CPU2GiB12GiB")}</option>
               </select>
             </label>
             <label className="text-sm text-[var(--theme-fg-soft)]">
-              Backends
-              <select className="relay-input mt-2 w-full" value="codex" onChange={() => undefined}>
+              {translate("devices.backends")}<select className="relay-input mt-2 w-full" value="codex" onChange={() => undefined}>
                 <option value="codex">Codex</option>
-                <option disabled>Claude Code (coming soon)</option>
-                <option disabled>OpenCode (coming soon)</option>
+                <option disabled>{translate("devices.claudeCodeComingSoon")}</option>
+                <option disabled>{translate("devices.openCodeComingSoon")}</option>
               </select>
             </label>
             <details className="rounded-md border border-[var(--theme-border)] lg:col-span-2" open>
               <summary className="cursor-pointer px-3 py-2 text-sm font-medium text-[var(--theme-fg)]">
-                Codex files
-              </summary>
+                {translate("devices.codexFiles")}</summary>
               <div className="space-y-4 border-t border-[var(--theme-border)] p-3">
                 <BackendFileField filename="config.toml" language="TOML" onChange={setCreateConfigToml} value={createConfigToml} />
                 <BackendFileField filename="auth.json" language="JSON" onChange={setCreateAuthJson} value={createAuthJson} />
@@ -953,8 +935,7 @@ function HostedSandboxesPanel({
             <div className="flex flex-col gap-2 lg:col-span-2 sm:flex-row sm:items-center sm:justify-between">
               <p className="flex items-center gap-2 text-xs text-[var(--theme-fg-muted)]">
                 <ShieldCheck className="h-4 w-4" />
-                The relay stores only an opaque credential reference.
-              </p>
+                {translate("devices.theRelayStoresOnlyAnOpaqueCredential")}</p>
               <button
                 className="relay-button-primary inline-flex min-h-11 items-center justify-center gap-2"
                 disabled={
@@ -963,7 +944,7 @@ function HostedSandboxesPanel({
                 type="submit"
               >
                 <Plus className="h-4 w-4" />
-                {busyKey === 'hosted:create' ? 'Creating…' : 'Create hosted VM'}
+                {busyKey === 'hosted:create' ? translate("devices.creating") : translate("devices.createHostedVM")}
               </button>
             </div>
           </form>
@@ -974,19 +955,16 @@ function HostedSandboxesPanel({
         <div className="flex items-center justify-between gap-3 border-b border-[var(--theme-border)] px-4 py-3">
           <div>
             <h3 className="text-sm font-semibold text-[var(--theme-fg)]">
-              Managed VMs
-            </h3>
+              {translate("devices.managedVMs")}</h3>
             <p className="text-xs text-[var(--theme-fg-muted)]">
-              Turn-aware idle stop is 30 minutes after the last terminal
-              activity.
-            </p>
+              {translate("devices.turnAwareIdleStopIs30Minutes")}</p>
           </div>
           <span className="text-sm tabular-nums text-[var(--theme-fg-muted)]">
             {sandboxes.length}
           </span>
         </div>
         {loading && sandboxes.length === 0 ? (
-          <div className="space-y-3 p-4" aria-label="Loading hosted VMs">
+          <div className="space-y-3 p-4" aria-label={translate("devices.loadingHostedVMs")}>
             <div className="h-14 animate-pulse rounded-md bg-[var(--theme-muted)]" />
             <div className="h-14 animate-pulse rounded-md bg-[var(--theme-muted)]" />
           </div>
@@ -1004,8 +982,7 @@ function HostedSandboxesPanel({
           </div>
         ) : (
           <div className="p-6 text-center text-sm text-[var(--theme-fg-muted)]">
-            No hosted VMs yet. Open “Create hosted VM” to assign the first one.
-          </div>
+            {translate("devices.noHostedVMsYetOpenCreateHosted")}</div>
         )}
       </div>
     </section>
@@ -1021,6 +998,7 @@ function HostedReconciliationPanel({
   onAction: (key: string, action: () => Promise<unknown>) => Promise<void>;
   reconciliation: RelayHostedSandboxReconciliationDto | null;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const issueCount = reconciliation
     ? reconciliation.missingInstanceSandboxIds.length +
       reconciliation.missingCredentialSandboxIds.length +
@@ -1036,12 +1014,12 @@ function HostedReconciliationPanel({
         : 'neutral';
   const label =
     reconciliation?.status === 'healthy'
-      ? 'Inventory healthy'
+      ? translate("devices.inventoryHealthy")
       : reconciliation?.status === 'issues'
-        ? `${issueCount} inventory issue${issueCount === 1 ? '' : 's'}`
+        ? translate("devices.inventoryIssue", { value1: issueCount, value2: issueCount === 1 ? '' : 's' })
         : reconciliation?.status === 'unavailable'
-          ? 'Inventory unavailable'
-          : 'Inventory not checked';
+          ? translate("devices.inventoryUnavailable")
+          : translate("devices.inventoryNotChecked");
 
   return (
     <div className="border-t border-[var(--theme-border)] px-4 py-3">
@@ -1049,14 +1027,11 @@ function HostedReconciliationPanel({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium text-[var(--theme-fg)]">
-              Relay ↔ Incus inventory
-            </span>
+              {translate("devices.relayIncusInventory")}</span>
             <HostedStatusPill tone={tone}>{label}</HostedStatusPill>
           </div>
           <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-            Audit only; resources are deleted only after an explicit admin
-            action and a fresh orphan check.
-          </p>
+            {translate("devices.auditOnlyResourcesAreDeletedOnlyAfter")}</p>
         </div>
         <button
           className="relay-button-secondary inline-flex min-h-11 items-center justify-center gap-2 sm:min-h-10"
@@ -1069,8 +1044,7 @@ function HostedReconciliationPanel({
           <RefreshCw
             className={`h-4 w-4 ${busyKey === 'hosted:reconcile' ? 'animate-spin' : ''}`}
           />
-          Run inventory audit
-        </button>
+          {translate("devices.runInventoryAudit")}</button>
       </div>
 
       {reconciliation?.missingInstanceSandboxIds.map((id) => (
@@ -1078,7 +1052,7 @@ function HostedReconciliationPanel({
           className="mt-2 text-xs text-amber-700 dark:text-amber-300"
           key={`missing-instance-${id}`}
         >
-          Missing Incus instance for relay sandbox {id}
+          {translate("devices.missingIncusInstanceForRelaySandbox")} {id}
         </p>
       ))}
       {reconciliation?.missingCredentialSandboxIds.map((id) => (
@@ -1086,7 +1060,7 @@ function HostedReconciliationPanel({
           className="mt-2 text-xs text-amber-700 dark:text-amber-300"
           key={`missing-credential-${id}`}
         >
-          Missing credential for relay sandbox {id}
+          {translate("devices.missingCredentialForRelaySandbox")} {id}
         </p>
       ))}
       {reconciliation?.orphanInstances.map((instance) => (
@@ -1095,9 +1069,8 @@ function HostedReconciliationPanel({
           key={instance.id}
         >
           <span className="text-xs text-[var(--theme-fg-soft)]">
-            Orphan VM {instance.id} · {instance.status} ·{' '}
-            {instance.snapshots.length} snapshots
-          </span>
+            {translate("devices.orphanVM")} {instance.id} · {instance.status} ·{' '}
+            {instance.snapshots.length} {translate("devices.snapshots")}</span>
           <button
             className="relay-button-danger min-h-11 sm:min-h-9"
             disabled={busyKey === `hosted:orphan-instance:${instance.id}`}
@@ -1108,8 +1081,7 @@ function HostedReconciliationPanel({
             }
             type="button"
           >
-            Delete orphan VM
-          </button>
+            {translate("devices.deleteOrphanVM")}</button>
         </div>
       ))}
       {reconciliation?.orphanCredentials.map((credential) => (
@@ -1118,7 +1090,7 @@ function HostedReconciliationPanel({
           key={credential.credentialRef}
         >
           <span className="text-xs text-[var(--theme-fg-soft)]">
-            Orphan credential {credential.credentialRef}
+            {translate("devices.orphanCredential")} {credential.credentialRef}
           </span>
           <button
             className="relay-button-danger min-h-11 sm:min-h-9"
@@ -1133,8 +1105,7 @@ function HostedReconciliationPanel({
             }
             type="button"
           >
-            Delete orphan credential
-          </button>
+            {translate("devices.deleteOrphanCredential")}</button>
         </div>
       ))}
     </div>
@@ -1152,6 +1123,7 @@ function HostedSandboxRow({
   sandbox: RelayHostedSandboxDto;
   users: RelayAdminSummaryDto['users'];
 }) {
+  const { locale: i18nLocale } = useI18n();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteQuery, setInviteQuery] = useState('');
@@ -1200,28 +1172,27 @@ function HostedSandboxRow({
             </HostedStatusPill>
             {sandbox.activeTurnCount > 0 ? (
               <HostedStatusPill tone="warning">
-                {sandbox.activeTurnCount} active turn
-                {sandbox.activeTurnCount === 1 ? '' : 's'}
+                {sandbox.activeTurnCount} {translate("devices.activeTurn")}{sandbox.activeTurnCount === 1 ? '' : translate("devices.s")}
               </HostedStatusPill>
             ) : null}
             {sandbox.workspaceIsolationEnabled ? (
-              <HostedStatusPill tone="success">Private workspaces</HostedStatusPill>
+              <HostedStatusPill tone="success">{translate("devices.privateWorkspaces")}</HostedStatusPill>
             ) : null}
           </div>
           <p className="mt-1 text-sm text-[var(--theme-fg-soft)]">
             {sandbox.assignedUsers.map((user) => user.username).join(', ')}
             <span className="mx-2 text-[var(--theme-fg-muted)]">·</span>
-            {sandbox.resources.cpuCount} CPU ·{' '}
+            {sandbox.resources.cpuCount} {translate("devices.cPU")}{' '}
             {formatMemory(sandbox.resources.memoryMiB)} ·{' '}
             {sandbox.resources.diskGiB} GiB
           </p>
           <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-            Updated {formatTimestamp(sandbox.updatedAt)}
+            {translate("devices.updated")} {formatTimestamp(sandbox.updatedAt)}
             {sandbox.runningSince
-              ? ` · running for ${formatRunningDuration(sandbox.runningSince, now)}`
+              ? translate("devices.runningFor", { value1: formatRunningDuration(sandbox.runningSince, now) })
               : ''}
             {sandbox.idleDeadlineAt
-              ? ` · idle stop ${formatTimestamp(sandbox.idleDeadlineAt)}`
+              ? translate("devices.idleStop", { value1: formatTimestamp(sandbox.idleDeadlineAt) })
               : ''}
           </p>
           {sandbox.lastErrorMessage ? (
@@ -1253,7 +1224,7 @@ function HostedSandboxRow({
               ) : (
                 <Play className="h-4 w-4" />
               )}
-              {sandbox.status === 'error' ? 'Retry' : 'Start'}
+              {sandbox.status === 'error' ? translate("devices.retry") : translate("devices.start")}
             </button>
           ) : (
             <button
@@ -1270,14 +1241,13 @@ function HostedSandboxRow({
               }
               title={
                 sandbox.activeTurnCount > 0
-                  ? 'An active turn prevents stopping.'
+                  ? translate("devices.anActiveTurnPreventsStopping")
                   : undefined
               }
               type="button"
             >
               <Square className="h-4 w-4" />
-              Stop
-            </button>
+              {translate("devices.stop")}</button>
           )}
           <button
             className="relay-button-secondary inline-flex min-h-11 items-center gap-2"
@@ -1292,8 +1262,7 @@ function HostedSandboxRow({
             type="button"
           >
             <Camera className="h-4 w-4" />
-            Snapshot
-          </button>
+            {translate("devices.snapshot")}</button>
           <button
             className="relay-button-secondary inline-flex min-h-11 items-center gap-2"
             disabled={busy}
@@ -1302,8 +1271,7 @@ function HostedSandboxRow({
             type="button"
           >
             <Settings className="h-4 w-4" />
-            Manage
-          </button>
+            {translate("devices.manage")}</button>
           {confirmDelete ? (
             <span className="inline-flex items-center gap-2 rounded-md bg-[var(--status-danger-bg)] p-1">
               <button
@@ -1316,15 +1284,13 @@ function HostedSandboxRow({
                 }
                 type="button"
               >
-                Confirm delete
-              </button>
+                {translate("devices.confirmDelete")}</button>
               <button
                 className="min-h-11 rounded-md px-2 text-sm text-[var(--theme-fg-muted)] hover:bg-[var(--theme-hover)] sm:min-h-9"
                 onClick={() => setConfirmDelete(false)}
                 type="button"
               >
-                Cancel
-              </button>
+                {translate("devices.cancel")}</button>
             </span>
           ) : (
             <button
@@ -1333,15 +1299,14 @@ function HostedSandboxRow({
               onClick={() => setConfirmDelete(true)}
               type="button"
             >
-              Delete
-            </button>
+              {translate("devices.delete")}</button>
           )}
         </div>
       </div>
       {manageOpen ? (
         <div className="fixed inset-0 z-50 flex justify-end" role="presentation">
           <button
-            aria-label="Close VM management"
+            aria-label={translate("devices.closeVMManagement")}
             className="absolute inset-0 bg-[var(--overlay-scrim)]"
             disabled={busy}
             onClick={() => setManageOpen(false)}
@@ -1359,14 +1324,13 @@ function HostedSandboxRow({
             <header className="flex min-h-16 items-center justify-between gap-4 border-b border-[var(--theme-border)] px-5">
               <div className="min-w-0">
                 <h3 className="truncate text-base font-semibold text-[var(--theme-fg)]" id={manageTitleId}>
-                  Manage {sandbox.deviceName}
+                  {translate("devices.manage")} {sandbox.deviceName}
                 </h3>
                 <p className="mt-0.5 text-xs text-[var(--theme-fg-muted)]">
-                  Access, isolation, credentials, and recovery settings
-                </p>
+                  {translate("devices.accessIsolationCredentialsAndRecoverySettings")}</p>
               </div>
               <button
-                aria-label="Close VM management"
+                aria-label={translate("devices.closeVMManagement")}
                 className="relay-button-secondary inline-flex h-11 w-11 items-center justify-center p-0"
                 disabled={busy}
                 onClick={() => setManageOpen(false)}
@@ -1381,14 +1345,12 @@ function HostedSandboxRow({
         <label className="flex cursor-pointer items-start justify-between gap-4">
           <span>
             <span className="block text-sm font-medium text-[var(--theme-fg)]">
-              Isolate user workspaces
-            </span>
+              {translate("devices.isolateUserWorkspaces")}</span>
             <span className="mt-1 block text-xs leading-5 text-[var(--theme-fg-muted)]">
-              Each authorized user sees only their own workspaces. Their first visit creates a private workspace and an initial Codex thread.
-            </span>
+              {translate("devices.eachAuthorizedUserSeesOnlyTheirOwn")}</span>
           </span>
           <input
-            aria-label={`Isolate user workspaces for ${sandbox.deviceName}`}
+            aria-label={translate("devices.isolateUserWorkspacesFor", { value1: sandbox.deviceName })}
             checked={sandbox.workspaceIsolationEnabled}
             className="mt-1 h-4 w-4 shrink-0 accent-[var(--theme-accent-strong)]"
             disabled={busy}
@@ -1405,22 +1367,19 @@ function HostedSandboxRow({
               </div>
               <details className="mt-4" open>
         <summary className="cursor-pointer text-xs font-medium text-[var(--theme-fg-muted)] hover:text-[var(--theme-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]">
-          Access · {sandbox.assignedUsers.length} user
-          {sandbox.assignedUsers.length === 1 ? '' : 's'}
+          {translate("devices.access")} {sandbox.assignedUsers.length} {translate("devices.user")}{sandbox.assignedUsers.length === 1 ? '' : translate("devices.s")}
         </summary>
         <div className="mt-3 max-w-2xl overflow-hidden rounded-md border border-[var(--theme-border)]">
           <div className="flex min-h-11 items-center justify-between gap-3 bg-[var(--theme-surface)] px-3">
             <div>
               <p className="text-xs font-semibold text-[var(--theme-fg)]">
-                Authorized users
-              </p>
+                {translate("devices.authorizedUsers")}</p>
               <p className="text-[11px] text-[var(--theme-fg-muted)]">
-                Full workspace, thread, and VM control
-              </p>
+                {translate("devices.fullWorkspaceThreadAndVMControl")}</p>
             </div>
             <button
               aria-expanded={inviteOpen}
-              aria-label="Add authorized user"
+              aria-label={translate("devices.addAuthorizedUser")}
               className="relay-button-secondary inline-flex h-11 w-11 items-center justify-center p-0 sm:h-9 sm:w-9"
               disabled={busy}
               onClick={() => {
@@ -1438,14 +1397,13 @@ function HostedSandboxRow({
                 className="text-xs font-medium text-[var(--theme-fg-soft)]"
                 htmlFor={`invite-user-${sandbox.id}`}
               >
-                Find an account
-              </label>
+                {translate("devices.findAnAccount")}</label>
               <input
                 autoFocus
                 className="relay-input mt-2 min-h-11 w-full"
                 id={`invite-user-${sandbox.id}`}
                 onChange={(event) => setInviteQuery(event.target.value)}
-                placeholder="Account ID, username, or email"
+                placeholder={translate("devices.accountIDUsernameOrEmail")}
                 value={inviteQuery}
               />
               {normalizedInviteQuery ? (
@@ -1477,14 +1435,12 @@ function HostedSandboxRow({
                           </span>
                         </span>
                         <span className="text-xs font-medium text-[var(--theme-accent-strong)]">
-                          Add
-                        </span>
+                          {translate("devices.add")}</span>
                       </button>
                     ))
                   ) : (
                     <p className="px-3 py-3 text-xs text-[var(--theme-fg-muted)]">
-                      No unassigned account matches that search.
-                    </p>
+                      {translate("devices.noUnassignedAccountMatchesThatSearch")}</p>
                   )}
                 </div>
               ) : null}
@@ -1505,7 +1461,7 @@ function HostedSandboxRow({
                   </span>
                 </span>
                 <button
-                  aria-label={`Remove ${user.username} access`}
+                  aria-label={translate("devices.removeAccess", { value1: user.username })}
                   className="min-h-11 rounded-md px-3 text-xs font-medium text-[var(--status-danger-fg)] hover:bg-[var(--status-danger-bg)] sm:min-h-9"
                   disabled={busy || memberIds.length === 1}
                   onClick={() =>
@@ -1518,22 +1474,20 @@ function HostedSandboxRow({
                   }
                   title={
                     memberIds.length === 1
-                      ? 'A hosted VM must keep at least one authorized user.'
+                      ? translate("devices.aHostedVMMustKeepAtLeast")
                       : undefined
                   }
                   type="button"
                 >
-                  Remove
-                </button>
+                  {translate("devices.remove")}</button>
               </li>
             ))}
           </ul>
         </div>
               </details>
               <div className="mt-4 rounded-md border border-[var(--theme-border)] bg-[var(--theme-surface)] px-3 py-3 text-xs leading-5 text-[var(--theme-fg-muted)]">
-                <span className="font-medium text-[var(--theme-fg)]">Snapshots</span>
-                {' '}capture the VM disk as a local Incus restore point before risky changes. They are not off-host backups and are not restored automatically.
-              </div>
+                <span className="font-medium text-[var(--theme-fg)]">{translate("devices.snapshots_55420c")}</span>
+                {' '}{translate("devices.captureTheVMDiskAsALocal")}</div>
               <HostedBackendFilesEditor
                 busy={busy}
                 onAction={onAction}
@@ -1556,6 +1510,7 @@ function HostedBackendFilesEditor({
   onAction: (key: string, action: () => Promise<unknown>) => Promise<void>;
   sandbox: RelayHostedSandboxDto;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1593,36 +1548,30 @@ function HostedBackendFilesEditor({
       }}
     >
       <summary className="cursor-pointer text-xs font-medium text-[var(--theme-fg-muted)] hover:text-[var(--theme-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]">
-        Backend credentials
-      </summary>
+        {translate("devices.backendCredentials")}</summary>
       {open ? (
         <div className="mt-3 max-w-3xl overflow-hidden rounded-md border border-[var(--theme-border)]">
           <div className="grid gap-3 bg-[var(--theme-surface)] p-3 sm:grid-cols-[12rem_1fr] sm:items-end">
             <label className="text-xs font-medium text-[var(--theme-fg-soft)]">
-              Backend
-              <select
+              {translate("devices.backend")}<select
                 className="relay-input mt-2 min-h-11 w-full"
                 onChange={() => undefined}
                 value="codex"
               >
                 <option value="codex">Codex</option>
-                <option disabled>Claude Code (coming soon)</option>
-                <option disabled>OpenCode (coming soon)</option>
+                <option disabled>{translate("devices.claudeCodeComingSoon")}</option>
+                <option disabled>{translate("devices.openCodeComingSoon")}</option>
               </select>
             </label>
             <p className="text-xs leading-5 text-[var(--theme-fg-muted)]">
-              Files are read from and written directly to this VM. The VM must
-              be online.
-            </p>
+              {translate("devices.filesAreReadFromAndWrittenDirectly")}</p>
           </div>
           {sandbox.status !== 'online' ? (
             <p className="border-t border-[var(--theme-border)] px-3 py-3 text-sm text-[var(--status-warning-fg)]">
-              Start the VM before editing backend files.
-            </p>
+              {translate("devices.startTheVMBeforeEditingBackendFiles")}</p>
           ) : loading ? (
             <p className="border-t border-[var(--theme-border)] px-3 py-4 text-sm text-[var(--theme-fg-muted)]">
-              Loading Codex files from the VM…
-            </p>
+              {translate("devices.loadingCodexFilesFromTheVM")}</p>
           ) : (
             <div className="space-y-4 border-t border-[var(--theme-border)] p-3">
               {error ? (
@@ -1649,8 +1598,7 @@ function HostedBackendFilesEditor({
                   onClick={() => void loadFiles()}
                   type="button"
                 >
-                  Reload
-                </button>
+                  {translate("devices.reload")}</button>
                 <button
                   className="relay-button-primary min-h-11"
                   disabled={busy || !configToml.trim() || !authJson.trim()}
@@ -1664,8 +1612,7 @@ function HostedBackendFilesEditor({
                   }
                   type="button"
                 >
-                  Save to VM
-                </button>
+                  {translate("devices.saveToVM")}</button>
               </div>
             </div>
           )}
@@ -1686,6 +1633,7 @@ function BackendFileField({
   onChange: (value: string) => void;
   value: string;
 }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <div>
       <div className="flex min-h-9 items-center justify-between gap-3">
@@ -1696,7 +1644,7 @@ function BackendFileField({
           {filename}
         </label>
         <label className="relay-button-secondary inline-flex min-h-11 cursor-pointer items-center px-3 text-xs sm:min-h-9">
-          Upload {language}
+          {translate("devices.upload")} {language}
           <input
             accept={
               language === 'JSON'
@@ -1731,6 +1679,7 @@ function HostedStatusPill({
   children: React.ReactNode;
   tone: 'success' | 'warning' | 'danger' | 'neutral';
 }) {
+  const { locale: i18nLocale } = useI18n();
   const classes = {
     success:
       'border-[var(--status-success-border)] bg-[var(--status-success-bg)] text-[var(--status-success-fg)]',
@@ -1780,33 +1729,26 @@ function AdminCompatibilityState({
   onRetry: () => void;
   statusCode: number;
 }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <section className="product-panel" role="status">
       <div className="p-5 sm:p-6">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-base font-semibold text-[var(--theme-fg)]">
-            Admin API is not available
-          </h2>
+            {translate("devices.adminAPIIsNotAvailable")}</h2>
           <span className="rounded-full border border-[var(--status-warning-border)] bg-[var(--status-warning-bg)] px-2 py-0.5 text-xs font-medium text-[var(--status-warning-fg)]">
             HTTP {statusCode}
           </span>
         </div>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--theme-fg-muted)]">
-          This relay server does not expose the administration endpoints required
-          by this web app. The relay home and normal device controls remain
-          available.
-        </p>
+          {translate("devices.thisRelayServerDoesNotExposeThe")}</p>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--theme-fg-muted)]">
-          Update and restart the relay server with a compatible Remote Codex
-          release, then retry this check.
-        </p>
+          {translate("devices.updateAndRestartTheRelayServerWith")}</p>
         <div className="mt-5 flex flex-wrap gap-2">
           <button className="relay-button-primary" onClick={onRetry} type="button">
-            Retry
-          </button>
+            {translate("devices.retry")}</button>
           <Link className="relay-button-secondary" to="/">
-            Relay home
-          </Link>
+            {translate("devices.relayHome")}</Link>
         </div>
       </div>
     </section>
@@ -1822,6 +1764,7 @@ function MetricStat({
   value: number;
   detail: string;
 }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <div className="min-w-0 px-4 py-3.5 sm:border-l sm:border-[var(--theme-border)] sm:first:border-l-0">
       <dt className="truncate text-xs font-medium text-[var(--theme-fg-muted)]">
@@ -1829,7 +1772,7 @@ function MetricStat({
       </dt>
       <dd className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <span className="text-xl font-semibold tabular-nums text-[var(--theme-fg)]">
-          {value.toLocaleString()}
+          {value.toLocaleString(getLocale())}
         </span>
         <span className="text-xs text-[var(--theme-fg-muted)]">{detail}</span>
       </dd>
@@ -1844,6 +1787,7 @@ function RelayAdminUserMenu({
   onLogout: () => void;
   session: RelaySessionDto | null;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const [open, setOpen] = useState(false);
   const menuId = useId();
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -1920,7 +1864,7 @@ function RelayAdminUserMenu({
         aria-controls={open ? menuId : undefined}
         aria-expanded={open}
         aria-haspopup="menu"
-        aria-label={`Relay admin menu for ${user.username}`}
+        aria-label={translate("devices.relayAdminMenuFor", { value1: user.username })}
         className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-[var(--theme-border)] bg-[var(--theme-panel)] text-sm font-semibold text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)]"
         onClick={() => setOpen((current) => !current)}
         onKeyDown={(event) => {
@@ -1950,8 +1894,7 @@ function RelayAdminUserMenu({
               {user.email}
             </p>
             <p className="mt-1 text-[11px] uppercase tracking-[0.14em] text-[var(--theme-fg-muted)]">
-              Admin session
-            </p>
+              {translate("devices.adminSession")}</p>
           </div>
           <button
             className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-[var(--status-danger-fg)] transition hover:bg-[var(--status-danger-bg)] focus-visible:bg-[var(--status-danger-bg)]"
@@ -1960,8 +1903,7 @@ function RelayAdminUserMenu({
             type="button"
           >
             <LogOut className="h-4 w-4" />
-            Logout admin
-          </button>
+            {translate("devices.logoutAdmin")}</button>
         </div>
       ) : null}
     </div>
@@ -1969,13 +1911,14 @@ function RelayAdminUserMenu({
 }
 
 function Overview({ summary }: { summary: RelayAdminSummaryDto }) {
+  const { locale: i18nLocale } = useI18n();
   const recentUsers = [...summary.users]
     .sort(compareNullableDate('lastSeenAt'))
     .slice(0, 6);
   const activeDevices = summary.devices.filter((device) => device.connected);
   return (
     <section className="product-panel grid min-w-0 divide-y divide-[var(--theme-border)] xl:grid-cols-[minmax(0,1fr)_minmax(22rem,0.7fr)] xl:divide-x xl:divide-y-0">
-      <Panel title="Recent users" detail="Last authenticated relay activity.">
+      <Panel title={translate("devices.recentUsers")} detail={translate("devices.lastAuthenticatedRelayActivity")}>
         <div className="divide-y divide-[var(--theme-border)]">
           {recentUsers.map((user) => (
             <div
@@ -1992,15 +1935,15 @@ function Overview({ summary }: { summary: RelayAdminSummaryDto }) {
               </div>
               <div className="text-right text-xs text-[var(--theme-fg-muted)]">
                 <p>{formatTimestamp(user.lastSeenAt)}</p>
-                <p>{user.conversationCount} conversations</p>
+                <p>{user.conversationCount} {translate("devices.conversations")}</p>
               </div>
             </div>
           ))}
         </div>
       </Panel>
       <Panel
-        title="Online devices"
-        detail="Devices with an active supervisor tunnel."
+        title={translate("devices.onlineDevices")}
+        detail={translate("devices.devicesWithAnActiveSupervisorTunnel")}
       >
         {activeDevices.length ? (
           <div className="space-y-3">
@@ -2009,7 +1952,7 @@ function Overview({ summary }: { summary: RelayAdminSummaryDto }) {
             ))}
           </div>
         ) : (
-          <EmptyState>No supervisors are connected.</EmptyState>
+          <EmptyState>{translate("devices.noSupervisorsAreConnected")}</EmptyState>
         )}
       </Panel>
     </section>
@@ -2029,6 +1972,7 @@ function UsersTable({
   onUpdateUser: (userId: string, enabled: boolean) => void;
   users: RelayAdminSummaryDto['users'];
 }) {
+  const { locale: i18nLocale } = useI18n();
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<{
     key: UserSortKey;
@@ -2068,8 +2012,8 @@ function UsersTable({
   return (
     <>
       <Panel
-        title="Users"
-        detail="Registered relay accounts. Admin accounts are excluded from workspace and device operations."
+        title={translate("devices.users")}
+        detail={translate("devices.registeredRelayAccountsAdminAccountsAreExcluded")}
       >
         <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <label className="relative block min-w-0 flex-1">
@@ -2077,19 +2021,17 @@ function UsersTable({
             <input
               className="relay-input w-full pl-9"
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search username or email"
+              placeholder={translate("devices.searchUsernameOrEmail")}
               value={query}
             />
           </label>
           <p className="text-sm text-[var(--theme-fg-muted)]">
-            {filteredUsers.length.toLocaleString()} of{' '}
-            {users.length.toLocaleString()} users
-          </p>
+            {filteredUsers.length.toLocaleString(getLocale())} {translate("devices.of")}{' '}
+            {users.length.toLocaleString(getLocale())} {translate("devices.users_5b7dcd")}</p>
         </div>
         <div className="mb-4 grid grid-cols-2 gap-3 md:hidden">
           <label className="text-xs font-medium text-[var(--theme-fg-muted)]">
-            Sort by
-            <select
+            {translate("devices.sortBy")}<select
               className="relay-input mt-1.5 w-full"
               onChange={(event) =>
                 setSort((current) => ({
@@ -2099,17 +2041,16 @@ function UsersTable({
               }
               value={sort.key}
             >
-              <option value="username">User</option>
-              <option value="enabled">Status</option>
-              <option value="lastSeenAt">Last used</option>
-              <option value="conversationCount">Conversations</option>
-              <option value="deviceCount">Devices</option>
-              <option value="createdAt">Created</option>
+              <option value="username">{translate("devices.user_9f8a23")}</option>
+              <option value="enabled">{translate("devices.status")}</option>
+              <option value="lastSeenAt">{translate("devices.lastUsed")}</option>
+              <option value="conversationCount">{translate("devices.conversations_07c59b")}</option>
+              <option value="deviceCount">{translate("devices.devices")}</option>
+              <option value="createdAt">{translate("devices.created")}</option>
             </select>
           </label>
           <label className="text-xs font-medium text-[var(--theme-fg-muted)]">
-            Direction
-            <select
+            {translate("devices.direction")}<select
               className="relay-input mt-1.5 w-full"
               onChange={(event) =>
                 setSort((current) => ({
@@ -2119,8 +2060,8 @@ function UsersTable({
               }
               value={sort.direction}
             >
-              <option value="desc">Descending</option>
-              <option value="asc">Ascending</option>
+              <option value="desc">{translate("devices.descending")}</option>
+              <option value="asc">{translate("devices.ascending")}</option>
             </select>
           </label>
         </div>
@@ -2132,59 +2073,54 @@ function UsersTable({
                 direction={sort.direction}
                 onClick={() => updateSort('username')}
               >
-                User
-              </SortableTh>
+                {translate("devices.user_9f8a23")}</SortableTh>
               <SortableTh
                 active={sort.key === 'enabled'}
                 direction={sort.direction}
                 onClick={() => updateSort('enabled')}
               >
-                Status
-              </SortableTh>
+                {translate("devices.status")}</SortableTh>
               <SortableTh
                 active={sort.key === 'lastSeenAt'}
                 direction={sort.direction}
                 onClick={() => updateSort('lastSeenAt')}
               >
-                Last used
-              </SortableTh>
+                {translate("devices.lastUsed")}</SortableTh>
               <SortableTh
                 active={sort.key === 'conversationCount'}
                 direction={sort.direction}
                 onClick={() => updateSort('conversationCount')}
               >
-                Conversations
-              </SortableTh>
+                {translate("devices.conversations_07c59b")}</SortableTh>
               <SortableTh
                 active={sort.key === 'deviceCount'}
                 direction={sort.direction}
                 onClick={() => updateSort('deviceCount')}
               >
-                Devices
-              </SortableTh>
-              <Th>Role</Th>
-              <Th>Actions</Th>
+                {translate("devices.devices")}</SortableTh>
+              <Th>{translate("devices.role")}</Th>
+              <Th>{translate("devices.actions")}</Th>
             </tr>
           </thead>
           <tbody>
             {filteredUsers.map((user) => (
               <tr key={user.id}>
-                <Td label="User" strong>
+                <Td label={translate("devices.user_9f8a23")} strong>
                   {user.username}
                   <div className="text-xs font-normal text-[var(--theme-fg-muted)]">
                     {user.email}
                   </div>
                 </Td>
-                <Td label="Status">
+                <Td label={translate("devices.status")}>
                   <StatusPill active={user.enabled}>
-                    {user.enabled ? 'Enabled' : 'Disabled'}
+                    {user.enabled ? translate("devices.enabled") : translate("devices.disabled")}
                   </StatusPill>
                 </Td>
-                <Td label="Last used">{formatTimestamp(user.lastSeenAt)}</Td>
-                <Td label="Conversations">{user.conversationCount.toLocaleString()}</Td>
-                <Td label="Devices">{user.deviceCount.toLocaleString()}</Td>
-                <Td label="Role">{user.role}</Td>
-                <Td label="Actions">
+                <Td label={translate("devices.lastUsed")}>{formatTimestamp(user.lastSeenAt)}</Td>
+                <Td label={translate("devices.conversations_07c59b")}>{user.conversationCount.toLocaleString(getLocale())}</Td>
+                <Td label={translate("devices.devices")}>{user.deviceCount.toLocaleString(getLocale())}</Td>
+                <Td label={translate("devices.role")}>{user.role}</Td>
+                <Td label={translate("devices.actions")}>
                   <div className="flex flex-wrap gap-2">
                     <button
                       className="relay-button-secondary"
@@ -2192,7 +2128,7 @@ function UsersTable({
                       onClick={() => onUpdateUser(user.id, !user.enabled)}
                       type="button"
                     >
-                      {user.enabled ? 'Disable' : 'Enable'}
+                      {user.enabled ? translate("devices.disable") : translate("devices.enable")}
                     </button>
                     <button
                       className="relay-button-secondary inline-flex items-center gap-2"
@@ -2203,8 +2139,7 @@ function UsersTable({
                       type="button"
                     >
                       <KeyRound className="h-4 w-4" />
-                      Reset
-                    </button>
+                      {translate("devices.reset")}</button>
                     <button
                       className="relay-button-secondary inline-flex items-center gap-2 text-[var(--status-danger-fg)]"
                       disabled={
@@ -2214,8 +2149,7 @@ function UsersTable({
                       type="button"
                     >
                       <Trash2 className="h-4 w-4" />
-                      Delete
-                    </button>
+                      {translate("devices.delete")}</button>
                   </div>
                 </Td>
               </tr>
@@ -2223,7 +2157,7 @@ function UsersTable({
           </tbody>
         </ResponsiveTable>
         {!filteredUsers.length ? (
-          <EmptyState>No users match the current search.</EmptyState>
+          <EmptyState>{translate("devices.noUsersMatchTheCurrentSearch")}</EmptyState>
         ) : null}
       </Panel>
       {resetTarget ? (
@@ -2240,14 +2174,14 @@ function UsersTable({
       {deleteTarget ? (
         <DangerConfirmDialog
           busy={busyKey === `delete:${deleteTarget.id}`}
-          confirmLabel="Delete user"
-          description={`Delete ${deleteTarget.username}, their devices, shares, and access history. This cannot be undone.`}
+          confirmLabel={translate("devices.deleteUser")}
+          description={translate("devices.deleteTheirDevicesSharesAndAccessHistory", { value1: deleteTarget.username })}
           onClose={() => setDeleteTarget(null)}
           onConfirm={async () => {
             await onDeleteUser(deleteTarget.id);
             setDeleteTarget(null);
           }}
-          title="Delete relay user"
+          title={translate("devices.deleteRelayUser")}
         />
       ) : null}
     </>
@@ -2261,6 +2195,7 @@ function DevicesPanel({
   devices: RelayAdminDeviceDto[];
   users: RelayAdminSummaryDto['users'];
 }) {
+  const { locale: i18nLocale } = useI18n();
   const [ownerId, setOwnerId] = useState('all');
   const [status, setStatus] = useState<'all' | 'online' | 'offline'>('all');
   const [activity, setActivity] = useState<'all' | '24h' | '7d' | '30d'>('all');
@@ -2293,18 +2228,17 @@ function DevicesPanel({
 
   return (
     <Panel
-      title="Devices"
-      detail="Supervisor devices grouped by owner, connection state, activity, and loaded workspace metadata."
+      title={translate("devices.devices")}
+      detail={translate("devices.supervisorDevicesGroupedByOwnerConnectionState")}
     >
       <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <label className="block text-sm text-[var(--theme-fg-soft)]">
-          Owner
-          <select
+          {translate("devices.owner")}<select
             className="relay-input mt-2 w-full"
             onChange={(event) => setOwnerId(event.target.value)}
             value={ownerId}
           >
-            <option value="all">All users</option>
+            <option value="all">{translate("devices.allUsers")}</option>
             {ownerUsers.map((user) => (
               <option key={user.id} value={user.id}>
                 {user.username}
@@ -2313,85 +2247,81 @@ function DevicesPanel({
           </select>
         </label>
         <label className="block text-sm text-[var(--theme-fg-soft)]">
-          Status
-          <select
+          {translate("devices.status")}<select
             className="relay-input mt-2 w-full"
             onChange={(event) => setStatus(event.target.value as typeof status)}
             value={status}
           >
-            <option value="all">All devices</option>
-            <option value="online">Online</option>
-            <option value="offline">Offline</option>
+            <option value="all">{translate("devices.allDevices")}</option>
+            <option value="online">{translate("devices.online_c3e839")}</option>
+            <option value="offline">{translate("devices.offline")}</option>
           </select>
         </label>
         <label className="block text-sm text-[var(--theme-fg-soft)]">
-          Last activity
-          <select
+          {translate("devices.lastActivity")}<select
             className="relay-input mt-2 w-full"
             onChange={(event) =>
               setActivity(event.target.value as typeof activity)
             }
             value={activity}
           >
-            <option value="all">Any time</option>
-            <option value="24h">Last 24 hours</option>
-            <option value="7d">Last 7 days</option>
-            <option value="30d">Last 30 days</option>
+            <option value="all">{translate("devices.anyTime")}</option>
+            <option value="24h">{translate("devices.last24Hours")}</option>
+            <option value="7d">{translate("devices.last7Days")}</option>
+            <option value="30d">{translate("devices.last30Days")}</option>
           </select>
         </label>
         <label className="block text-sm text-[var(--theme-fg-soft)]">
-          Sort by
-          <select
+          {translate("devices.sortBy")}<select
             className="relay-input mt-2 w-full"
             onChange={(event) =>
               setSortKey(event.target.value as DeviceSortKey)
             }
             value={sortKey}
           >
-            <option value="lastActivity">Last activity</option>
-            <option value="name">Device name</option>
-            <option value="ownerUsername">Owner</option>
-            <option value="connected">Connection</option>
-            <option value="createdAt">Created</option>
-            <option value="workspaceCount">Workspaces</option>
-            <option value="threadCount">Threads</option>
+            <option value="lastActivity">{translate("devices.lastActivity")}</option>
+            <option value="name">{translate("devices.deviceName")}</option>
+            <option value="ownerUsername">{translate("devices.owner")}</option>
+            <option value="connected">{translate("devices.connection")}</option>
+            <option value="createdAt">{translate("devices.created")}</option>
+            <option value="workspaceCount">{translate("devices.workspaces")}</option>
+            <option value="threadCount">{translate("devices.threads")}</option>
           </select>
         </label>
         <label className="block text-sm text-[var(--theme-fg-soft)]">
-          Direction
-          <select
+          {translate("devices.direction")}<select
             className="relay-input mt-2 w-full"
             onChange={(event) =>
               setDirection(event.target.value as SortDirection)
             }
             value={direction}
           >
-            <option value="desc">Descending</option>
-            <option value="asc">Ascending</option>
+            <option value="desc">{translate("devices.descending")}</option>
+            <option value="asc">{translate("devices.ascending")}</option>
           </select>
         </label>
       </div>
       <ResponsiveTable minWidth="74rem">
         <thead>
           <tr>
-            <Th>Device</Th>
-            <Th>Owner</Th>
-            <Th>Status</Th>
-            <Th>Last activity</Th>
-            <Th>Inventory</Th>
-            <Th>Network</Th>
+            <Th>{translate("devices.device")}</Th>
+            <Th>{translate("devices.owner")}</Th>
+            <Th>{translate("devices.status")}</Th>
+            <Th>{translate("devices.lastActivity")}</Th>
+            <Th>{translate("devices.inventory")}</Th>
+            <Th>{translate("devices.network")}</Th>
           </tr>
         </thead>
         <tbody>
           {filteredDevices.map((device) => (
             <tr key={device.id}>
-              <Td label="Device" strong>
+              <Td label={translate("devices.device")} strong>
                 {device.name}
                 <div className="text-xs font-normal text-[var(--theme-fg-muted)]">
                   {device.tokenPreview}
                 </div>
               </Td>
-              <Td label="Owner">
+              <Td label={translate("devices.owner")}>
                 <span className="font-medium text-[var(--theme-fg-soft)]">
                   {device.ownerUsername}
                 </span>
@@ -2399,34 +2329,33 @@ function DevicesPanel({
                   {device.ownerEmail}
                 </div>
               </Td>
-              <Td label="Status">
+              <Td label={translate("devices.status")}>
                 <StatusPill active={device.connected}>
-                  {device.connected ? 'Online' : 'Offline'}
+                  {device.connected ? translate("devices.online_c3e839") : translate("devices.offline")}
                 </StatusPill>
               </Td>
-              <Td label="Last activity">
+              <Td label={translate("devices.lastActivity")}>
                 {formatTimestamp(deviceLastActivity(device))}
                 <div className="text-xs text-[var(--theme-fg-muted)]">
-                  created {formatTimestamp(device.createdAt)}
+                  {translate("devices.created_21c508")} {formatTimestamp(device.createdAt)}
                 </div>
               </Td>
-              <Td label="Inventory">
+              <Td label={translate("devices.inventory")}>
                 <span>
-                  {device.workspaces.length.toLocaleString()} workspaces
-                </span>
+                  {device.workspaces.length.toLocaleString(getLocale())} {translate("devices.workspaces_e6f0a0")}</span>
                 <span className="mx-2 text-[var(--theme-fg-muted)]">·</span>
-                <span>{device.threads.length.toLocaleString()} threads</span>
+                <span>{device.threads.length.toLocaleString(getLocale())} {translate("devices.threads_c91e11")}</span>
                 <div className="mt-1 truncate text-xs text-[var(--theme-fg-muted)]">
-                  {device.workspaces[0]?.label ?? 'No workspace metadata'}
+                  {device.workspaces[0]?.label ?? translate("devices.noWorkspaceMetadata")}
                 </div>
                 <div className="truncate text-xs text-[var(--theme-fg-muted)]">
-                  {device.threads[0]?.title ?? 'No thread metadata'}
+                  {device.threads[0]?.title ?? translate("devices.noThreadMetadata")}
                 </div>
               </Td>
-              <Td label="Network">
-                {device.ipAddress ?? 'IP unavailable'}
+              <Td label={translate("devices.network")}>
+                {device.ipAddress ?? translate("devices.iPUnavailable")}
                 <div className="text-xs text-[var(--theme-fg-muted)]">
-                  heartbeat {formatTimestamp(device.lastHeartbeatAt)}
+                  {translate("devices.heartbeat")} {formatTimestamp(device.lastHeartbeatAt)}
                 </div>
               </Td>
             </tr>
@@ -2434,56 +2363,57 @@ function DevicesPanel({
         </tbody>
       </ResponsiveTable>
       {!filteredDevices.length ? (
-        <EmptyState>No devices match the selected filters.</EmptyState>
+        <EmptyState>{translate("devices.noDevicesMatchTheSelectedFilters")}</EmptyState>
       ) : null}
     </Panel>
   );
 }
 
 function SharesTable({ shares }: { shares: RelaySessionShareDto[] }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <Panel
-      title="Share relationships"
-      detail="Thread grants between relay users. Revoked grants remain visible for audit."
+      title={translate("devices.shareRelationships")}
+      detail={translate("devices.threadGrantsBetweenRelayUsersRevokedGrants")}
     >
       <ResponsiveTable minWidth="62rem">
         <thead>
           <tr>
-            <Th>Owner</Th>
-            <Th>Target</Th>
-            <Th>Thread</Th>
-            <Th>Device</Th>
-            <Th>Permissions</Th>
-            <Th>Last access</Th>
-            <Th>Status</Th>
+            <Th>{translate("devices.owner")}</Th>
+            <Th>{translate("devices.target")}</Th>
+            <Th>{translate("devices.thread")}</Th>
+            <Th>{translate("devices.device")}</Th>
+            <Th>{translate("devices.permissions")}</Th>
+            <Th>{translate("devices.lastAccess")}</Th>
+            <Th>{translate("devices.status")}</Th>
           </tr>
         </thead>
         <tbody>
           {shares.map((share) => (
             <tr key={share.id}>
-              <Td label="Owner" strong>{share.ownerUsername}</Td>
-              <Td label="Target">{share.targetUsername}</Td>
-              <Td label="Thread">
+              <Td label={translate("devices.owner")} strong>{share.ownerUsername}</Td>
+              <Td label={translate("devices.target")}>{share.targetUsername}</Td>
+              <Td label={translate("devices.thread")}>
                 <span className="font-medium text-[var(--theme-fg)]">
-                  {share.threadTitle ?? share.label ?? 'Thread unavailable'}
+                  {share.threadTitle ?? share.label ?? translate("devices.threadUnavailable")}
                 </span>
                 <div className="text-xs text-[var(--theme-fg-muted)]">
-                  {share.workspaceLabel ?? 'Workspace unavailable'}
+                  {share.workspaceLabel ?? translate("devices.workspaceUnavailable")}
                 </div>
               </Td>
-              <Td label="Device">{share.deviceName}</Td>
-              <Td label="Permissions">
+              <Td label={translate("devices.device")}>{share.deviceName}</Td>
+              <Td label={translate("devices.permissions")}>
                 {share.threadAccess} /{' '}
                 {workspaceAccessLabel(share.workspaceAccess)}
               </Td>
-              <Td label="Last access">{formatTimestamp(share.lastAccessedAt)}</Td>
-              <Td label="Status">
+              <Td label={translate("devices.lastAccess")}>{formatTimestamp(share.lastAccessedAt)}</Td>
+              <Td label={translate("devices.status")}>
                 {share.revokedAt
-                  ? 'Revoked'
+                  ? translate("devices.revoked")
                   : share.expiresAt &&
                       share.expiresAt <= new Date().toISOString()
-                    ? 'Expired'
-                    : 'Active'}
+                    ? translate("devices.expired")
+                    : translate("devices.active")}
               </Td>
             </tr>
           ))}
@@ -2513,45 +2443,45 @@ function SettingsPanel({
   pending: RelayAdminSummaryDto['pendingRegistrations'];
   reviewBusyKey: string | null;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const settingsLocked = busy || reviewBusyKey !== null;
   return (
     <section className="product-panel grid min-w-0 divide-y divide-[var(--theme-border)] xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] xl:divide-x xl:divide-y-0">
       <Panel
-        title="Registration settings"
-        detail="Stored in the relay database. Environment password seeds this once if empty."
+        title={translate("devices.registrationSettings")}
+        detail={translate("devices.storedInTheRelayDatabaseEnvironmentPassword")}
       >
         <form className="space-y-4" onSubmit={onSave}>
           <Checkbox
             checked={draft.enabled}
             disabled={settingsLocked}
-            label="Open registration"
+            label={translate("devices.openRegistration")}
             onChange={(enabled) => onChange({ ...draft, enabled })}
           />
           <label className="block text-sm text-[var(--theme-fg-soft)]">
-            Registration password
-            <input
+            {translate("devices.registrationPassword")}<input
               className="relay-input mt-2 w-full"
               disabled={settingsLocked}
               onChange={(event) =>
                 onChange({ ...draft, registrationPassword: event.target.value })
               }
-              placeholder="Leave empty for no invite password"
+              placeholder={translate("devices.leaveEmptyForNoInvitePassword")}
               value={draft.registrationPassword ?? ''}
             />
           </label>
           <Checkbox
             checked={draft.approvalRequired}
             disabled={settingsLocked}
-            label="Require admin approval"
+            label={translate("devices.requireAdminApproval")}
             onChange={(approvalRequired) =>
               onChange({ ...draft, approvalRequired })
             }
           />
           <div className="space-y-3 border-t border-[var(--theme-border)] pt-4">
-            <Checkbox checked={draft.googleAuthEnabled} disabled={settingsLocked || !draft.googleAuthAvailable} label="Enable Google authentication" onChange={(googleAuthEnabled) => onChange({ ...draft, googleAuthEnabled })} />
-            <Checkbox checked={draft.githubAuthEnabled} disabled={settingsLocked || !draft.githubAuthAvailable} label="Enable GitHub authentication" onChange={(githubAuthEnabled) => onChange({ ...draft, githubAuthEnabled })} />
-            <Checkbox checked={draft.emailVerificationEnabled} disabled={settingsLocked || !draft.emailVerificationAvailable} label="Enable email verification" onChange={(emailVerificationEnabled) => onChange({ ...draft, emailVerificationEnabled })} />
-            {!draft.emailVerificationAvailable ? <p className="text-xs text-[var(--theme-fg-muted)]">Configure the email provider and verification secret to enable this option.</p> : null}
+            <Checkbox checked={draft.googleAuthEnabled} disabled={settingsLocked || !draft.googleAuthAvailable} label={translate("devices.enableGoogleAuthentication")} onChange={(googleAuthEnabled) => onChange({ ...draft, googleAuthEnabled })} />
+            <Checkbox checked={draft.githubAuthEnabled} disabled={settingsLocked || !draft.githubAuthAvailable} label={translate("devices.enableGitHubAuthentication")} onChange={(githubAuthEnabled) => onChange({ ...draft, githubAuthEnabled })} />
+            <Checkbox checked={draft.emailVerificationEnabled} disabled={settingsLocked || !draft.emailVerificationAvailable} label={translate("devices.enableEmailVerification")} onChange={(emailVerificationEnabled) => onChange({ ...draft, emailVerificationEnabled })} />
+            {!draft.emailVerificationAvailable ? <p className="text-xs text-[var(--theme-fg-muted)]">{translate("devices.configureTheEmailProviderAndVerificationSecret")}</p> : null}
           </div>
           <button
             className="relay-button-primary inline-flex items-center gap-2"
@@ -2559,14 +2489,14 @@ function SettingsPanel({
             type="submit"
           >
             <Settings className="h-4 w-4" />
-            {busy ? 'Saving...' : 'Save settings'}
+            {busy ? translate("devices.saving") : translate("devices.saveSettings")}
           </button>
         </form>
       </Panel>
 
       <Panel
-        title="Pending registrations"
-        detail="Approve creates the user. Reject keeps an audit trail."
+        title={translate("devices.pendingRegistrations")}
+        detail={translate("devices.approveCreatesTheUserRejectKeepsAn")}
       >
         {pending.length ? (
           <div className="divide-y divide-[var(--theme-border)]">
@@ -2591,22 +2521,20 @@ function SettingsPanel({
                     type="button"
                   >
                     <Check className="h-4 w-4" />
-                    Approve
-                  </button>
+                    {translate("devices.approve")}</button>
                   <button
                     className="relay-button-secondary"
                     disabled={reviewBusyKey !== null}
                     onClick={() => onReviewRegistration(request.id, 'reject')}
                     type="button"
                   >
-                    Reject
-                  </button>
+                    {translate("devices.reject")}</button>
                 </div>
               </div>
             ))}
           </div>
         ) : (
-          <EmptyState>No pending applications.</EmptyState>
+          <EmptyState>{translate("devices.noPendingApplications")}</EmptyState>
         )}
       </Panel>
     </section>
@@ -2614,26 +2542,27 @@ function SettingsPanel({
 }
 
 function DeviceSummary({ device }: { device: RelayAdminDeviceDto }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <div className="grid gap-2 text-xs text-[var(--theme-fg-muted)] sm:grid-cols-2">
       <p>
-        Owner:{' '}
+        {translate("devices.owner_719379")}{' '}
         <span className="text-[var(--theme-fg-soft)]">{device.ownerEmail}</span>
       </p>
       <p>
-        IP:{' '}
+        {translate("devices.iP")}{' '}
         <span className="text-[var(--theme-fg-soft)]">
-          {device.ipAddress ?? 'unavailable'}
+          {device.ipAddress ?? translate("devices.unavailable_1d5ee3")}
         </span>
       </p>
       <p>
-        Connected:{' '}
+        {translate("devices.connected")}{' '}
         <span className="text-[var(--theme-fg-soft)]">
           {formatTimestamp(device.connectedAt)}
         </span>
       </p>
       <p>
-        Heartbeat:{' '}
+        {translate("devices.heartbeat_93fd96")}{' '}
         <span className="text-[var(--theme-fg-soft)]">
           {formatTimestamp(device.lastHeartbeatAt)}
         </span>
@@ -2653,6 +2582,7 @@ function Panel({
   detail: string;
   title: string;
 }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <section className="min-w-0 px-4 py-5 sm:px-5">
       <div className="mb-4 flex items-start justify-between gap-3">
@@ -2676,9 +2606,10 @@ function ResponsiveTable({
   children: React.ReactNode;
   minWidth: string;
 }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <div
-      aria-label="Scrollable data table"
+      aria-label={translate("devices.scrollableDataTable")}
       className="admin-responsive-table max-w-full overflow-x-auto overscroll-x-contain rounded-lg border border-[var(--theme-border)]"
       role="region"
       tabIndex={0}
@@ -2694,6 +2625,7 @@ function ResponsiveTable({
 }
 
 function Th({ children }: { children: React.ReactNode }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <th className="border-b border-[var(--theme-border)] py-2 pr-3 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--theme-fg-muted)] first:pl-3">
       {children}
@@ -2712,6 +2644,7 @@ function SortableTh({
   direction: SortDirection;
   onClick: () => void;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const Icon = !active
     ? ArrowUpDown
     : direction === 'asc'
@@ -2745,6 +2678,7 @@ function Td({
   label: string;
   strong?: boolean;
 }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <td
       data-label={label}
@@ -2767,6 +2701,7 @@ function Checkbox({
   label: string;
   onChange: (checked: boolean) => void;
 }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <label className={`flex items-center gap-3 text-sm ${disabled ? 'text-[var(--theme-fg-muted)] opacity-60' : 'text-[var(--theme-fg-soft)]'}`}>
       <input
@@ -2788,6 +2723,7 @@ function StatusPill({
   active: boolean;
   children: React.ReactNode;
 }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <span
       className={`rounded-full border px-2 py-0.5 text-xs ${
@@ -2802,6 +2738,7 @@ function StatusPill({
 }
 
 function EmptyState({ children }: { children: React.ReactNode }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <p className="product-empty !min-h-24 !p-4 text-sm">
       {children}
@@ -2820,6 +2757,7 @@ function PasswordResetDialog({
   onSubmit: (password: string) => Promise<void>;
   user: RelayAdminSummaryDto['users'][number];
 }) {
+  const { locale: i18nLocale } = useI18n();
   const [password, setPassword] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLFormElement>(null);
@@ -2839,7 +2777,7 @@ function PasswordResetDialog({
     event.preventDefault();
     setLocalError(null);
     if (password.length < 8) {
-      setLocalError('Password must be at least 8 characters.');
+      setLocalError(translate("devices.passwordMustBeAtLeast8Characters"));
       return;
     }
     try {
@@ -2852,7 +2790,7 @@ function PasswordResetDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8">
       <button
-        aria-label="Close reset password dialog"
+        aria-label={translate("devices.closeResetPasswordDialog")}
         className="ui-overlay-scrim absolute inset-0 backdrop-blur-[2px]"
         disabled={busy}
         onClick={onClose}
@@ -2871,14 +2809,13 @@ function PasswordResetDialog({
         <header className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold text-[var(--theme-fg)]" id={titleId}>
-              Reset password
-            </h2>
+              {translate("devices.resetPassword")}</h2>
             <p className="mt-1 text-sm text-[var(--theme-fg-muted)]">
-              Set a new relay password for {user.username}.
+              {translate("devices.setANewRelayPasswordFor")} {user.username}.
             </p>
           </div>
           <button
-            aria-label="Close reset password dialog"
+            aria-label={translate("devices.closeResetPasswordDialog")}
             className="product-icon-button"
             disabled={busy}
             onClick={onClose}
@@ -2889,8 +2826,7 @@ function PasswordResetDialog({
         </header>
         <div>
           <label className="block text-sm text-[var(--theme-fg-soft)]">
-            New password
-            <input
+            {translate("devices.newPassword")}<input
               aria-describedby={localError ? errorId : undefined}
               aria-invalid={localError ? true : undefined}
               autoComplete="new-password"
@@ -2918,15 +2854,14 @@ function PasswordResetDialog({
               onClick={onClose}
               type="button"
             >
-              Cancel
-            </button>
+              {translate("devices.cancel")}</button>
             <button
               className="relay-button-primary inline-flex items-center gap-2"
               disabled={busy || password.length < 8}
               type="submit"
             >
               <KeyRound aria-hidden="true" className="h-4 w-4" />
-              {busy ? 'Saving...' : 'Save password'}
+              {busy ? translate("devices.saving") : translate("devices.savePassword")}
             </button>
           </div>
       </form>
@@ -2949,6 +2884,7 @@ function DangerConfirmDialog({
   onConfirm: () => Promise<void>;
   title: string;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const [localError, setLocalError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -2975,7 +2911,7 @@ function DangerConfirmDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center px-4 py-8">
       <button
-        aria-label="Close confirmation dialog"
+        aria-label={translate("devices.closeConfirmationDialog")}
         className="ui-overlay-scrim absolute inset-0 backdrop-blur-[2px]"
         disabled={busy}
         onClick={onClose}
@@ -2996,7 +2932,7 @@ function DangerConfirmDialog({
           {title}
           </h2>
           <button
-            aria-label="Close confirmation dialog"
+            aria-label={translate("devices.closeConfirmationDialog")}
             className="product-icon-button"
             disabled={busy}
             onClick={onClose}
@@ -3021,8 +2957,7 @@ function DangerConfirmDialog({
             ref={cancelRef}
             type="button"
           >
-            Cancel
-          </button>
+            {translate("devices.cancel")}</button>
           <button
             className="ui-action-danger inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold transition disabled:cursor-not-allowed"
             disabled={busy}
@@ -3030,7 +2965,7 @@ function DangerConfirmDialog({
             type="button"
           >
             <Trash2 aria-hidden="true" className="h-4 w-4" />
-            {busy ? 'Deleting...' : confirmLabel}
+            {busy ? translate("devices.deleting") : confirmLabel}
           </button>
         </div>
       </div>
@@ -3142,32 +3077,32 @@ function replaceAdminUser(
 }
 
 function tabLabel(tab: AdminTab) {
-  if(tab==='security')return 'Security';
+  if(tab==='security')return translate("devices.security");
   switch (tab) {
     case 'overview':
-      return 'Overview';
+      return translate("devices.overview");
     case 'users':
-      return 'Users';
+      return translate("devices.users");
     case 'devices':
-      return 'Devices';
+      return translate("devices.devices");
     case 'hosted':
-      return 'Hosted VMs';
+      return translate("devices.hostedVMs");
     case 'shares':
-      return 'Shares';
+      return translate("devices.shares_d15dcb");
     case 'settings':
-      return 'Settings';
+      return translate("devices.settings");
   }
 }
 
 function workspaceAccessLabel(access: RelaySessionShareDto['workspaceAccess']) {
   switch (access) {
     case 'write':
-      return 'workspace write';
+      return translate("devices.workspaceWrite_fa0c11");
     case 'read':
-      return 'workspace read';
+      return translate("devices.workspaceRead_10156a");
     case 'none':
     default:
-      return 'no workspace';
+      return translate("devices.noWorkspace_d3694f");
   }
 }
 
@@ -3179,7 +3114,7 @@ function compareNullableDate(field: 'lastSeenAt') {
 }
 
 function formatTimestamp(value: string | null | undefined) {
-  return value ? new Date(value).toLocaleString() : 'never';
+  return value ? new Date(value).toLocaleString(getLocale()) : 'never';
 }
 
 function formatRunningDuration(value: string, now: number) {

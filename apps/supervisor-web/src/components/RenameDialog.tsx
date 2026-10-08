@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { FormEvent, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
@@ -27,6 +28,7 @@ export function RenameDialog({
   onCancel,
   onSubmit,
 }: RenameDialogProps) {
+  useI18n();
   const dialogRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const titleId = useId();
@@ -53,7 +55,7 @@ export function RenameDialog({
     <div className="fixed inset-0 z-[95] flex items-center justify-center p-4 sm:p-6">
       <button
         type="button"
-        aria-label="Close rename dialog"
+        aria-label={translate("workbench.closeRenameDialog")}
         onClick={onCancel}
         disabled={busy}
         className="ui-overlay-scrim absolute inset-0 backdrop-blur-sm disabled:cursor-not-allowed"
@@ -71,12 +73,11 @@ export function RenameDialog({
           <div className="min-w-0 flex-1">
             <h2 className="host-page-title text-base font-semibold" id={titleId}>{title}</h2>
             <p className="host-muted mt-1 text-sm">
-              Changes are saved only after confirmation.
-            </p>
+              {translate("workbench.changesAreSavedOnlyAfterConfirmation")}</p>
           </div>
           <button
             type="button"
-            aria-label="Close dialog"
+            aria-label={translate("workbench.closeDialog")}
             onClick={onCancel}
             disabled={busy}
             className="host-icon-button inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md border transition disabled:cursor-not-allowed disabled:opacity-60 sm:h-9 sm:w-9"
@@ -115,15 +116,13 @@ export function RenameDialog({
             disabled={busy}
             className="host-secondary-button min-h-11 rounded-md border px-4 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Cancel
-          </button>
+            {translate("workbench.cancel")}</button>
           <button
             type="submit"
             disabled={busy || !value.trim()}
             className="ui-action-primary min-h-11 rounded-md px-4 text-sm font-semibold transition disabled:cursor-not-allowed"
           >
-            Save
-          </button>
+            {translate("workbench.save")}</button>
         </div>
       </form>
     </div>,

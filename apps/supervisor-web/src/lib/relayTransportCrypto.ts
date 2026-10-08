@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import {
   Aes256Gcm,
   CipherSuite,
@@ -119,7 +120,7 @@ export async function resetPinnedDevice(deviceId: string) {
 // old pin would trust whichever device answers next, including a different key.
 export async function trustPinnedDevice(deviceId: string, identityKey: string, fingerprint: string) {
   const actual = b64(await crypto.subtle.digest('SHA-256', buffer(unb64(identityKey))));
-  if (actual !== fingerprint) throw new Error('The device fingerprint changed. Inspect it again.');
+  if (actual !== fingerprint) throw new Error(translate("workbench.theDeviceFingerprintChangedInspectItAgain"));
   const db = await identityStore();
   try {
     await new Promise<void>((done, fail) => {
@@ -177,7 +178,7 @@ async function keyFor(
       );
     } catch (error) {
       if (controller.signal.aborted)
-        throw new TransportError('device_unresponsive', 'The device did not respond to the encryption handshake. Retry in a moment.', 504);
+        throw new TransportError('device_unresponsive', translate("workbench.handshakeTimeout"), 504);
       throw error;
     } finally {
       clearTimeout(timeout);
@@ -200,26 +201,26 @@ async function keyFor(
       )
         throw new TransportError(
           'device_offline',
-          'This device is offline. Wake it and check its network connection, then retry.',
+          translate("workbench.offlineRetry"),
           response.status,
         );
       if (response.status === 504)
         throw new TransportError(
           'device_unresponsive',
-          'This device did not respond. It may be asleep or reconnecting. Wake it and retry.',
+          translate("workbench.noResponseRetry"),
           response.status,
         );
       throw new TransportError(
         'transport_unavailable',
         response.status === 401
-          ? 'Sign in to connect to this device.'
+          ? translate("workbench.signInForDevice")
           : response.status === 403
-            ? 'You no longer have access to this device.'
+            ? translate("workbench.deviceAccessLost")
             : response.status === 429
-              ? 'This device is busy. Wait a moment and retry.'
+              ? translate("workbench.deviceBusyRetry")
               : response.status >= 500
-                ? 'The device connection is temporarily unavailable. Retry in a moment.'
-                : 'Unable to establish an encrypted device connection.',
+                ? translate("workbench.connectionUnavailableRetry")
+                : translate("workbench.encryptedConnectionUnavailable"),
         response.status,
       );
     }
@@ -231,7 +232,7 @@ async function keyFor(
     )
       throw new TransportError(
         'transport_downgrade',
-        'Device encryption is unavailable. Update the supervisor and reconnect.',
+        translate("workbench.encryptionUpdateRequired"),
       );
     const identity = await crypto.subtle.importKey(
       'raw',
@@ -253,7 +254,7 @@ async function keyFor(
     )
       throw new TransportError(
         'transport_invalid_identity',
-        'The device encryption identity could not be verified.',
+        translate("workbench.identityUnverified"),
       );
     const fingerprint = b64(
       await crypto.subtle.digest(
@@ -266,7 +267,7 @@ async function keyFor(
       reportTransport({ deviceId, state: 'identity-changed', fingerprint, identityKey: descriptor.identityKey });
       throw new TransportError(
         'transport_identity_changed',
-        'The device identity changed. Verify its fingerprint before trusting it again.',
+        translate("workbench.identityChangedRetry"),
       );
     }
     return {
@@ -301,10 +302,10 @@ function packet(headers: Headers, body: Uint8Array, query = '') {
 }
 function unpack(clear: ArrayBuffer) {
   if (clear.byteLength < 4 || clear.byteLength > limit + 65540)
-    throw new Error('Invalid encrypted response size.');
+    throw new Error(translate("workbench.invalidEncryptedResponseSize"));
   const length = new DataView(clear).getUint32(0);
   if (length > 65536 || length + 4 > clear.byteLength)
-    throw new Error('Invalid encrypted response metadata.');
+    throw new Error(translate("workbench.invalidEncryptedResponseMetadata"));
   const meta = JSON.parse(decoder.decode(new Uint8Array(clear, 4, length))) as {
     headers: Record<string, string>;
     status: number;
@@ -377,7 +378,7 @@ export async function exchange(
       ? new Uint8Array()
       : new Uint8Array(await request.arrayBuffer());
   if (body.byteLength > limit)
-    throw new Error('The encrypted request is too large.');
+    throw new Error(translate("workbench.theEncryptedRequestIsTooLarge"));
   let resource = '';
   if (
     request.headers.get('content-type')?.includes('application/json') &&
@@ -450,12 +451,12 @@ export async function exchange(
     if (!response.ok) return { response };
     throw new TransportError(
       'transport_downgrade',
-      'An unencrypted device response was rejected.',
+      translate("workbench.anUnencryptedDeviceResponseWasRejected"),
     );
   }
   const ciphertext = await response.arrayBuffer();
   if (ciphertext.byteLength > limit + 65556)
-    throw new Error('The encrypted response is too large.');
+    throw new Error(translate("workbench.theEncryptedResponseIsTooLarge"));
   const responseKey = await aesKey(
     await sender.export(encoder.encode('remote-codex/http-response/v1'), 32),
     ['decrypt'],
@@ -503,7 +504,7 @@ export async function exchange(
             !next.startsWith(`${prefix}/transport/stream/`) ||
             next.includes('..')
           )
-            throw new Error('Invalid encrypted continuation scope.');
+            throw new Error(translate("workbench.invalidEncryptedContinuationScope"));
           const endpoint = new URL(
             `/relay/devices/${encodeURIComponent(route.deviceId)}${next}`,
             url.origin,
@@ -520,7 +521,7 @@ export async function exchange(
             false,
           );
           if (!part.response.ok)
-            throw new Error('Download expired. Start it again.');
+            throw new Error(translate("workbench.downloadExpiredStartItAgain"));
           controller.enqueue(new Uint8Array(await part.response.arrayBuffer()));
           next = part.continuation;
         } catch (error) {
@@ -585,7 +586,7 @@ export class SocketCipher {
   async seal(message: WireMessage) {
     const sequence = this.sent++;
     if (!Number.isSafeInteger(sequence))
-      throw new Error('Encrypted channel sequence exhausted.');
+      throw new Error(translate("workbench.encryptedChannelSequenceExhausted"));
     const body = await crypto.subtle.encrypt(
       {
         name: 'AES-GCM',
@@ -611,7 +612,7 @@ export class SocketCipher {
       !Number.isSafeInteger(encrypted.sequence) ||
       encrypted.sequence <= this.received
     )
-      throw new Error('Encrypted event replay or wrong channel.');
+      throw new Error(translate("workbench.encryptedEventReplayOrWrongChannel"));
     // Relay scope filtering may omit unrelated events; monotonic gaps are valid.
     const clear = await crypto.subtle.decrypt(
       {
@@ -627,7 +628,7 @@ export class SocketCipher {
       decoder.decode(wsAad(this.id, encrypted.sequence, parsed)) !==
       decoder.decode(wsAad(this.id, encrypted.sequence, message))
     )
-      throw new Error('Encrypted event routing mismatch.');
+      throw new Error(translate("workbench.encryptedEventRoutingMismatch"));
     this.received = encrypted.sequence;
     return parsed;
   }

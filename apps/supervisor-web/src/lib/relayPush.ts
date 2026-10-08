@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { request } from './api';
 import { ensureRelayWorker } from './relayTransport';
 
@@ -37,7 +38,7 @@ export async function enablePush(
 ) {
   if ((await permission) !== 'granted')
     throw new Error(
-      'Allow notifications in your browser settings to enable thread updates.',
+      translate("workbench.allowNotificationsInYourBrowserSettingsTo"),
     );
   const registration = await ensureRelayWorker();
   let sub = await registration.pushManager.getSubscription();

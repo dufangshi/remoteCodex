@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Copy, ExternalLink, MoreHorizontal, Pencil, Star, Trash2 } from 'lucide-react';
@@ -16,6 +17,7 @@ export function RecentThreadMenu({ thread, onFavorite, onRenamed, onRemoved, onN
   currentKey: string;
   onNavigate: (href: string, options?: { replace?: boolean }) => void;
 }) {
+  useI18n();
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
   const [detail, setDetail] = useState<ThreadDetailDto | null>(null);
   const [owner, setOwner] = useState(false);
@@ -38,7 +40,7 @@ export function RecentThreadMenu({ thread, onFavorite, onRenamed, onRemoved, onN
       request<ThreadDetailDto>(`${base}?view=summary&limit=1`),
       device === 'local' ? Promise.resolve({ kind: 'owner' }) : fetchRelayAccess({ deviceId: device, threadId: id }),
     ]).then(([value, access]) => { if (active) { setDetail(value); setOwner(access.kind === 'owner'); } })
-      .catch(() => { if (active) setNotice('Device unavailable. You can still manage this shortcut.'); });
+      .catch(() => { if (active) setNotice(translate("workbench.deviceUnavailableYouCanStillManageThis")); });
     const close = (event: Event) => {
       if (event.type === 'keydown' && (event as KeyboardEvent).key !== 'Escape') return;
       if (event.type === 'pointerdown' && (menu.current?.contains(event.target as Node) || trigger.current?.contains(event.target as Node))) return;
@@ -52,40 +54,40 @@ export function RecentThreadMenu({ thread, onFavorite, onRenamed, onRemoved, onN
     return () => { active = false; document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', close); window.removeEventListener('resize', close); };
   }, [position, base, device, id]);
   const copy = async (text: string) => {
-    try { await navigator.clipboard.writeText(text); setNotice('Copied.'); }
-    catch { setNotice('Could not copy. Check browser clipboard permissions.'); }
+    try { await navigator.clipboard.writeText(text); setNotice(translate("workbench.copied_dd2ce2")); }
+    catch { setNotice(translate("workbench.couldNotCopyCheckBrowserClipboardPermissions")); }
   };
   return <>
-    <button ref={trigger} className="recent-thread-actions" aria-label={`Actions for ${thread.title}`} aria-expanded={!!position} aria-haspopup="dialog" onClick={() => {
+    <button ref={trigger} className="recent-thread-actions" aria-label={translate("workbench.actionsFor", { value1: thread.title })} aria-expanded={!!position} aria-haspopup="dialog" onClick={() => {
       if (position) { setPosition(null); return; }
       const box = trigger.current!.getBoundingClientRect();
       setPosition({ left: Math.min(Math.max(8, box.right - 260), innerWidth - 268), top: Math.max(8, Math.min(box.bottom + 6, innerHeight - 340)) });
     }}><MoreHorizontal size={16} /></button>
-    {position && createPortal(<div ref={menu} role="dialog" aria-label={`Thread actions: ${thread.title}`} className="recent-thread-menu" style={position}>
+    {position && createPortal(<div ref={menu} role="dialog" aria-label={translate("workbench.threadActions", { value1: thread.title })} className="recent-thread-menu" style={position}>
       <p className="recent-thread-menu-title">{thread.title}</p>
-      <button disabled={busy} onClick={async () => { setBusy(true); try { await onFavorite(thread.key); setPosition(null); } finally { setBusy(false); } }}><Star size={15} fill={thread.favorite ? 'currentColor' : 'none'} />{thread.favorite ? 'Unstar thread' : 'Star thread'}</button>
-      <button onClick={() => { setPosition(null); onNavigate(thread.href); }}><ExternalLink size={15} />Open thread</button>
-      <button onClick={() => void copy(id)}><Copy size={15} />Copy Remote Codex session ID</button>
-      <button disabled={!detail?.thread.providerSessionId} onClick={() => void copy(detail!.thread.providerSessionId!)}><Copy size={15} />Copy harness session ID</button>
-      {detail?.thread.providerSessionId && (detail.thread.agentId === 'codex' || detail.thread.provider === 'codex') && <button onClick={() => void copy(`codex://threads/${encodeURIComponent(detail.thread.providerSessionId!)}`)}><Copy size={15} />Copy Codex deeplink</button>}
-      {owner && <button onClick={() => { setTitle(detail?.thread.title ?? thread.title); setNotice(''); setPosition(null); setRenaming(true); }}><Pencil size={15} />Rename thread</button>}
-      {owner && <button className="recent-thread-delete" onClick={() => { setNotice(''); setPosition(null); setDeleting(true); }}><Trash2 size={15} />Delete thread</button>}
+      <button disabled={busy} onClick={async () => { setBusy(true); try { await onFavorite(thread.key); setPosition(null); } finally { setBusy(false); } }}><Star size={15} fill={thread.favorite ? 'currentColor' : 'none'} />{thread.favorite ? translate("workbench.unstarThread") : translate("workbench.starThread")}</button>
+      <button onClick={() => { setPosition(null); onNavigate(thread.href); }}><ExternalLink size={15} />{translate("workbench.openThread")}</button>
+      <button onClick={() => void copy(id)}><Copy size={15} />{translate("workbench.copyRemoteCodexSessionID")}</button>
+      <button disabled={!detail?.thread.providerSessionId} onClick={() => void copy(detail!.thread.providerSessionId!)}><Copy size={15} />{translate("workbench.copyHarnessSessionID")}</button>
+      {detail?.thread.providerSessionId && (detail.thread.agentId === 'codex' || detail.thread.provider === 'codex') && <button onClick={() => void copy(`codex://threads/${encodeURIComponent(detail.thread.providerSessionId!)}`)}><Copy size={15} />{translate("workbench.copyCodexDeeplink")}</button>}
+      {owner && <button onClick={() => { setTitle(detail?.thread.title ?? thread.title); setNotice(''); setPosition(null); setRenaming(true); }}><Pencil size={15} />{translate("workbench.renameThread")}</button>}
+      {owner && <button className="recent-thread-delete" onClick={() => { setNotice(''); setPosition(null); setDeleting(true); }}><Trash2 size={15} />{translate("workbench.deleteThread")}</button>}
       {notice && <p role="status">{notice}</p>}
     </div>, document.body)}
-    <RenameDialog open={renaming} title="Rename thread" label="Thread title" value={title} busy={busy} error={notice} onChange={setTitle} onCancel={() => setRenaming(false)} onSubmit={async () => {
+    <RenameDialog open={renaming} title={translate("workbench.renameThread")} label={translate("workbench.threadTitle")} value={title} busy={busy} error={notice} onChange={setTitle} onCancel={() => setRenaming(false)} onSubmit={async () => {
       setBusy(true); setNotice('');
       try { await request(base, { method: 'PATCH', body: JSON.stringify({ title: title.trim() }) }); await onRenamed(thread.key, title.trim()); setRenaming(false); }
-      catch (error) { setNotice(error instanceof Error ? error.message : 'Could not rename thread.'); }
+      catch (error) { setNotice(error instanceof Error ? error.message : translate("workbench.couldNotRenameThread")); }
       finally { setBusy(false); }
     }} />
-    <ConfirmDialog open={deleting} title="Delete thread?" description={`Delete “${thread.title}” and its Remote Codex history? This cannot be undone.`} busy={busy} error={notice} onCancel={() => setDeleting(false)} onConfirm={async () => {
+    <ConfirmDialog open={deleting} title={translate("workbench.deleteThread_c8f2c4")} description={translate("workbench.deleteAndItsRemoteCodexHistoryThis", { value1: thread.title })} busy={busy} error={notice} onCancel={() => setDeleting(false)} onConfirm={async () => {
       setBusy(true); setNotice('');
       try {
         await request(base, { method: 'DELETE' });
         if (thread.key === currentKey) onNavigate(threadsHref(detail?.thread.workspaceId, device === 'local' ? null : device), { replace: true });
         await onRemoved(thread.key);
         setDeleting(false);
-      } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not delete thread.'); }
+      } catch (error) { setNotice(error instanceof Error ? error.message : translate("workbench.couldNotDeleteThread")); }
       finally { setBusy(false); }
     }} />
   </>;

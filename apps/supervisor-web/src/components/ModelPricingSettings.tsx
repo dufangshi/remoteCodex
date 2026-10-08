@@ -1,3 +1,5 @@
+import { getLocale } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { Plus, Pencil } from 'lucide-react';
 import { FormDialog } from './FormDialog';
 import { useEffect, useState } from 'react';
@@ -7,16 +9,17 @@ import {
   type ModelPriceRates,
 } from '../lib/modelPricingApi';
 
-const fields = [
-  ['inputUsdPerMillion', 'In'],
-  ['cachedInputUsdPerMillion', 'Cached'],
-  ['outputUsdPerMillion', 'Out'],
-  ['cacheWriteInputUsdPerMillion', 'Cache write'],
+const pricingFields = () => [
+  ['inputUsdPerMillion', translate("settings.in")],
+  ['cachedInputUsdPerMillion', translate("settings.cached")],
+  ['outputUsdPerMillion', translate("settings.out_220e06")],
+  ['cacheWriteInputUsdPerMillion', translate("settings.cacheWrite")],
 ] as const;
 const inputClass =
   'min-w-0 w-full rounded-md border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-2 py-1.5 text-sm text-[var(--theme-fg)]';
 
 export function ModelPricingSettings() {
+  useI18n();
   const [models, setModels] = useState<Record<string, ModelPriceRates>>({});
   const [query, setQuery] = useState('');
   const [draft, setDraft] = useState<{
@@ -61,20 +64,20 @@ export function ModelPricingSettings() {
       setModels(data.models);
       setDraft(null);
       window.dispatchEvent(new Event('model-pricing-updated'));
-      setMessage(reset ? 'Default restored.' : 'Model prices saved.');
+      setMessage(reset ? translate("settings.defaultRestored") : translate("settings.modelPricesSaved"));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to save prices.');
+      setError(e instanceof Error ? e.message : translate("settings.unableToSavePrices"));
     } finally {
       setBusy(false);
     }
   }
   return (
-    <section className="py-5" aria-label="Model pricing">
+    <section className="py-5" aria-label={translate("settings.modelPricing")}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">Model pricing</h3>
+        <h3 className="text-sm font-semibold">{translate("settings.modelPricing")}</h3>
         <button
-          aria-label="Add model"
-          title="Add model"
+          aria-label={translate("settings.addModel")}
+          title={translate("settings.addModel")}
           className="host-icon-button inline-flex h-9 w-9 items-center justify-center rounded-md"
           onClick={() => {
             setError('');
@@ -94,13 +97,11 @@ export function ModelPricingSettings() {
         </button>
       </div>
       <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-        USD per 1M tokens · In excludes cache. Estimates exclude tool fees and
-        cache storage. Applies to all workspaces on this device.
-      </p>
+        {translate("settings.uSDPer1MTokensInExcludesCache")}</p>
       <input
-        aria-label="Search model prices"
+        aria-label={translate("settings.searchModelPrices")}
         className={`${inputClass} mt-3`}
-        placeholder="Search model ID or display name"
+        placeholder={translate("settings.searchModelIDOrDisplayName")}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
@@ -108,14 +109,14 @@ export function ModelPricingSettings() {
         <table className="w-full text-left text-xs">
           <thead className="sticky top-0 bg-[var(--theme-surface-strong)]">
             <tr>
-              <th className="p-2">Model</th>
-              {fields.map(([key, label]) => (
+              <th className="p-2">{translate("settings.model")}</th>
+              {pricingFields().map(([key, label]) => (
                 <th className="p-2 text-right" key={key}>
                   {label}
                 </th>
               ))}
               <th>
-                <span className="sr-only">Edit</span>
+                <span className="sr-only">{translate("settings.edit")}</span>
               </th>
             </tr>
           </thead>
@@ -132,18 +133,17 @@ export function ModelPricingSettings() {
                     <span>{id}</span>
                     {rates.custom && (
                       <span className="ml-1 text-[var(--theme-fg-muted)]">
-                        custom
-                      </span>
+                        {translate("settings.custom")}</span>
                     )}
                   </td>
-                  {fields.map(([key]) => (
+                  {pricingFields().map(([key]) => (
                     <td className="p-2 text-right tabular-nums" key={key}>
                       {typeof rates[key] === 'number' ? `$${rates[key]}` : '—'}
                     </td>
                   ))}
                   <td className="p-2">
                     <button
-                      aria-label={`Edit ${id}`}
+                      aria-label={translate("settings.edit_c10442", { value1: id })}
                       className="host-secondary-button rounded border px-2 py-1"
                       onClick={() => {
                         setError('');
@@ -165,8 +165,8 @@ export function ModelPricingSettings() {
       </div>
       {draft && (
         <FormDialog
-          title={draft.isNew ? 'Add model' : 'Edit model prices'}
-          description="USD per 1M tokens"
+          title={draft.isNew ? translate("settings.addModel") : translate("settings.editModelPrices")}
+          description={translate("settings.uSDPer1MTokens")}
           busy={busy}
           onClose={() => setDraft(null)}
         >
@@ -178,10 +178,9 @@ export function ModelPricingSettings() {
             }}
           >
             <label className="block text-xs">
-              Model ID
-              <input
+              {translate("settings.modelID")}<input
                 required
-                aria-label="Pricing model ID"
+                aria-label={translate("settings.pricingModelID")}
                 className={`${inputClass} mt-1`}
                 disabled={!draft.isNew || busy}
                 value={draft.id}
@@ -189,9 +188,8 @@ export function ModelPricingSettings() {
               />
             </label>
             <label className="mt-2 block text-xs">
-              Display names / aliases (comma separated)
-              <input
-                aria-label="Model aliases"
+              {translate("settings.displayNamesAliasesCommaSeparated")}<input
+                aria-label={translate("settings.modelAliases")}
                 className={`${inputClass} mt-1`}
                 value={draft.aliases}
                 disabled={busy}
@@ -201,11 +199,11 @@ export function ModelPricingSettings() {
               />
             </label>
             <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {fields.map(([key, label]) => (
+              {pricingFields().map(([key, label]) => (
                 <label className="text-xs" key={key}>
                   {label} $/1M
                   <input
-                    aria-label={`${label} price per million`}
+                    aria-label={translate("settings.pricePerMillion", { value1: label })}
                     className={`${inputClass} mt-1`}
                     type="number"
                     min="0"
@@ -237,12 +235,11 @@ export function ModelPricingSettings() {
             )}
             {draft.rates.longContextThresholdTokens != null && (
               <p className="mt-2 text-xs text-[var(--theme-fg-muted)]">
-                Long context: above{' '}
+                {translate("settings.longContextAbove")}{' '}
                 {Number(
                   draft.rates.longContextThresholdTokens,
-                ).toLocaleString()}{' '}
-                input tok · In/cache ×{draft.rates.longContextInputMultiplier} ·
-                Out ×{draft.rates.longContextOutputMultiplier}
+                ).toLocaleString(getLocale())}{' '}
+                {translate("settings.inputTokInCache")}{draft.rates.longContextInputMultiplier} {translate("settings.out")}{draft.rates.longContextOutputMultiplier}
               </p>
             )}
             {draft.rates.sourceUrl && (
@@ -252,7 +249,7 @@ export function ModelPricingSettings() {
                 target="_blank"
                 rel="noreferrer"
               >
-                Official pricing · checked {draft.rates.verifiedAt}
+                {translate("settings.officialPricingChecked")} {draft.rates.verifiedAt}
               </a>
             )}
             <div className="mt-3 flex flex-wrap gap-2">
@@ -261,7 +258,7 @@ export function ModelPricingSettings() {
                 type="submit"
                 className="host-secondary-button rounded border px-3 py-2 text-xs"
               >
-                {busy ? 'Saving…' : 'Save prices'}
+                {busy ? translate("settings.saving_56a228") : translate("settings.savePrices")}
               </button>
               <button
                 type="button"
@@ -269,8 +266,7 @@ export function ModelPricingSettings() {
                 onClick={() => setDraft(null)}
                 className="host-secondary-button rounded border px-3 py-2 text-xs"
               >
-                Cancel
-              </button>
+                {translate("settings.cancel")}</button>
               {!draft.isNew && draft.rates.custom && (
                 <button
                   type="button"
@@ -278,8 +274,7 @@ export function ModelPricingSettings() {
                   className="host-secondary-button rounded border px-3 py-2 text-xs"
                   onClick={() => void save(true)}
                 >
-                  Reset / remove custom
-                </button>
+                  {translate("settings.resetRemoveCustom")}</button>
               )}
             </div>
             {error && (

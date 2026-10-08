@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useId, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -66,6 +67,7 @@ function Field({
   label: string;
   children: ReactNode;
 }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <div>
       <label className="host-form-label text-xs font-medium" htmlFor={id}>
@@ -89,6 +91,7 @@ export function ThreadCreateForm({
   onCancel?: () => void;
   variant?: 'panel' | 'dialog';
 }) {
+  const { locale: i18nLocale } = useI18n();
   const shellNav = useAppShellNav();
   const formId = useId();
   const compact = variant === 'dialog';
@@ -153,7 +156,7 @@ export function ThreadCreateForm({
       })
       .catch((caught) => {
         if (!cancelled) {
-          setError(errorText(caught, 'Unable to load creation form data.'));
+          setError(errorText(caught, translate("workbench.unableToLoadCreationFormData")));
         }
       })
       .finally(() => {
@@ -188,7 +191,7 @@ export function ThreadCreateForm({
           if (!cancelled) {
             setAgentOptions([]);
             setAgentId('');
-            setError(errorText(caught, 'Unable to load ACP agents.'));
+            setError(errorText(caught, translate("workbench.unableToLoadACPAgents")));
           }
         });
       return () => {
@@ -209,7 +212,7 @@ export function ThreadCreateForm({
       .catch((caught) => {
         if (!cancelled) {
           applyModels([]);
-          setError(errorText(caught, 'Unable to load backend models.'));
+          setError(errorText(caught, translate("workbench.unableToLoadBackendModels")));
         }
       });
     return () => {
@@ -234,7 +237,7 @@ export function ThreadCreateForm({
       })
       .catch((caught) => {
         if (!cancelled) {
-          setError(errorText(caught, 'Unable to load agent models.'));
+          setError(errorText(caught, translate("workbench.unableToLoadAgentModels")));
         }
       });
     return () => {
@@ -301,7 +304,7 @@ export function ThreadCreateForm({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedBackend || !canStart(selectedBackend)) {
-      setError('Choose an available backend before creating a thread.');
+      setError(translate("workbench.chooseAnAvailableBackendBeforeCreatingA"));
       return;
     }
     setBusy(true);
@@ -320,7 +323,7 @@ export function ThreadCreateForm({
         }),
       );
     } catch (caught) {
-      setError(errorText(caught, 'Unable to create thread.'));
+      setError(errorText(caught, translate("workbench.unableToCreateThread")));
     } finally {
       setBusy(false);
     }
@@ -329,13 +332,12 @@ export function ThreadCreateForm({
   if (loading) {
     return (
       <div className="host-empty-state rounded-lg border px-6 py-12 text-center">
-        Loading creation form...
-      </div>
+        {translate("workbench.loadingCreationForm")}</div>
     );
   }
 
   const backendUnavailable = selectedBackend && !canStart(selectedBackend);
-  const selectedBackendAction = selectedBackend?.installation.installed ? 'Update' : 'Install';
+  const selectedBackendAction = selectedBackend?.installation.installed ? translate("workbench.update") : translate("workbench.install");
   const selectedBackendActionAvailable = selectedBackend
     ? selectedBackend.installation.installed
       ? Boolean(selectedBackend.installation.updateCommand)
@@ -345,8 +347,8 @@ export function ThreadCreateForm({
     ? runtimeBusyProvider === selectedBackend.provider || selectedBackend.installation.busy
     : false;
   const selectedBackendBusyLabel = selectedBackend?.installation.installed
-    ? 'Updating...'
-    : 'Installing...';
+    ? translate("workbench.updating")
+    : translate("workbench.installing");
 
   return (
     <form
@@ -355,15 +357,14 @@ export function ThreadCreateForm({
     >
       {compact ? (
         <div className="pr-8">
-          <h2 className="text-base font-semibold text-[var(--theme-fg)]">Create New Chat</h2>
+          <h2 className="text-base font-semibold text-[var(--theme-fg)]">{translate("workbench.createNewChat")}</h2>
           <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
-            Choose the workspace and agent for this thread.
-          </p>
+            {translate("workbench.chooseTheWorkspaceAndAgentForThis")}</p>
         </div>
       ) : null}
 
       <fieldset>
-        <legend className="host-form-label text-xs font-medium">Backend</legend>
+        <legend className="host-form-label text-xs font-medium">{translate("workbench.backend")}</legend>
         {compact ? (
           <select
             id={`${formId}-thread-backend`}
@@ -375,17 +376,16 @@ export function ThreadCreateForm({
             {backends.map((backend) => (
               <option key={backend.provider} value={backend.provider} disabled={!canStart(backend)}>
                 {backend.displayName}
-                {canStart(backend) ? '' : ' (not available)'}
+                {canStart(backend) ? '' : translate("workbench.notAvailable")}
               </option>
             ))}
             {!acpAdvertised ? (
               <option value="acp" disabled>
-                ACP Agent (enable on device)
-              </option>
+                {translate("workbench.aCPAgentEnableOnDevice")}</option>
             ) : null}
           </select>
         ) : (
-          <div aria-label="Backend" className="product-segmented mt-2 !grid w-full grid-cols-2 sm:!flex" role="radiogroup">
+          <div aria-label={translate("workbench.backend")} className="product-segmented mt-2 !grid w-full grid-cols-2 sm:!flex" role="radiogroup">
             {backends.map((backend) => {
               const selected = backend.provider === provider;
               return (
@@ -413,8 +413,8 @@ export function ThreadCreateForm({
           <div className="mt-3 flex flex-col gap-2 border-b border-[var(--theme-border)] pb-4 sm:flex-row sm:items-center sm:justify-between">
             <p className="min-w-0 text-xs leading-5 text-[var(--theme-fg-muted)]">
               {selectedBackend.installation.installed
-                ? `Installed${selectedBackend.installation.installedVersion ? `, version ${selectedBackend.installation.installedVersion}` : ''}`
-                : selectedBackend.installation.lastError ?? selectedBackend.status.lastError ?? 'Runtime is not installed.'}
+                ? translate("workbench.installed", { value1: selectedBackend.installation.installedVersion ? `, version ${selectedBackend.installation.installedVersion}` : '' })
+                : selectedBackend.installation.lastError ?? selectedBackend.status.lastError ?? translate("workbench.runtimeIsNotInstalled")}
             </p>
             {selectedBackendActionAvailable ? (
               <button
@@ -424,26 +424,24 @@ export function ThreadCreateForm({
                 onClick={() => void handleRuntimeAction(selectedBackend)}
                 type="button"
               >
-                {selectedBackendBusy ? selectedBackendBusyLabel : `${selectedBackendAction} runtime`}
+                {selectedBackendBusy ? selectedBackendBusyLabel : translate("workbench.runtime", { value1: selectedBackendAction })}
               </button>
             ) : null}
           </div>
         ) : null}
         {!acpAdvertised ? (
           <p className="mt-2 text-xs leading-5 text-[var(--theme-fg-muted)]">
-            ACP is not enabled on this supervisor. Add
-            <code className="mx-1 font-mono">acp</code>
-            to <code className="font-mono">REMOTE_CODEX_ENABLED_AGENT_PROVIDERS</code>.
+            {translate("workbench.aCPIsNotEnabledOnThisSupervisor")}<code className="mx-1 font-mono">acp</code>
+            {translate("workbench.to")} <code className="font-mono">REMOTE_CODEX_ENABLED_AGENT_PROVIDERS</code>.
           </p>
         ) : null}
         {backendUnavailable ? (
           <p className={`mt-2 ${compact ? 'text-xs text-[var(--theme-fg-muted)]' : 'text-sm opacity-75'}`}>
-            Select an available backend before creating a thread.
-          </p>
+            {translate("workbench.selectAnAvailableBackendBeforeCreatingA")}</p>
         ) : null}
       </fieldset>
 
-      <Field id={`${formId}-thread-workspace`} label="Workspace">
+      <Field id={`${formId}-thread-workspace`} label={translate("workbench.workspace")}>
         <select
           id={`${formId}-thread-workspace`}
           disabled={busy}
@@ -451,7 +449,7 @@ export function ThreadCreateForm({
           onChange={(event) => setWorkspaceId(event.target.value)}
           className={controlClass}
         >
-          {!workspaceId ? <option value="">Choose a workspace</option> : null}
+          {!workspaceId ? <option value="">{translate("workbench.chooseAWorkspace")}</option> : null}
           {workspaces.map((workspace) => (
             <option key={workspace.id} value={workspace.id}>
               {workspace.label} · {workspace.absPath}
@@ -460,25 +458,23 @@ export function ThreadCreateForm({
         </select>
         {workspaces.length === 0 ? (
           <p className="mt-2 text-xs leading-5 text-[var(--theme-fg-muted)]">
-            Add a workspace before creating a thread.{' '}
+            {translate("workbench.addAWorkspaceBeforeCreatingAThread")}{' '}
             <Link className="font-semibold text-[var(--theme-accent-strong)] hover:underline" to={currentRelayScopedPath('/workspaces/new')}>
-              Add workspace
-            </Link>
+              {translate("workbench.addWorkspace")}</Link>
           </p>
         ) : initialWorkspaceId && !workspaces.some((workspace) => workspace.id === initialWorkspaceId) ? (
           <p className="mt-2 text-xs leading-5 text-[var(--status-warning-fg)]" role="status">
-            The requested workspace is unavailable. Choose another workspace to continue.
-          </p>
+            {translate("workbench.theRequestedWorkspaceIsUnavailableChooseAnother")}</p>
         ) : null}
       </Field>
 
       {isAcpAgentSelection ? (
         <fieldset>
-          <legend className="host-form-label text-xs font-medium">Agent</legend>
+          <legend className="host-form-label text-xs font-medium">{translate("workbench.agent")}</legend>
           <div
             className={`mt-2 ${compact ? 'max-h-32' : 'max-h-64'} divide-y divide-[var(--theme-border)] overflow-y-auto overscroll-contain rounded-lg border border-[var(--theme-border)] bg-[var(--theme-surface)]`}
             role="radiogroup"
-            aria-label="Agent"
+            aria-label={translate("workbench.agent")}
           >
             {agentOptions.map((entry) => {
               const meta = entry.acpAgent;
@@ -488,12 +484,12 @@ export function ThreadCreateForm({
               const selected = entry.model === agentId;
               const statusLabel =
                 meta?.availability === 'base_missing'
-                  ? 'Base agent missing'
+                  ? translate("workbench.baseAgentMissing")
                   : adapterMissing
-                    ? 'Adapter needed'
+                    ? translate("workbench.adapterNeeded")
                     : meta?.availability === 'server_unavailable'
-                      ? 'ACP unavailable'
-                      : meta?.statusMessage === 'Ready' ? 'Ready' : meta?.statusMessage?.startsWith('ACP verification failed:') ? 'Connection failed' : 'Installed';
+                      ? translate("workbench.aCPUnavailable")
+                      : meta?.statusMessage === 'Ready' ? translate("workbench.ready") : meta?.statusMessage?.startsWith('ACP verification failed:') ? translate("workbench.connectionFailed") : translate("workbench.installed_7bb440");
               return (
                 <div key={entry.id} className="flex min-w-0 items-stretch gap-2 px-2 py-2">
                   <label
@@ -520,7 +516,7 @@ export function ThreadCreateForm({
                       <span className="host-pill rounded-full px-2 py-0.5 text-[0.68rem]">{statusLabel}</span>
                     </span>
                     <span className="mt-1 block truncate font-mono text-[0.68rem] text-[var(--theme-fg-muted)]">
-                      {meta?.serverCommand ?? 'Unavailable'}
+                      {meta?.serverCommand ?? translate("workbench.unavailable")}
                     </span>
                   </label>
                   {adapterMissing && meta?.installCommand ? (
@@ -530,7 +526,7 @@ export function ThreadCreateForm({
                       disabled={busy || installing || installingAgentId !== null}
                       className="host-secondary-button my-auto min-h-11 shrink-0 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {installing ? 'Installing...' : 'Install adapter'}
+                      {installing ? translate("workbench.installing") : translate("workbench.installAdapter")}
                     </button>
                   ) : null}
                 </div>
@@ -541,7 +537,7 @@ export function ThreadCreateForm({
       ) : null}
 
       <div className={selectedModel?.supportedReasoningEfforts.length ? 'grid gap-5 sm:grid-cols-2' : ''}>
-        <Field id={`${formId}-thread-model`} label="Model">
+        <Field id={`${formId}-thread-model`} label={translate("workbench.model")}>
           <select
             id={`${formId}-thread-model`}
             value={model}
@@ -557,7 +553,7 @@ export function ThreadCreateForm({
             }}
             className={controlClass}
           >
-            {models.length === 0 ? <option value="">No models available</option> : null}
+            {models.length === 0 ? <option value="">{translate("workbench.noModelsAvailable")}</option> : null}
             {models.map((entry) => (
               <option key={entry.id} value={entry.model}>
                 {entry.displayName}
@@ -567,7 +563,7 @@ export function ThreadCreateForm({
         </Field>
 
         {selectedModel && selectedModel.supportedReasoningEfforts.length > 0 ? (
-          <Field id={`${formId}-thread-effort`} label="Reasoning effort">
+          <Field id={`${formId}-thread-effort`} label={translate("workbench.reasoningEffort")}>
             <select
               id={`${formId}-thread-effort`}
               disabled={busy}
@@ -579,7 +575,7 @@ export function ThreadCreateForm({
             >
               {selectedModel.supportedReasoningEfforts.map((entry) => (
                 <option key={entry.reasoningEffort} value={entry.reasoningEffort}>
-                  {entry.reasoningEffort || 'Provider default'}
+                  {entry.reasoningEffort || translate("workbench.providerDefault")}
                 </option>
               ))}
             </select>
@@ -587,13 +583,13 @@ export function ThreadCreateForm({
         ) : null}
       </div>
 
-      <Field id={`${formId}-thread-title`} label="Title">
+      <Field id={`${formId}-thread-title`} label={translate("workbench.title")}>
         <input
           id={`${formId}-thread-title`}
           disabled={busy}
           value={title}
           onChange={(event) => setTitle(event.target.value)}
-          placeholder="Optional. Falls back to first prompt."
+          placeholder={translate("workbench.optionalFallsBackToFirstPrompt")}
           className={controlClass}
         />
       </Field>
@@ -618,7 +614,7 @@ export function ThreadCreateForm({
               : 'ui-action-primary min-h-11 rounded-md px-5 font-semibold transition disabled:cursor-not-allowed'
           }
         >
-          {busy ? 'Creating...' : 'Create Thread'}
+          {busy ? translate("workbench.creating") : translate("workbench.createThread_ea3fa3")}
         </button>
         {onCancel ? (
           <button
@@ -631,8 +627,7 @@ export function ThreadCreateForm({
                 : 'host-secondary-button min-h-11 rounded-md border px-5 font-medium transition disabled:cursor-not-allowed disabled:opacity-60'
             }
           >
-            Cancel
-          </button>
+            {translate("workbench.cancel")}</button>
         ) : null}
       </div>
     </form>

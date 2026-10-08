@@ -1,3 +1,5 @@
+import { getLocale } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { DeviceEncryptionStatus } from '../components/DeviceEncryptionStatus';
 import { ProductHeader } from '../components/ProductHeader';
 import {
@@ -51,13 +53,14 @@ function errorText(caught: unknown, fallback: string) {
 
 function lastOpenedLabel(value: string | null) {
   if (!value) {
-    return 'Not opened yet';
+    return translate("files.notOpenedYet");
   }
 
-  return `Opened ${new Date(value).toLocaleString()}`;
+  return translate("files.opened", { value1: new Date(value).toLocaleString(getLocale()) });
 }
 
 export function WorkspacesPage() {
+  const { locale: i18nLocale } = useI18n();
   const location = useLocation();
   const relayDeviceId = relayDeviceIdFromPath(location.pathname);
   const [workspaces, setWorkspaces] = useState<WorkspaceDto[]>([]);
@@ -111,13 +114,13 @@ export function WorkspacesPage() {
         setWorkspaces(workspaceResult.value);
         setError(null);
       } else {
-        setError(errorText(workspaceResult.reason, 'Unable to load workspaces.'));
+        setError(errorText(workspaceResult.reason, translate("files.unableToLoadWorkspaces")));
       }
       if (runtimeResult.status === 'fulfilled') {
         setRuntimeConfig(runtimeResult.value);
         setRuntimeError(null);
       } else {
-        setRuntimeError(errorText(runtimeResult.reason, 'Unable to load supervisor config.'));
+        setRuntimeError(errorText(runtimeResult.reason, translate("files.unableToLoadSupervisorConfig")));
       }
     };
 
@@ -148,7 +151,7 @@ export function WorkspacesPage() {
       setWorkspaces((current) => current.map((item) => (item.id === updated.id ? updated : item)));
     } catch (caught) {
       setWorkspaces((current) => current.map((item) => (item.id === workspace.id ? workspace : item)));
-      setError(errorText(caught, 'Unable to update workspace.'));
+      setError(errorText(caught, translate("files.unableToUpdateWorkspace")));
     } finally {
       setFavoriteWorkspaceId(null);
     }
@@ -167,7 +170,7 @@ export function WorkspacesPage() {
       setEditingWorkspaceId(null);
       setDraftLabel('');
     } catch (caught) {
-      setError(errorText(caught, 'Unable to rename workspace.'));
+      setError(errorText(caught, translate("files.unableToRenameWorkspace")));
     } finally {
       setSavingWorkspaceId(null);
     }
@@ -187,7 +190,7 @@ export function WorkspacesPage() {
       setWorkspaces((current) => current.filter((item) => item.id !== deletingWorkspace.id));
       setDeletingWorkspace(null);
     } catch (caught) {
-      setDeleteError(errorText(caught, 'Unable to delete workspace.'));
+      setDeleteError(errorText(caught, translate("files.unableToDeleteWorkspace")));
     } finally {
       setDeletingWorkspaceBusy(false);
     }
@@ -209,14 +212,14 @@ export function WorkspacesPage() {
   const runtimeSummary = runtimeConfig
     ? runtimeConfig.workspaceRoot
     : vmStarting
-      ? 'Connecting to hosted supervisor...'
-      : runtimeError ?? 'Checking runtime...';
+      ? translate("files.connectingToHostedSupervisor")
+      : runtimeError ?? translate("files.checkingRuntime");
 
   return (
     <div className="product-page space-y-4">
-      <ProductHeader title="Workspaces" {...(relayDeviceId ? {backHref: '/relay-devices', backLabel: 'Back to devices'} : {})} actions={<>
-        <Link to={currentRelayScopedPath('/threads/import')} aria-label="Import session" title="Import session" className="product-icon-button"><FileInput size={19} /></Link>
-        <Link to={currentRelayScopedPath('/workspaces/new')} aria-label="Add workspace" title="Add workspace" className="product-icon-button"><Plus size={20} /></Link>
+      <ProductHeader title={translate("files.workspaces")} {...(relayDeviceId ? {backHref: '/relay-devices', backLabel: translate("files.backToDevices")} : {})} actions={<>
+        <Link to={currentRelayScopedPath('/threads/import')} aria-label={translate("files.importSession")} title={translate("files.importSession")} className="product-icon-button"><FileInput size={19} /></Link>
+        <Link to={currentRelayScopedPath('/workspaces/new')} aria-label={translate("files.addWorkspace")} title={translate("files.addWorkspace")} className="product-icon-button"><Plus size={20} /></Link>
       </>} />
 
       <details className="group border-y border-[var(--theme-border)]">
@@ -236,7 +239,7 @@ export function WorkspacesPage() {
             {runtimeSummary}
           </span>
           <span className="hidden shrink-0 text-xs tabular-nums text-[var(--theme-fg-muted)] sm:inline">
-            {workspaces.length} {workspaces.length === 1 ? 'workspace' : 'workspaces'}
+            {workspaces.length} {workspaces.length === 1 ? translate("files.workspace_a279fe") : translate("files.workspaces_e6f0a0")}
           </span>
           <ChevronDown
             aria-hidden="true"
@@ -244,18 +247,18 @@ export function WorkspacesPage() {
           />
         </summary>
         <dl className="grid gap-x-8 gap-y-3 border-t border-[var(--theme-border)] py-3 sm:grid-cols-2 lg:grid-cols-3">
-          <RuntimeFact label="Workspace root" value={runtimeSummary} />
+          <RuntimeFact label={translate("files.workspaceRoot")} value={runtimeSummary} />
           <RuntimeFact
-            label="Environment"
+            label={translate("files.environment")}
             value={
               runtimeConfig
                 ? `${runtimeConfig.environment} | ${runtimeConfig.host}:${runtimeConfig.port}`
-                : runtimeError ?? 'Not available'
+                : runtimeError ?? translate("workbench.runtimeNotAvailable")
             }
           />
           <RuntimeFact
-            label="Version"
-            value={runtimeConfig ? `${runtimeConfig.appName} ${runtimeConfig.appVersion}` : 'Not available'}
+            label={translate("files.version")}
+            value={runtimeConfig ? `${runtimeConfig.appName} ${runtimeConfig.appVersion}` : translate("workbench.runtimeNotAvailable")}
           />
         </dl>
       </details>
@@ -268,13 +271,12 @@ export function WorkspacesPage() {
         >
           <div className="flex items-center justify-between gap-4 px-4 py-3">
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-[var(--status-warning-fg)]">Starting hosted VM</p>
+              <p className="text-sm font-semibold text-[var(--status-warning-fg)]">{translate("files.startingHostedVM")}</p>
               <p className="mt-0.5 text-sm text-[var(--theme-fg-muted)]">
-                Waiting for the supervisor. This page will resume automatically.
-              </p>
+                {translate("files.waitingForTheSupervisorThisPageWill")}</p>
             </div>
             <span className="shrink-0 text-xs tabular-nums text-[var(--theme-fg-muted)]">
-              Check {wakeAttempt}
+              {translate("files.check")} {wakeAttempt}
             </span>
           </div>
           <div className="h-1 overflow-hidden bg-[var(--theme-muted)]">
@@ -294,14 +296,13 @@ export function WorkspacesPage() {
               type="button"
             >
               <RefreshCw aria-hidden="true" className="h-3.5 w-3.5" />
-              Retry
-            </button>
+              {translate("files.retry")}</button>
           ) : null}
         </div>
       ) : null}
 
       {loading && !vmStarting ? (
-        <div className="product-list" aria-label="Loading workspaces" aria-busy="true">
+        <div className="product-list" aria-label={translate("files.loadingWorkspaces")} aria-busy="true">
           {[0, 1, 2].map((item) => (
             <div key={item} className="product-row min-h-[5.5rem]">
               <div className="min-w-0 flex-1 space-y-2.5">
@@ -318,24 +319,22 @@ export function WorkspacesPage() {
         <section className="product-panel">
           <div className="product-empty">
             <div>
-              <h2 className="text-lg font-semibold text-[var(--theme-fg)]">No workspaces yet</h2>
+              <h2 className="text-lg font-semibold text-[var(--theme-fg)]">{translate("files.noWorkspacesYet")}</h2>
               <p className="mx-auto mt-2 max-w-md text-sm leading-6">
-                Add a folder on this device, connect an existing path, or clone a Git repository.
-              </p>
+                {translate("files.addAFolderOnThisDeviceConnect")}</p>
               <Link
                 to={currentRelayScopedPath('/workspaces/new')}
                 className="ui-action-primary mt-5 inline-flex h-11 items-center gap-2 rounded-md px-4 text-sm font-medium transition"
               >
                 <Plus aria-hidden="true" className="h-4 w-4" />
-                Add workspace
-              </Link>
+                {translate("files.addWorkspace")}</Link>
             </div>
           </div>
         </section>
       ) : null}
 
       {!loading && sortedWorkspaces.length > 0 ? (
-        <section aria-label="Workspace registry">
+        <section aria-label={translate("files.workspaceRegistry")}>
           <div className="product-list !overflow-visible">
             {sortedWorkspaces.map((workspace) => {
               const menuOpen = openMenuId === workspace.id;
@@ -377,8 +376,8 @@ export function WorkspacesPage() {
                       type="button"
                       disabled={favoriteBusy}
                       onClick={() => void handleFavorite(workspace)}
-                      aria-label={workspace.isFavorite ? `Unpin ${workspace.label}` : `Pin ${workspace.label}`}
-                      title={workspace.isFavorite ? 'Unpin workspace' : 'Pin workspace'}
+                      aria-label={workspace.isFavorite ? translate("files.unpin", { value1: workspace.label }) : translate("files.pin", { value1: workspace.label })}
+                      title={workspace.isFavorite ? translate("files.unpinWorkspace") : translate("files.pinWorkspace")}
                       className={`product-icon-button disabled:cursor-wait disabled:opacity-60 ${
                         workspace.isFavorite
                           ? 'text-[var(--status-warning-fg)] hover:bg-[var(--status-warning-bg)]'
@@ -408,8 +407,8 @@ export function WorkspacesPage() {
 
       <RenameDialog
         open={editingWorkspaceId !== null}
-        title="Rename workspace"
-        label="Workspace label"
+        title={translate("files.renameWorkspace")}
+        label={translate("files.workspaceLabel")}
         value={draftLabel}
         busy={savingWorkspaceId !== null}
         error={editingWorkspaceId ? error : null}
@@ -423,21 +422,19 @@ export function WorkspacesPage() {
       />
       <LongTextDialog
         open={expandedPath !== null}
-        title="Workspace path"
+        title={translate("files.workspacePath")}
         text={expandedPath ?? ''}
         onClose={() => setExpandedPath(null)}
       />
       <ConfirmDialog
         open={deletingWorkspace !== null}
-        title="Delete workspace?"
+        title={translate("files.deleteWorkspace")}
         description={
           deletingWorkspace
-            ? `Remove ${deletingWorkspace.label} and its threads from this supervisor. Files on disk are not deleted.${
-                deleteError ? ` The last attempt failed: ${deleteError}` : ''
-              }`
+            ? translate("files.removeAndItsThreadsFromThisSupervisor", { value1: deletingWorkspace.label, value2: deleteError ? translate("files.theLastAttemptFailed", { value1: deleteError }) : '' })
             : ''
         }
-        confirmLabel="Delete workspace"
+        confirmLabel={translate("files.deleteWorkspace_bc2cf9")}
         busy={deletingWorkspaceBusy}
         error={deleteError}
         onCancel={() => {
@@ -467,6 +464,7 @@ function WorkspaceActionsMenu({
   onRename: () => void;
   onDelete: () => void;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -541,11 +539,11 @@ function WorkspaceActionsMenu({
       <button
         ref={triggerRef}
         type="button"
-        aria-label={`More actions for ${workspace.label}`}
+        aria-label={translate("files.moreActionsFor", { value1: workspace.label })}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
-        title="Workspace actions"
+        title={translate("files.workspaceActions")}
         onClick={() => onOpenChange(!open)}
         className="product-icon-button"
       >
@@ -556,7 +554,7 @@ function WorkspaceActionsMenu({
           ref={menuRef}
           id={menuId}
           role="menu"
-          aria-label={`Actions for ${workspace.label}`}
+          aria-label={translate("files.actionsFor", { value1: workspace.label })}
           onKeyDown={handleMenuKeyDown}
           className="absolute right-0 top-[calc(100%+0.375rem)] z-30 w-52 rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-1.5 shadow-[var(--theme-shadow)]"
         >
@@ -567,8 +565,7 @@ function WorkspaceActionsMenu({
             className="flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-left text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus-visible:bg-[var(--theme-hover)]"
           >
             <Eye aria-hidden="true" className="h-4 w-4 text-[var(--theme-fg-muted)]" />
-            View full path
-          </button>
+            {translate("files.viewFullPath")}</button>
           <button
             type="button"
             role="menuitem"
@@ -576,8 +573,7 @@ function WorkspaceActionsMenu({
             className="flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-left text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus-visible:bg-[var(--theme-hover)]"
           >
             <Pencil aria-hidden="true" className="h-4 w-4 text-[var(--theme-fg-muted)]" />
-            Rename
-          </button>
+            {translate("files.rename_d3f4cb")}</button>
           <div className="my-1 border-t border-[var(--theme-border)]" />
           <button
             type="button"
@@ -586,8 +582,7 @@ function WorkspaceActionsMenu({
             className="flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-left text-sm text-[var(--status-danger-fg)] transition hover:bg-[var(--status-danger-bg)] focus:outline-none focus-visible:bg-[var(--status-danger-bg)]"
           >
             <Trash2 aria-hidden="true" className="h-4 w-4" />
-            Delete workspace
-          </button>
+            {translate("files.deleteWorkspace_bc2cf9")}</button>
         </div>
       ) : null}
     </div>
@@ -595,6 +590,7 @@ function WorkspaceActionsMenu({
 }
 
 function RuntimeFact({ label, value }: { label: string; value: string }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <div className="min-w-0">
       <dt className="text-xs text-[var(--theme-fg-muted)]">{label}</dt>

@@ -1,3 +1,4 @@
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { RelayNotifications } from '../components/RelayNotifications';
 import {
   RelaySecurityPanel,
@@ -31,6 +32,7 @@ export function RelayAccountSettingsPanel({
 }: {
   className?: string;
 }) {
+  const { locale: i18nLocale } = useI18n();
   const [session, setSession] = useState<RelaySessionDto | null>(null);
   const [username, setUsername] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -57,7 +59,7 @@ export function RelayAccountSettingsPanel({
       setUsername(nextSession.user?.username ?? '');
     } catch (caught) {
       setSession(null);
-      setLoadError(errorMessage(caught, 'Unable to load your relay account.'));
+      setLoadError(errorMessage(caught, translate("auth.accountLoadFailed")));
     } finally {
       setLoading(false);
     }
@@ -78,9 +80,9 @@ export function RelayAccountSettingsPanel({
         current?.authenticated ? { ...current, user } : current,
       );
       setUsername(user.username);
-      setProfileMessage('Profile saved.');
+      setProfileMessage(translate("auth.profileSaved"));
     } catch (caught) {
-      setProfileError(errorMessage(caught, 'Unable to save your profile.'));
+      setProfileError(errorMessage(caught, translate("auth.profileSaveFailed")));
     } finally {
       setSavingProfile(false);
     }
@@ -96,7 +98,7 @@ export function RelayAccountSettingsPanel({
     setPasswordMessage(null);
     try {
       if (newPassword !== confirmPassword) {
-        setPasswordError('New passwords do not match.');
+        setPasswordError(translate("auth.newPasswordsDoNotMatch"));
         return;
       }
       await updateRelayPassword({
@@ -108,7 +110,7 @@ export function RelayAccountSettingsPanel({
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      setPasswordMessage('Password changed.');
+      setPasswordMessage(translate("auth.passwordChanged"));
     } catch (caught) {
       if (
         caught instanceof ApiError &&
@@ -117,7 +119,7 @@ export function RelayAccountSettingsPanel({
         setVerification(await securityRequest<SecurityStatus>(''));
       } else
         setPasswordError(
-          errorMessage(caught, 'Unable to change your password.'),
+          errorMessage(caught, translate("auth.unableToChangeYourPassword")),
         );
     } finally {
       setSavingPassword(false);
@@ -131,7 +133,7 @@ export function RelayAccountSettingsPanel({
         className={`space-y-4 ${className}`.trim()}
         role="status"
       >
-        <span className="sr-only">Loading account...</span>
+        <span className="sr-only">{translate("auth.loadingAccount")}</span>
         <div
           className="h-4 w-28 animate-pulse rounded bg-[var(--theme-muted)]"
           aria-hidden="true"
@@ -151,7 +153,7 @@ export function RelayAccountSettingsPanel({
   if (loadError) {
     return (
       <Notice className={className} tone="danger">
-        <p className="font-medium">Account details could not be loaded.</p>
+        <p className="font-medium">{translate("auth.accountDetailsCouldNotBeLoaded")}</p>
         <p className="mt-1 text-sm">{loadError}</p>
         <button
           className="relay-button-secondary mt-3 inline-flex h-11 items-center gap-2"
@@ -159,8 +161,7 @@ export function RelayAccountSettingsPanel({
           type="button"
         >
           <RefreshCw aria-hidden="true" className="h-4 w-4" />
-          Retry
-        </button>
+          {translate("auth.retry")}</button>
       </Notice>
     );
   }
@@ -169,17 +170,14 @@ export function RelayAccountSettingsPanel({
     return (
       <div className={className}>
         <h2 className="text-base font-semibold text-[var(--theme-fg)]">
-          Sign in required
-        </h2>
+          {translate("auth.signInRequired")}</h2>
         <p className="mt-2 max-w-xl text-sm leading-6 text-[var(--theme-fg-muted)]">
-          Your relay session has ended. Sign in again to manage this account.
-        </p>
+          {translate("auth.yourRelaySessionHasEndedSignIn")}</p>
         <Link
           className="relay-button-primary mt-4 inline-flex h-11"
           to="/relay-portal?returnTo=%2Frelay-account"
         >
-          Sign in
-        </Link>
+          {translate("auth.signIn")}</Link>
       </div>
     );
   }
@@ -193,23 +191,20 @@ export function RelayAccountSettingsPanel({
       <section className="grid gap-5 py-6 sm:grid-cols-[11rem_minmax(0,1fr)] sm:gap-8">
         <header>
           <h2 className="text-base font-semibold text-[var(--theme-fg)]">
-            Profile
-          </h2>
+            {translate("auth.profile")}</h2>
           <p className="mt-1 text-sm leading-5 text-[var(--theme-fg-muted)]">
-            Your relay identity.
-          </p>
+            {translate("auth.yourRelayIdentity")}</p>
         </header>
         <div className="min-w-0 max-w-md">
           <div>
-            <p className="text-sm text-[var(--theme-fg-soft)]">Email</p>
+            <p className="text-sm text-[var(--theme-fg-soft)]">{translate("auth.email")}</p>
             <p className="mt-1 break-words text-sm font-medium text-[var(--theme-fg)]">
               {session.user?.email}
             </p>
           </div>
           <form className="mt-5 space-y-4" onSubmit={saveProfile}>
             <label className="block text-sm text-[var(--theme-fg-soft)]">
-              Username
-              <input
+              {translate("auth.username")}<input
                 autoComplete="username"
                 className="relay-input mt-2 min-h-11 w-full disabled:cursor-wait disabled:opacity-60"
                 disabled={savingProfile}
@@ -235,18 +230,18 @@ export function RelayAccountSettingsPanel({
               type="submit"
             >
               <Save aria-hidden="true" className="h-4 w-4" />
-              {savingProfile ? 'Saving...' : 'Save profile'}
+              {savingProfile ? translate("auth.saving") : translate("auth.saveProfile")}
             </button>
           </form>
         </div>
       </section>
 
       <section className="flex items-center justify-between gap-3 py-4">
-        <h2 className="text-sm font-semibold">Password</h2>
+        <h2 className="text-sm font-semibold">{translate("auth.password")}</h2>
         <button
           type="button"
-          aria-label="Change password"
-          title="Change password"
+          aria-label={translate("auth.changePassword")}
+          title={translate("auth.changePassword")}
           className="host-icon-button inline-flex h-10 w-10 items-center justify-center rounded-md"
           onClick={() => {
             setPasswordError(null);
@@ -260,7 +255,7 @@ export function RelayAccountSettingsPanel({
       {passwordMessage && <Notice tone="success">{passwordMessage}</Notice>}
       {passwordOpen && (
         <FormDialog
-          title="Change password"
+          title={translate("auth.changePassword")}
           busy={savingPassword || Boolean(verification)}
           onClose={() => {
             setPasswordOpen(false);
@@ -271,14 +266,13 @@ export function RelayAccountSettingsPanel({
         >
           <header>
             <p className="mt-1 text-sm leading-5 text-[var(--theme-fg-muted)]">
-              Use at least 8 characters.
-            </p>
+              {translate("auth.useAtLeast8Characters")}</p>
           </header>
           <form className="min-w-0 max-w-md space-y-4" onSubmit={savePassword}>
             <PasswordInput
               autoComplete="current-password"
               disabled={savingPassword}
-              label="Current password"
+              label={translate("auth.currentPassword")}
               name="currentPassword"
               onChange={(value) => {
                 setCurrentPassword(value);
@@ -290,7 +284,7 @@ export function RelayAccountSettingsPanel({
             <PasswordInput
               autoComplete="new-password"
               disabled={savingPassword}
-              label="New password"
+              label={translate("auth.newPassword")}
               minLength={8}
               name="newPassword"
               onChange={(value) => {
@@ -303,7 +297,7 @@ export function RelayAccountSettingsPanel({
             <PasswordInput
               autoComplete="new-password"
               disabled={savingPassword}
-              label="Confirm new password"
+              label={translate("auth.confirmNewPassword")}
               minLength={8}
               name="confirmPassword"
               onChange={(value) => {
@@ -330,7 +324,7 @@ export function RelayAccountSettingsPanel({
               type="submit"
             >
               <Save aria-hidden="true" className="h-4 w-4" />
-              {savingPassword ? 'Changing...' : 'Change password'}
+              {savingPassword ? translate("auth.changing") : translate("auth.changePassword")}
             </button>
           </form>
         </FormDialog>
@@ -352,6 +346,7 @@ export function RelayAccountSettingsPanel({
 }
 
 export function RelayAccountPage() {
+  const { locale: i18nLocale } = useI18n();
   return (
     <div className="product-page !max-w-3xl">
       <header className="border-b border-[var(--theme-border)] pb-6">
@@ -360,17 +355,13 @@ export function RelayAccountPage() {
           to="/relay-devices"
         >
           <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-          Devices
-        </Link>
+          {translate("auth.devices")}</Link>
         <p className="mt-6 text-sm font-medium text-[var(--theme-accent-strong)]">
-          Relay account
-        </p>
+          {translate("auth.relayAccount")}</p>
         <h1 className="mt-2 text-2xl font-semibold text-[var(--theme-fg)]">
-          Account settings
-        </h1>
+          {translate("auth.accountSettings")}</h1>
         <p className="mt-2 max-w-xl text-sm leading-6 text-[var(--theme-fg-muted)]">
-          Manage the identity and password used to access this relay.
-        </p>
+          {translate("auth.manageTheIdentityAndPasswordUsedTo")}</p>
       </header>
       <div className="py-2">
         <RelayAccountSettingsPanel />
@@ -396,6 +387,7 @@ function PasswordInput({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <label className="block text-sm text-[var(--theme-fg-soft)]">
       {label}
@@ -423,6 +415,7 @@ function Notice({
   children: React.ReactNode;
   className?: string;
 }) {
+  const { locale: i18nLocale } = useI18n();
   return (
     <div
       aria-live={tone === 'danger' ? 'assertive' : 'polite'}
