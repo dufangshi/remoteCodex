@@ -183,6 +183,26 @@ origin, or uses a second port for hot reload may need application configuration.
 Use same-origin WebSocket URLs or explicitly configure the app’s public HMR URL.
 Do not disable its host/origin checks globally. Previews open in new tabs.
 
+The gateway authenticates the preview owner and validates the browser Origin
+before forwarding. It then sends `Host: 127.0.0.1:<port>` and, if an Origin was
+present, rewrites it to `http://127.0.0.1:<port>`. Ordinary Vite dev servers allow
+IP addresses by default, so a preview hostname does not normally need adding to
+`server.allowedHosts`. This is separate from listening on an accessible address:
+the service must still accept connections from the Supervisor's loopback.
+
+The public authority is retained in `X-Forwarded-Host`, with HTTPS indicated by
+`X-Forwarded-Proto`. Frameworks that trust these headers or validate public URLs
+can still require an explicit allowed origin/public URL configuration. Diagnose
+the framework's actual rejection before changing its configuration. If a public
+host needs allowing, prefer the exact mapping hostname; do not set
+`allowedHosts: true` or allow every origin. A future framework-specific setup
+helper could supply this configuration when starting the service; such a helper
+is not part of the current implementation.
+
+See [Vite server host and origin options](https://vite.dev/config/server-options)
+and [Next.js allowedDevOrigins](https://nextjs.org/docs/app/api-reference/config/next-config-js/allowedDevOrigins)
+for framework-specific controls.
+
 ## Validation
 
 `e2e/port-preview.spec.ts` starts isolated, real Rust Relay and Supervisor
