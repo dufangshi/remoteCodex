@@ -40,6 +40,7 @@ import { appSettingsSections } from '../components/AppShellSettingsDialog';
 import { useAppShellNav } from '../components/AppShellNavContext';
 import {
   ConfirmDialog,
+  confirmWorkspaceDocumentLeave,
   LongTextDialog,
   ThreadActionsDialog,
   ThreadDetailSurface,
@@ -678,6 +679,9 @@ export function ThreadDetailPage() {
   }, [workbenchPresentation.update]);
   const makeReferencePrimary = () => {
     if (!referenceId) return;
+    // The file guard can cancel navigation. Keep reference membership unchanged
+    // until that decision succeeds, or cancellation would hide the chosen peer.
+    if (!confirmWorkspaceDocumentLeave()) return;
     workbenchPresentation.update({ referenceId: id, mode: 'thread' });
     navigate(currentThreadHref(referenceId));
   };
