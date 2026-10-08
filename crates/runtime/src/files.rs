@@ -138,10 +138,33 @@ pub fn list_tree(root: &Path, rel: &str) -> Result<Vec<ThreadWorkspaceTreeNodeDt
 
 pub fn preview_file(root: &Path, rel: &str, limit: usize) -> Result<ThreadWorkspaceFilePreviewDto> {
     let path = assert_within(root, &PathBuf::from(rel))?;
-    let bytes = std::fs::read(&path)?;
-    let truncated = bytes.len() > limit;
-    let slice = if truncated { &bytes[..limit] } else { &bytes };
-    let content = String::from_utf8_lossy(slice).into_owned();
+    anyhow::ensure!(std::fs::metadata(&path)?.is_file(), "not a regular file");
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let mut file = options.open(&path)?;
+    let metadata = file.metadata()?;
+    anyhow::ensure!(metadata.is_file(), "not a regular file");
+    let limit = limit.min(64 * 1024);
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take((limit + 4) as u64)
+        .read_to_end(&mut bytes)?;
+    let truncated = metadata.len() > limit as u64;
+    let mut end = bytes.len().min(limit);
+    // Only a partial final UTF-8 sequence may be trimmed; never lossy decode.
+    let content = loop {
+        match std::str::from_utf8(&bytes[..end]) {
+            Ok(text) if !text.contains('\0') => break text.to_owned(),
+            Err(e) if truncated && e.error_len().is_none() => end = e.valid_up_to(),
+            _ => bail!("unsupportedEncodingOrBinaryFile"),
+        }
+    };
+    let slice = &bytes[..end];
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -151,7 +174,7 @@ pub fn preview_file(root: &Path, rel: &str, limit: usize) -> Result<ThreadWorksp
         name: name.clone(),
         content,
         language: language_for(&name),
-        size: bytes.len() as u64,
+        size: metadata.len(),
         truncated,
         next_offset: slice.len() as u64,
     })
@@ -319,6 +342,7 @@ pub fn write_file_with_scope(
     content: &str,
     scope: WriteScope,
 ) -> Result<()> {
+    let _gate = crate::file_documents::mutation_guard();
     let path = if scope == WriteScope::Unrestricted {
         if Path::new(rel).is_absolute() {
             PathBuf::from(rel)

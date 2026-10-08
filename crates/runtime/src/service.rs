@@ -995,6 +995,7 @@ impl Supervisor {
         rel: &str,
         content: &[u8],
     ) -> Result<(String, u64)> {
+        let _gate = crate::file_documents::mutation_guard();
         let workspace = self.get_workspace(id)?;
         let root = PathBuf::from(&workspace.abs_path).canonicalize()?;
         let path = files::assert_within(&root, Path::new(rel))?;

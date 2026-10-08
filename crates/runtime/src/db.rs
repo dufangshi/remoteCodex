@@ -144,6 +144,20 @@ const RUNTIME_MIGRATIONS: &[Migration] = &[
             Ok(())
         },
     },
+    Migration {
+        version: 12,
+        name: "file_save_operations",
+        apply: |conn| {
+            conn.execute_batch(
+                "CREATE TABLE file_save_operations (
+                actor TEXT NOT NULL, workspace_id TEXT NOT NULL, workspace_revision TEXT NOT NULL,
+                operation_id TEXT NOT NULL, input_digest TEXT NOT NULL, intended_hash TEXT,
+                before_bytes BLOB, result TEXT NOT NULL, created_at INTEGER NOT NULL,
+                PRIMARY KEY(actor,workspace_id,operation_id));",
+            )?;
+            Ok(())
+        },
+    },
 ];
 
 const NODE_0030_MIGRATIONS: &[&str] = &[
@@ -235,6 +249,7 @@ impl Database {
         conn.execute_batch(
             "
             PRAGMA journal_mode=WAL;
+            PRAGMA synchronous=FULL;
             PRAGMA foreign_keys=ON;
             ",
         )?;

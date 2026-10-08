@@ -211,6 +211,8 @@ pub(crate) fn shared_workspace_path_allowed(
             "" | "/transport/key"
                 | "/files/tree"
                 | "/files/preview"
+                | "/files/capabilities"
+                | "/files/document"
                 | "/files/raw"
                 | "/files/download"
                 | "/artifacts"
@@ -218,18 +220,70 @@ pub(crate) fn shared_workspace_path_allowed(
             return true;
         }
         let parts: Vec<&str> = suffix.split('/').filter(|part| !part.is_empty()).collect();
-        return (parts.len() == 2 && parts[0] == "artifacts")
+        return (write && parts.len() == 3 && parts[0] == "files" && parts[1] == "operations")
+            || (parts.len() == 2 && parts[0] == "artifacts")
             || (parts.len() == 3 && parts[0] == "artifacts" && parts[2] == "download");
     }
     write
         && matches!(method, "POST" | "PUT" | "PATCH" | "DELETE")
-        && matches!(suffix, "/files" | "/files/upload" | "/files/move")
+        && matches!(
+            suffix,
+            "/files" | "/files/upload" | "/files/move" | "/files/save"
+        )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[test]
+    fn safe_file_routes_require_exact_workspace_and_write_for_operations() {
+        let base = "/api/workspaces/ws";
+        for suffix in ["/files/capabilities", "/files/document"] {
+            assert!(shared_workspace_path_allowed(
+                "GET",
+                &format!("{base}{suffix}"),
+                "ws",
+                false
+            ));
+            assert!(!shared_workspace_path_allowed(
+                "GET",
+                &format!("{base}{suffix}"),
+                "other",
+                true
+            ));
+        }
+        assert!(!shared_workspace_path_allowed(
+            "POST",
+            &format!("{base}/files/save"),
+            "ws",
+            false
+        ));
+        assert!(shared_workspace_path_allowed(
+            "POST",
+            &format!("{base}/files/save"),
+            "ws",
+            true
+        ));
+        assert!(!shared_workspace_path_allowed(
+            "GET",
+            &format!("{base}/files/operations/id"),
+            "ws",
+            false
+        ));
+        assert!(shared_workspace_path_allowed(
+            "GET",
+            &format!("{base}/files/operations/id"),
+            "ws",
+            true
+        ));
+        assert!(!shared_workspace_path_allowed(
+            "GET",
+            &format!("{base}/files/operations/id/extra"),
+            "ws",
+            true
+        ));
+    }
     #[test]
     fn global_search_is_denied_for_multi_user_hosted_isolation() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();

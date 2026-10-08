@@ -24,7 +24,7 @@ use serde_json::{json, Value};
 use tokio::io::AsyncReadExt;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
-pub type AppState = Arc<Supervisor>;
+pub(crate) type AppState = Arc<Supervisor>;
 
 const MAX_PROMPT_ATTACHMENTS: usize = 10;
 const MAX_PROMPT_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
@@ -179,6 +179,23 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/workspaces/{id}/favorite", post(favorite_workspace))
         .route("/api/workspaces/{id}/open", post(open_workspace))
+        .route(
+            "/api/workspaces/{id}/files/capabilities",
+            get(crate::file_documents::capabilities),
+        )
+        .route(
+            "/api/workspaces/{id}/files/document",
+            get(crate::file_documents::document),
+        )
+        .route(
+            "/api/workspaces/{id}/files/save",
+            post(crate::file_documents::save)
+                .layer(axum::extract::DefaultBodyLimit::max(400 * 1024)),
+        )
+        .route(
+            "/api/workspaces/{id}/files/operations/{op}",
+            get(crate::file_documents::operation),
+        )
         .route("/api/workspaces/{id}/files/tree", get(workspace_tree))
         .route("/api/workspaces/{id}/files/preview", get(workspace_preview))
         .route("/api/workspaces/{id}/files/raw", get(workspace_raw))
@@ -938,6 +955,7 @@ async fn workspace_delete_file(
     let path = query
         .path
         .ok_or_else(|| err(StatusCode::BAD_REQUEST, "bad_request", "path is required"))?;
+    let _gate = remote_codex_runtime::file_documents::mutation_guard();
     let ws = state.get_workspace(&id).map_err(map_err)?;
     let abs = remote_codex_runtime::files::assert_mutation_within(
         std::path::Path::new(&ws.abs_path),
@@ -2128,6 +2146,7 @@ async fn workspace_move(
     State(state): State<AppState>,
     Json(body): Json<MoveBody>,
 ) -> Result<Json<Value>, ApiErr> {
+    let _gate = remote_codex_runtime::file_documents::mutation_guard();
     let ws = state.get_workspace(&id).map_err(map_err)?;
     let from = remote_codex_runtime::files::assert_mutation_within(
         std::path::Path::new(&ws.abs_path),

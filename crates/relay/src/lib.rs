@@ -2992,6 +2992,7 @@ async fn device_api(
             json!(serde_json::to_string(&owned).unwrap_or_default()),
         );
     }
+    forwarded_headers.insert("x-rcd-file-actor".into(), json!(user_id));
     let (body, body_encoding) = encode_relay_request_body(&body);
     let response = forward_device(
         state.clone(),
@@ -3125,7 +3126,7 @@ async fn relay_api_compat(
         )
             .into_response();
     }
-    let forwarded_headers = [
+    let mut forwarded_headers = [
         header::CONTENT_TYPE,
         header::ACCEPT,
         header::RANGE,
@@ -3143,6 +3144,7 @@ async fn relay_api_compat(
             .map(|value| (name.as_str().to_string(), Value::String(value.to_string())))
     })
     .collect::<serde_json::Map<String, Value>>();
+    forwarded_headers.insert("x-rcd-file-actor".into(), json!(user_id));
     let (body, body_encoding) = encode_relay_request_body(&body);
     let response = forward_device(
         state.clone(),
