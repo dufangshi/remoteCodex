@@ -40,12 +40,24 @@ export function useThreadWorkspaceAdapter({
       ...(allowLinkedFiles ? {statLinkedFile: (input: {threadId: string; path: string}) => fetchLinkedFile(input.threadId, input.path)} : {}),
       listTree: (input) =>
         fetchWorkspaceFileTree(workspaceId, { path: input.path ?? '' }),
-      readFile: (input) =>
-        isLinked(input.path) && allowLinkedFiles ? fetchLinkedFilePreview(input.threadId, input) : fetchWorkspaceFilePreview(workspaceId, {
+      readFile: async (input) => {
+        // Draw.io XML must be complete; older Supervisors cap text previews at
+        // 64 KiB and ignore pagination. Reuse the authenticated/encrypted binary
+        // download path so this also works immediately with existing devices.
+        if (/\.(drawio|dio)$/i.test(input.path)) {
+          const { blob } = isLinked(input.path) && allowLinkedFiles
+            ? await downloadLinkedFile(input.threadId, input.path)
+            : await downloadWorkspaceFile(workspaceId, { path: input.path });
+          if (blob.size > 8 * 1024 * 1024) throw new Error('Diagram preview supports files up to 8 MiB. Download this file to view it locally.');
+          return { path: input.path, name: input.path.replace(/\\/g, '/').split('/').pop() ?? input.path,
+            content: await blob.text(), language: 'xml', size: blob.size, truncated: false, nextOffset: blob.size };
+        }
+        return isLinked(input.path) && allowLinkedFiles ? fetchLinkedFilePreview(input.threadId, input) : fetchWorkspaceFilePreview(workspaceId, {
           path: input.path,
           ...(input.offset !== undefined ? { offset: input.offset } : {}),
           ...(input.limit !== undefined ? { limit: input.limit } : {}),
-        }),
+        });
+      },
       getRawFileUrl: (input) =>
         isLinked(input.path) && allowLinkedFiles ? buildLinkedFileUrl(input.threadId, input.path) : buildWorkspaceRawFileUrl(workspaceId, { path: input.path }),
       ...(access === 'write'
