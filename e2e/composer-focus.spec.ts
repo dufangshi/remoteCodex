@@ -47,8 +47,10 @@ async function openComposer(page: Page, request: APIRequestContext) {
           hidden: false,
           defaultReasoningEffort: 'medium',
           supportedReasoningEfforts: [
+            { reasoningEffort: 'low', description: '' },
             { reasoningEffort: 'medium', description: '' },
             { reasoningEffort: 'high', description: '' },
+            { reasoningEffort: 'xhigh', description: '' },
           ],
         },
       ],
@@ -72,9 +74,7 @@ async function openComposer(page: Page, request: APIRequestContext) {
   );
   await page.goto(`/threads/${thread.id}`);
   const composer = page.getByTestId('chat-composer');
-  await expect(composer.getByTestId('composer-model-label')).toHaveText(
-    modelName,
-  );
+  await expect(composer.locator('.composer-model-name')).toHaveText(modelName);
   return {
     composer,
     editor: composer.getByRole('textbox', { name: 'Prompt', exact: true }),
@@ -87,13 +87,12 @@ async function activate(locator: Locator, touch: boolean) {
   else await locator.click();
 }
 
-async function screenshot(page: Page, name: string) {
+async function screenshot(page: Page, name: string, area?: Locator) {
   if (!process.env.COMPOSER_SCREENSHOT_DIR) return;
   await mkdir(process.env.COMPOSER_SCREENSHOT_DIR, { recursive: true });
-  await page.screenshot({
-    path: path.join(process.env.COMPOSER_SCREENSHOT_DIR, name),
-    fullPage: true,
-  });
+  const target = path.join(process.env.COMPOSER_SCREENSHOT_DIR, name);
+  if (area) await area.screenshot({ path: target });
+  else await page.screenshot({ path: target, fullPage: true });
 }
 
 test('multiline composer stays expanded across plus/slash menus and keyboard focus, and collapses outside', async ({
@@ -168,18 +167,20 @@ test('collapsed composer model, plus and slash controls are clickable and preser
   request,
   isMobile,
 }) => {
+  await page.addInitScript(() =>
+    localStorage.setItem('remote-codex-theme-mode', 'dark'),
+  );
   const { composer, editor, id } = await openComposer(page, request);
   const model = composer.getByTestId('composer-model-label');
   await expect(composer).toHaveAttribute('data-composer-layout', 'collapsed');
   await expect(model).toBeEnabled();
   await expect(model).toHaveCSS('cursor', 'pointer');
   await activate(model, isMobile);
-  const effort = composer.getByRole('menuitemradio', {
-    name: 'high',
-    exact: true,
-  });
+  const effort = composer.getByRole('slider', { name: 'Effort', exact: true });
   await expect(effort).toBeVisible();
-  await activate(effort, isMobile);
+  await expect(effort).toHaveAttribute('aria-valuemax', '3');
+  await effort.focus();
+  await page.keyboard.press('ArrowRight');
   await expect
     .poll(
       async () =>
@@ -187,6 +188,12 @@ test('collapsed composer model, plus and slash controls are clickable and preser
           .reasoningEffort,
     )
     .toBe('high');
+  await expect(model.locator('.composer-model-effort')).toHaveText('high');
+  await screenshot(
+    page,
+    `${isMobile ? 'mobile' : 'desktop'}-composer-effort-label.png`,
+    composer,
+  );
   await activate(
     composer.getByRole('button', { name: 'Add attachment', exact: true }),
     isMobile,
@@ -211,6 +218,92 @@ test('collapsed composer model, plus and slash controls are clickable and preser
   await screenshot(
     page,
     `${isMobile ? 'mobile' : 'desktop'}-composer-model-menu.png`,
+  );
+  const beforeColor = await composer
+    .locator('.composer-reasoning')
+    .evaluate((el) => getComputedStyle(el).getPropertyValue('--effort-color'));
+  const thumb = await effort.boundingBox();
+  const track = await composer
+    .locator('.composer-reasoning-slider')
+    .boundingBox();
+  const start = {
+    x: thumb!.x + thumb!.width / 2,
+    y: thumb!.y + thumb!.height / 2,
+  };
+  const end = { x: track!.x + track!.width - 11, y: start.y };
+  const client = isMobile ? await page.context().newCDPSession(page) : null;
+  if (client) {
+    await client.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [start],
+    });
+    await client.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [end],
+    });
+  } else {
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(end.x, end.y, { steps: 5 });
+  }
+  await expect(effort).toHaveAttribute('aria-valuetext', 'xhigh');
+  await expect(composer).toHaveAttribute('data-composer-layout', 'expanded');
+  await expect
+    .poll(() =>
+      composer
+        .locator('.composer-reasoning')
+        .evaluate((el) =>
+          getComputedStyle(el).getPropertyValue('--effort-color'),
+        ),
+    )
+    .not.toBe(beforeColor);
+  expect(
+    (await (await request.get(`${api}/api/threads/${id}`)).json()).thread
+      .reasoningEffort,
+  ).toBe('high');
+  await screenshot(
+    page,
+    `${isMobile ? 'mobile' : 'desktop'}-composer-slider-preview.png`,
+  );
+  if (client) {
+    await client.send('Input.dispatchTouchEvent', {
+      type: 'touchEnd',
+      touchPoints: [],
+    });
+    await client.detach();
+  } else await page.mouse.up();
+  await expect
+    .poll(
+      async () =>
+        (await (await request.get(`${api}/api/threads/${id}`)).json()).thread
+          .reasoningEffort,
+    )
+    .toBe('xhigh');
+  await expect(model.locator('.composer-model-effort')).toHaveText('xhigh');
+  await page.route(`**/api/threads/${id}/models`, (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: 'default',
+          model: 'default',
+          displayName: modelName,
+          description: '',
+          isDefault: true,
+          hidden: false,
+          defaultReasoningEffort: null,
+          supportedReasoningEfforts: [],
+        },
+      ],
+    }),
+  );
+  await page.reload();
+  await expect(composer.locator('.composer-model-name')).toHaveText(modelName);
+  await expect(model.locator('.composer-model-effort')).toHaveCount(0);
+  await expect(model).toHaveAccessibleName(modelName);
+  await screenshot(
+    page,
+    `${isMobile ? 'mobile' : 'desktop'}-composer-model-only.png`,
+    composer,
   );
 });
 
