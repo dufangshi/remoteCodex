@@ -69,3 +69,43 @@ fake ACP 使用 `ios-e2e-stream`；Rust 可执行文件来自固定主线已有�
 
 真实 Relay/OAuth/托管 VM/passkey 服务及第三方 Monaco/Draw.io 内部菜单没有进行
 本轮浏览器端到端验证，范围和仍保留原文的界面见 `docs/i18n.md`。
+
+## Task #7：语言缓存定向补充修复
+
+父线程交付审查发现两处导入时翻译和两处 memo 文案缓存。修复将 MCP 成功提示、
+Shell 超时提示的翻译移到新操作发生时，并让 linked-files、Working/Confirming/
+Worked duration 的 memo 按 locale 重算。小范围同类审查补齐顶栏用量、图节点/
+工具标签、实时 Hook 摘要和共享访问徽标的语言依赖；不重建文件 adapter/model 或
+输入草稿。新增三个 Worked duration 配对 key，中英资源共 2,234 keys。
+
+没有改 `useI18n().t` 身份：它仍是稳定的、每次调用读取当前语言的全局函数；现有
+使用没有 `[t]` memo 依赖。架构文档明确缓存显示标签用 `[locale, ...inputs]`。
+模块级变量初始化、translate/Intl/helper 的 memo、memo 组件语言订阅进行了有界
+源码检查；纯数据模型/过滤 memo、运行时错误和事件回调不机械添加 locale 依赖。
+
+共享 UI 执行：
+
+```sh
+corepack pnpm --dir remote-codex-thread-ui --filter @remote-codex/thread-ui test \
+  src/components/composer/useComposerMcpConfig.test.tsx \
+  src/components/shell/shellEvents.test.ts \
+  src/components/ThreadTimeline.test.tsx \
+  src/components/graph-workspace/GraphWorkspaceExplorer.test.tsx \
+  src/i18n/i18n.test.tsx
+```
+
+首轮 4 文件 51 测试通过，Shell 回归中一句中文标点期望写错导致 1 测试失败；
+修正期望后仅重跑该相关文件：
+
+```sh
+corepack pnpm --dir remote-codex-thread-ui --filter @remote-codex/thread-ui test src/components/shell/shellEvents.test.ts
+```
+
+26 测试通过。最终五个相关文件合计 77 测试全部通过（四文件保留首轮通过结果）。
+新增回归证明模块已经导入后，en→zh 的新 MCP raw/HTTP 保存和 terminal attach
+超时使用新语言，之前创建的通知/错误保持原文；inProgress/recovering/completed
+的 React.memo 时间线在 props 不变时刷新标签；linked-files 更新且不重请求文件树。
+
+共享 UI typecheck、最后一次 shared build、更新主仓库 file dependency 后的主 Web
+类型检查及两个仓库 `git diff --check` 通过。本轮不重复浏览器回归；父线程负责组合
+search/i18n 浏览器链路。既有 MCP harness 测试仍有 React act 警告，测试未失败。

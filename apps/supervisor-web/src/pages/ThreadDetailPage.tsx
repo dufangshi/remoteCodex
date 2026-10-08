@@ -3317,7 +3317,7 @@ export function ThreadDetailPage() {
           </span>
         </div>
       ) : null,
-    [relayAccess],
+    [relayAccess, i18nLocale],
   );
   const threadActionsButton = <div>
     {relayThreadIsOwner && relayRouteDeviceId && <button aria-label={translate("workbench.portMappings")} title={translate("workbench.portMappings")} onClick={() => setPortsOpen(true)}><Network /></button>}
