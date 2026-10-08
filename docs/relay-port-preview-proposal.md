@@ -10,8 +10,9 @@ Mappings belong to the device, persist across Supervisor restarts, and are
 private to its account owner. Shared-thread control does not grant port access.
 
 **Open** signs the current browser in to that preview. **Copy address** copies
-the stable private address, without a login ticket; a different browser must use
-Open from its own signed-in device page first. **Stop** revokes the mapping and
+the stable private address, without a login ticket. Browser navigation to that
+address enters the Relay login/open flow automatically; API and WebSocket
+requests without a preview session still receive 401. **Stop** revokes the mapping and
 closes its connections; the local service keeps running. Re-enabling a stopped
 port creates a new address. Supervisors predating this feature must be updated.
 
@@ -195,7 +196,7 @@ The public authority is retained in `X-Forwarded-Host`, with HTTPS indicated by
 can still require an explicit allowed origin/public URL configuration. Diagnose
 the framework's actual rejection before changing its configuration. If a public
 host needs allowing, prefer the exact mapping hostname; do not set
-`allowedHosts: true` or allow every origin. A future framework-specific setup
+`allowedHosts: true` or allow every origin. A framework-specific setup
 helper could supply this configuration when starting the service; such a helper
 is not part of the current implementation.
 
@@ -218,3 +219,28 @@ tests cover local link parsing, confirmation and unavailable configuration.
 - [Cloudflare Universal SSL limitations](https://developers.cloudflare.com/ssl/edge-certificates/universal-ssl/limitations/)
 - [Set-Cookie semantics](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie)
 - [Vite host and WebSocket configuration](https://vite.dev/config/server-options.html)
+
+## Agent CLI workflow
+
+`remote-codex preview create --port 4013 --label "App preview"` reserves a
+persistent address without requiring a listening service. Its JSON includes
+`id`, `port`, exact `hostname`, `origin`, stable `url`, and `openUrl`. The last
+URL enters the owner's browser login/open flow; it contains no account session
+or launch ticket. Creation for an existing port is idempotent. The CLI uses its
+normal local Supervisor credential and obtains the configured base domain from
+the authenticated Relay connection, rather than guessing a hostname.
+
+Configure only required exact-host/origin entries, start HTTP on the mapped
+loopback port, then run `remote-codex preview check 4013`. Use
+`--path /app` for a particular HTTP route, or `--websocket-path /ws` to test a
+known WebSocket handshake. Results distinguish connection failure/timeouts,
+explicit host-check rejection, ordinary HTTP errors and WebSocket failures.
+Body inspection is bounded; redirects are not followed and the probe cannot
+leave loopback. This checks the local upstream, not public DNS/TLS/login or
+actual browser hot reload. A rejected handshake can also mean the framework
+requires a token/subprotocol, so do not diagnose it as a broken Relay by itself.
+
+Use `preview list` to recover addresses and `preview stop PORT_OR_ID` to revoke
+one. Stop does not terminate the application process. Shared-device access does
+not authorize preview access; the existing owner-only policy remains in force.
+The embedded `remote-codex skill` documents the required agent workflow.

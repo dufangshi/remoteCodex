@@ -5,6 +5,7 @@ mod http;
 mod interaction;
 mod linked_files;
 mod management;
+mod preview_cli;
 // Device-to-device messaging and files (docs/cross-device-peer.zh.md).
 mod peer_api;
 mod peer_files;

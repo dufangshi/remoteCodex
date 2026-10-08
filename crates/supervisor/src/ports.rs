@@ -58,20 +58,7 @@ pub(crate) async fn create(
     State(state): State<Arc<Supervisor>>,
     Json(input): Json<Create>,
 ) -> Response {
-    if input.port == 0 || input.port == state.config.port || input.label.len() > 120 {
-        return (StatusCode::BAD_REQUEST, Json(json!({"message":"Choose an HTTP service port from 1–65535, excluding the Supervisor port. Labels may contain up to 120 bytes."}))).into_response();
-    }
-    let result = state.db.with(|conn| {
-        let saved: String = conn.query_row("SELECT COALESCE((SELECT value FROM kv WHERE key=?1),'[]')", [KEY], |r| r.get(0))?;
-        let mut mappings: Vec<Mapping> = serde_json::from_str(&saved)?;
-        if let Some(existing) = mappings.iter().find(|m| m.port == input.port) { return Ok(existing.clone()); }
-        if mappings.len() >= 32 { bail!("At most 32 port mappings can be enabled on a device"); }
-        let mapping = Mapping { id: Uuid::new_v4().simple().to_string(), port: input.port, label: input.label.trim().to_string(), created_at: remote_codex_protocol::now_rfc3339() };
-        mappings.push(mapping.clone());
-        conn.execute("INSERT INTO kv(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [KEY, &serde_json::to_string(&mappings)?])?;
-        Ok(mapping)
-    });
-    match result {
+    match create_mapping(&state, input.port, &input.label) {
         Ok(mapping) => Json(json!(mapping)).into_response(),
         Err(error) => (
             StatusCode::BAD_REQUEST,
@@ -81,26 +68,58 @@ pub(crate) async fn create(
     }
 }
 
+fn changed(state: &Supervisor) {
+    state.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+        event_type: "device.ports.changed".into(),
+        thread_id: String::new(),
+        timestamp: remote_codex_protocol::now_rfc3339(),
+        payload: json!({"reason":"port_mappings_changed"}),
+    });
+}
+
+pub(crate) fn create_mapping(state: &Supervisor, port: u16, label: &str) -> Result<Mapping> {
+    if port == 0 || port == state.config.port || label.len() > 120 {
+        bail!("Choose an HTTP service port from 1–65535, excluding the Supervisor port. Labels may contain up to 120 bytes.");
+    }
+    let mapping = state.db.with(|conn| {
+        let saved: String = conn.query_row("SELECT COALESCE((SELECT value FROM kv WHERE key=?1),'[]')", [KEY], |r| r.get(0))?;
+        let mut mappings: Vec<Mapping> = serde_json::from_str(&saved)?;
+        if let Some(existing) = mappings.iter().find(|m| m.port == port) { return Ok(existing.clone()); }
+        if mappings.len() >= 32 { bail!("At most 32 port mappings can be enabled on a device"); }
+        let mapping = Mapping { id: Uuid::new_v4().simple().to_string(), port, label: label.trim().to_string(), created_at: remote_codex_protocol::now_rfc3339() };
+        mappings.push(mapping.clone());
+        conn.execute("INSERT INTO kv(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [KEY, &serde_json::to_string(&mappings)?])?;
+        Ok(mapping)
+    })?;
+    changed(state);
+    Ok(mapping)
+}
+
 pub(crate) async fn remove(
     State(state): State<Arc<Supervisor>>,
     Path(id): Path<String>,
 ) -> Response {
-    let result = state.db.with(|conn| {
+    match remove_mapping(&state, &id) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+pub(crate) fn remove_mapping(state: &Supervisor, id: &str) -> Result<()> {
+    state.db.with(|conn| {
         let saved: String = conn.query_row("SELECT COALESCE((SELECT value FROM kv WHERE key=?1),'[]')", [KEY], |r| r.get(0))?;
         let mut mappings: Vec<Mapping> = serde_json::from_str(&saved)?;
         mappings.retain(|m| m.id != id);
         conn.execute("INSERT INTO kv(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [KEY, &serde_json::to_string(&mappings)?])?;
         Ok(())
-    });
-    if result.is_err() {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    }
-    if let Some(handles) = active().lock().unwrap().remove(&id) {
+    })?;
+    if let Some(handles) = active().lock().unwrap().remove(id) {
         for handle in handles {
             handle.abort();
         }
     }
-    StatusCode::NO_CONTENT.into_response()
+    changed(state);
+    Ok(())
 }
 
 pub(crate) fn open(state: Arc<Supervisor>, message: &Value) {

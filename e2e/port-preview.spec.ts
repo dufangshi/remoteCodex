@@ -1,5 +1,6 @@
+import { promisify } from 'node:util';
 import { test, expect } from '@playwright/test';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -51,6 +52,8 @@ test('private device ports support browser links, HTTP streaming, WebSocket and 
   let observedCookies = '';
   const service = createServer(async (req, res) => {
     observedCookies = req.headers.cookie ?? '';
+    if (req.url === '/blocked') { res.writeHead(403); res.end('Blocked request. This host is not allowed.'); return; }
+    if (req.url === '/forbidden') { res.writeHead(403); res.end('Login required'); return; }
     if (req.url === '/sse') {
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       res.write('data: immediate\n\n');
@@ -73,10 +76,13 @@ test('private device ports support browser links, HTTP streaming, WebSocket and 
       socket.onclose=()=>document.querySelector('#ws').textContent='Disconnected';
     </script></body></html>`);
   });
-  const wsServer = new WebSocketServer({ server: service });
+  const wsServer = new WebSocketServer({ server: service, path: '/ws' });
   wsServer.on('connection', socket => socket.on('message', data => socket.send(data.toString())));
-  await new Promise<void>(done => service.listen(0, '127.0.0.1', done));
-  const port = (service.address() as { port: number }).port;
+  const port = await freePort();
+  async function cli(...args: string[]) {
+    const { stdout } = await promisify(execFile)(binaries, ['--cli-config', join(root, 'device.cli.json'), 'preview', ...args], { env, timeout: 20_000 });
+    return JSON.parse(stdout);
+  }
   // Native fetch in Node 24 ignores an explicitly supplied Host header. Use
   // node:http to reach the isolated listener with the actual preview authority.
   const fetchPreview = (url: URL, cookie?: string, init: RequestInit = {}) => new Promise<Response>((done, reject) => {
@@ -106,6 +112,20 @@ test('private device ports support browser links, HTTP streaming, WebSocket and 
       REMOTE_CODEX_DATABASE_PATH: join(root, 'device.sqlite'), REMOTE_CODEX_WORKSPACE_ROOT: join(root, 'workspaces') });
     await expect.poll(() => api('/healthz').then(r => r.data.connectedSupervisors)).toBe(1);
     const deviceApi = `/relay/devices/${deviceId}/api`;
+    // Real local CLI reserves a stable address while nothing is listening yet.
+    const reserved = await cli('create', '--port', String(port), '--label', 'Test website');
+    expect(reserved.hostname).toBe(`p-${reserved.id}.preview.localhost`);
+    expect(reserved.url).not.toContain('__rc_launch');
+    expect((await cli('create', '--port', String(port))).id).toBe(reserved.id);
+    expect((await cli('check', String(port))).check.status).toBe('serviceNotRunning');
+    await new Promise<void>(done => service.listen(port, '127.0.0.1', done));
+    const ready = await cli('check', String(port), '--websocket-path', '/ws');
+    expect(ready.check.status).toBe('httpReady');
+    expect(ready.check.websocket).toBe('handshakeAccepted');
+    expect((await cli('check', String(port), '--path', '/blocked')).check.status).toBe('hostRejected');
+    expect((await cli('check', String(port), '--path', '/forbidden')).check.status).toBe('httpError');
+    expect((await cli('check', String(port), '--websocket-path', '/missing-ws')).check.websocket).toBe('handshakeFailed');
+    expect((await cli('list')).mappings[0].id).toBe(reserved.id);
     const work = join(root, 'workspace'); await mkdir(work);
     const workspace = await api(deviceApi + '/workspaces', 'POST', { absPath: work, label: 'Preview' }, owner);
     expect(workspace.status).toBe(200);
@@ -141,6 +161,31 @@ test('private device ports support browser links, HTTP streaming, WebSocket and 
     expect((await api(openPath, 'POST', { path: '/' }, other)).status).toBe(403);
     expect((await api(openPath, 'POST', { path: '//evil.test' }, owner)).status).toBe(400);
     // Real browser navigation through the public-style distinct origin, including WS.
+    const direct = await context.newPage();
+    await direct.goto(reserved.url + 'app?q=1');
+    await expect(direct.getByRole('heading', { name: 'Device web preview' })).toBeVisible();
+    await expect(direct.locator('#ws')).toHaveText('hot reload');
+    expect(new URL(direct.url()).pathname).toBe('/app');
+    expect(new URL(direct.url()).search).toBe('?q=1');
+    await direct.close();
+    // A fresh browser must enter sign-in; a different owner cannot redeem the link.
+    const fresh = await context.browser()!.newContext();
+    try {
+      const anonymous = await fresh.newPage();
+      await anonymous.goto(reserved.url);
+      await expect(anonymous).toHaveURL(/\/relay-portal\?returnTo=/);
+      expect(decodeURIComponent(new URL(anonymous.url()).searchParams.get('returnTo')!)).toContain(`/devices/${deviceId}/ports/${reserved.id}`);
+      await anonymous.getByRole('textbox', { name: 'Email or username', exact: true }).fill('owner');
+      await anonymous.getByLabel('Password', { exact: true }).fill(password);
+      await anonymous.getByRole('button', { name: 'Sign in', exact: true }).click();
+      await expect(anonymous.getByRole('heading', { name: 'Device web preview' })).toBeVisible();
+      await expect(anonymous.locator('#ws')).toHaveText('hot reload');
+      await fresh.clearCookies();
+      await fresh.addCookies([{ name: 'remote_codex_relay_session', value: other, url: base }]);
+      await anonymous.goto(reserved.openUrl);
+      await expect(anonymous.getByRole('alert')).toBeVisible();
+      expect(new URL(anonymous.url()).host).toBe(new URL(base).host);
+    } finally { await fresh.close(); }
     const popupPromise = page.waitForEvent('popup');
     await manager.getByRole('button', { name: 'Open', exact: true }).click();
     const preview = await popupPromise;
@@ -153,6 +198,7 @@ test('private device ports support browser links, HTTP streaming, WebSocket and 
     const url = new URL(preview.url());
     const cookie = `rc_port_preview=${browserCookie.value}; remote_codex_relay_session=NEVER_FORWARD; app=value`;
     expect((await fetchPreview(url)).status).toBe(401);
+    expect((await fetchPreview(url, undefined, { method: 'POST', headers: { accept: 'text/html', 'sec-fetch-mode': 'navigate' } })).status).toBe(401);
     const payload = randomBytes(512 * 1024 + 37);
     url.pathname = '/echo';
     const echo = await fetchPreview(url, cookie, { method: 'POST', body: payload });
@@ -211,6 +257,10 @@ test('private device ports support browser links, HTTP streaming, WebSocket and 
     expect((await api('/relay/auth/logout', 'POST', {}, owner)).status).toBe(200);
     expect((await fetchPreview(new URL(linked.url()), `rc_port_preview=${newCookie.value}`)).status).toBe(401);
     await expect(linked.locator('#ws')).toHaveText('Disconnected');
+    await linked.reload();
+    await expect(linked).toHaveURL(/\/relay-portal\?returnTo=/);
+    expect((await cli('stop', String(port))).stopped).toBe(true);
+    expect((await cli('list')).mappings).toEqual([]);
     await page.screenshot({ path: testInfo.outputPath('port-preview-toolbar.png') });
     await linked.close(); await preview.close();
   } finally {

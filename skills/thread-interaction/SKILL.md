@@ -1,13 +1,63 @@
 ---
 name: thread-interaction
-description: Coordinate peer remoteCodex threads on this device or on another device of the same owner through passive result handoffs, dependency-aware waiting, explicit task dispatch, urgent corrections and file exchange. Use when creating, messaging or collecting work from remoteCodex peers.
+description: Coordinate peer remoteCodex threads on this device or on another device of the same owner through passive result handoffs, dependency-aware waiting, explicit task dispatch, urgent corrections and file exchange. Also reserve and diagnose private web previews on this device. Use when creating, messaging or collecting work from remoteCodex peers, or preparing a local website for the user to view.
 ---
 
-# Interact with remoteCodex threads
+# remoteCodex threads and web previews
 
 Threads are peers. Each can create others, message existing threads, read state/history, or receive requests. This is a Supervisor-level interface across Codex, ACP Grok, and other installed providers. Creation does not copy your conversation. Peers in one workspace share files unless you create them with `--worktree`; give each delegate its own files, or its own worktree, for overlapping edits.
 
 `remote-codex skill` reads the running Supervisor's guide, falling back to the CLI's bundled guide offline or with an older Supervisor. Data commands return JSON; help and this guide return text. Use command-specific help to discover exact flags. If your CLI lacks a flag required by this guide, use the installed runtime's CLI; do not bypass the delivery rule. Check exit status and the returned delivery state. A receipt is not proof of task completion.
+
+## Show a local website to the user
+
+When the user asks to view an app, or your task calls for delivering a runnable
+web preview, reserve its address **before starting the HTTP service**:
+
+```bash
+remote-codex preview create --port 4013 --label "App preview"
+# Read JSON: hostname (exact host), origin, url and openUrl.
+# Configure the framework if needed, then start HTTP on 127.0.0.1:4013.
+remote-codex preview check 4013
+remote-codex preview list
+# Optional: probe a known WebSocket endpoint (not a complete browser HMR test).
+remote-codex preview check 4013 --websocket-path /ws
+# Revoke when no longer needed; this does not stop the HTTP process.
+remote-codex preview stop 4013
+```
+
+- Creation reserves a mapping, **not a running server**. Repeating it for an
+  enabled port keeps the same address. Stop then recreate gets a new address;
+  update exact-host configuration accordingly. Avoid stopping another task's
+  mapping; mappings are device-wide, not thread-local.
+- Bind to loopback in the Supervisor's own network namespace. For Vite use a
+  fixed port (`--strictPort`) so automatic port fallback cannot break the mapping.
+- If the installed framework requires a host/origin allowlist, add only the
+  returned `hostname` or `origin`, matching that setting's expected format;
+  preserve existing entries. Examples: Vite `server.allowedHosts`, webpack
+  `devServer.allowedHosts`, Django `ALLOWED_HOSTS`; Next.js dev-origin restrictions
+  use `allowedDevOrigins`. Inspect the installed version. Do not use `*`,
+  `allowedHosts: true`, disable host checks or permit a whole shared domain.
+  The gateway forwards a loopback Host and original `X-Forwarded-Host`, so many
+  apps need no host change. Do not edit allowlists without a framework need.
+- Diagnose before changing configuration: `serviceNotRunning` means check the
+  process/port/bind address; `hostRejected` means inspect the precise rejection;
+  `httpError` alone does not prove an allowlist problem. A successful HTTP check
+  does not certify public DNS, TLS, account access or hot reload.
+- If the page works but hot reload fails, inspect the actual browser WebSocket
+  endpoint, protocol, port, auth token and subprotocol. Prefer same-origin WS.
+  For confirmed public-endpoint issues, Vite uses `server.ws` (older versions:
+  `server.hmr`); use the assigned host, public scheme/port, never the user's
+  localhost. WebSocket probes require the actual endpoint and may fail when
+  framework-specific auth/subprotocols are required.
+- Give the user **`openUrl`** as the clickable entry. It authenticates in their
+  browser and opens `url`; the mapped hostname can also initiate browser login.
+  Previews remain private to the device owner; shared device access alone does
+  not grant preview access. Never copy account tokens or one-use launch tickets
+  into reports or CLI commands. CLI output contains neither.
+- A disconnected Supervisor, disabled preview gateway or old runtime/Relay must
+  be fixed explicitly. Do not invent a domain or bypass authentication. See
+  `remote-codex preview --help`; an older installation may need updating.
 
 ## The orchestration loop
 

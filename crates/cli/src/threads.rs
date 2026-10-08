@@ -71,6 +71,33 @@ impl Body {
     }
 }
 #[derive(Subcommand)]
+pub enum PreviewCommand {
+    /// Reserve a stable private preview address BEFORE starting an HTTP service.
+    Create {
+        #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
+        port: u16,
+        #[arg(long, default_value = "")]
+        label: String,
+        #[arg(long, default_value = "/")]
+        path: String,
+    },
+    /// Show enabled mappings, exact allowlist hostnames and browser entry URLs.
+    List,
+    /// Probe local HTTP and optionally a known WebSocket/HMR endpoint.
+    Check {
+        /// Mapping ID or local port.
+        target: String,
+        #[arg(long, default_value = "/")]
+        path: String,
+        /// Exact local endpoint; handshake acceptance alone does not verify browser HMR.
+        #[arg(long)]
+        websocket_path: Option<String>,
+    },
+    /// Revoke a mapping and terminate its preview connections.
+    Stop { target: String },
+}
+
+#[derive(Subcommand)]
 pub enum ThreadCommand {
     /// Current remoteCodex thread identity and status.
     #[command(name = "self")]
@@ -541,6 +568,23 @@ impl Client {
             .await?
             .apply(&mut input);
         self.request(input).await
+    }
+    pub async fn preview(&self, command: PreviewCommand) -> Result<Value> {
+        let input = match command {
+            PreviewCommand::Create { port, label, path } => {
+                json!({"operation":"previewCreate","port":port,"label":label,"path":path})
+            }
+            PreviewCommand::List => json!({"operation":"previewList"}),
+            PreviewCommand::Check {
+                target,
+                path,
+                websocket_path,
+            } => {
+                json!({"operation":"previewCheck","target":target,"path":path,"websocketPath":websocket_path})
+            }
+            PreviewCommand::Stop { target } => json!({"operation":"previewStop","target":target}),
+        };
+        self.request(input).await.context("Preview command requires a Supervisor and Relay with CLI preview support; update older installations")
     }
     pub async fn device(&self, command: DeviceCommand) -> Result<Value> {
         let input = match command {

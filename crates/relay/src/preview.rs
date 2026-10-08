@@ -30,7 +30,7 @@ struct Stream {
 }
 #[derive(Default)]
 pub(super) struct Hub {
-    base: Option<url::Url>,
+    pub(super) base: Option<url::Url>,
     mappings: StdMutex<HashMap<String, Mapping>>,
     launches: StdMutex<HashMap<String, Grant>>,
     sessions: StdMutex<HashMap<String, Grant>>,
@@ -260,6 +260,59 @@ pub(super) fn disconnected(state: &AppState, device: &str, connection: Uuid) {
     });
 }
 
+fn browser_entry(state: &AppState, request: &Request, mapping: &Mapping) -> Option<url::Url> {
+    if !matches!(*request.method(), Method::GET | Method::HEAD)
+        || request.headers().get("sec-fetch-mode")?.to_str().ok()? != "navigate"
+        || !request
+            .headers()
+            .get(header::ACCEPT)?
+            .to_str()
+            .ok()?
+            .contains("text/html")
+    {
+        return None;
+    }
+    // Use configured control-plane origin, never the caller's Host/Forwarded headers.
+    let mut destination = url::Url::parse(state.oauth.public_base_url.as_deref()?).ok()?;
+    if !matches!(destination.scheme(), "http" | "https")
+        || destination.host_str().is_none()
+        || !destination.username().is_empty()
+        || destination.password().is_some()
+    {
+        return None;
+    }
+    destination.set_path(&format!("/devices/{}/ports/{}", mapping.device, mapping.id));
+    destination.set_query(None);
+    destination.set_fragment(None);
+    destination.query_pairs_mut().append_pair(
+        "path",
+        request
+            .uri()
+            .path_and_query()
+            .map(|p| p.as_str())
+            .unwrap_or("/"),
+    );
+    Some(destination)
+}
+
+fn require_browser_login(state: &AppState, request: &Request, mapping: &Mapping) -> Response {
+    // Only HTML navigations enter login. API/assets/WS retain 401.
+    if let Some(destination) = browser_entry(state, request, mapping) {
+        return Response::builder()
+            .status(StatusCode::SEE_OTHER)
+            .header(header::LOCATION, destination.as_str())
+            .header(header::CACHE_CONTROL, "no-store")
+            .header(header::REFERRER_POLICY, "no-referrer")
+            .body(Body::empty())
+            .unwrap();
+    }
+    (
+        StatusCode::UNAUTHORIZED,
+        "Open this port from your signed-in Remote Codex device page.",
+    )
+        .into_response()
+}
+
 // Run outside the control-plane security middleware: local applications own their
 // CSP and websocket Origin, and must never be served on the control-plane origin.
 pub(super) async fn middleware(
@@ -342,14 +395,10 @@ pub(super) async fn middleware(
     let Some(grant) = grant.filter(|g| {
         g.mapping == id && g.device == mapping.device && g.expires > std::time::Instant::now()
     }) else {
-        return (
-            StatusCode::UNAUTHORIZED,
-            "Open this port from your signed-in Remote Codex device page.",
-        )
-            .into_response();
+        return require_browser_login(&state, &request, &mapping);
     };
     if !valid_grant(&state, &grant).await {
-        return unauthorized();
+        return require_browser_login(&state, &request, &mapping);
     }
     if let Some(value) = request.headers().get(header::ORIGIN) {
         if !value

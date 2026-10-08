@@ -20,6 +20,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn preview_cli_reserves_before_startup_and_rejects_invalid_ports() {
+        for port in ["0", "65536", "-1", "abc"] {
+            assert!(
+                Cli::try_parse_from(["remote-codex", "preview", "create", "--port", port]).is_err()
+            );
+        }
+        for args in [
+            vec!["preview", "create", "--port", "4013", "--path", "/app?q=1"],
+            vec!["preview", "list"],
+            vec!["preview", "check", "4013", "--websocket-path", "/ws"],
+            vec!["preview", "stop", "4013"],
+        ] {
+            assert!(Cli::try_parse_from(std::iter::once("remote-codex").chain(args)).is_ok());
+        }
+    }
+
+    #[test]
     fn peer_send_accepts_explicit_interrupt_reason_and_status_topic() {
         let cli = Cli::try_parse_from([
             "remote-codex",
@@ -225,6 +242,11 @@ mod tests {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Reserve, inspect and diagnose private device web previews.
+    Preview {
+        #[command(subcommand)]
+        command: threads::PreviewCommand,
+    },
     /// Create, contact, and inspect local threads or same-owner device peers.
     Thread {
         #[command(subcommand)]
@@ -306,6 +328,12 @@ async fn main() -> Result<()> {
         .init();
     let cli = Cli::parse();
     match cli.command {
+        Commands::Preview { command } => {
+            let value = threads::Client::new(cli.connection)?
+                .preview(command)
+                .await?;
+            println!("{}", serde_json::to_string_pretty(&value)?);
+        }
         Commands::Skill => {
             let text = match threads::Client::new(cli.connection) {
                 Ok(client) => match client.skill().await {

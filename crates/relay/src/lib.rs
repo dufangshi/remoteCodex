@@ -3984,7 +3984,9 @@ async fn handle_supervisor_with_timeout(
             "type": "relay.connected",
             "timestamp": connected_at,
             "deviceId": device_id,
-            "deviceName": device_name
+            "deviceName": device_name,
+            "portPreviewBaseUrl": state.preview.base.as_ref().map(url::Url::as_str),
+            "publicBaseUrl": state.oauth.public_base_url
         })
         .to_string()
         .into(),

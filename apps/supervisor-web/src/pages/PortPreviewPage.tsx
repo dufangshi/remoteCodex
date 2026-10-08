@@ -1,0 +1,32 @@
+import { useEffect, useState } from 'react';
+import { Link, useLocation, useParams } from 'react-router-dom';
+import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { request } from '../lib/api';
+
+/** Exchange the browser's account session for a private preview-host cookie. */
+export function PortPreviewPage() {
+  useI18n();
+  const { deviceId, mappingId } = useParams();
+  const location = useLocation();
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    setError(null);
+    const path = new URLSearchParams(location.search).get('path') ?? '/';
+    request<{ url: string }>(`/relay/devices/${encodeURIComponent(deviceId ?? '')}/port-mappings/${encodeURIComponent(mappingId ?? '')}/open`, {
+      method: 'POST', body: JSON.stringify({ path }), signal: controller.signal,
+    }).then(({ url }) => {
+      if (!controller.signal.aborted) window.location.replace(url);
+    }).catch((cause: unknown) => {
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
+    });
+    return () => controller.abort();
+  }, [deviceId, mappingId, location.search]);
+  return <main className="flex min-h-screen items-center justify-center bg-[var(--app-bg)] p-6 text-[var(--theme-fg)]">
+    <section className="max-w-lg space-y-4">
+      <h1 className="text-xl font-semibold">{translate('devices.portMappings')}</h1>
+      {error ? <p role="alert">{error}</p> : <p role="status">{translate('devices.opening')}</p>}
+      {error && <Link className="underline" to="/">{translate('workbench.remoteCodexHome')}</Link>}
+    </section>
+  </main>;
+}

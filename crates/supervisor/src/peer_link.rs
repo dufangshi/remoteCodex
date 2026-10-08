@@ -22,6 +22,8 @@ const MAX_PENDING: usize = 32;
 pub(crate) struct RelayIdentity {
     pub device_id: String,
     pub device_name: String,
+    pub port_preview_base_url: Option<String>,
+    pub public_base_url: Option<String>,
 }
 
 /// A decrypted reply from another device's `/api/peer/...` handler.
@@ -340,6 +342,8 @@ pub(crate) mod tests {
         connection.connected(Some(RelayIdentity {
             device_id: device_id.into(),
             device_name: format!("Device {device_id}"),
+            port_preview_base_url: None,
+            public_base_url: None,
         }));
         (connection, outbound)
     }

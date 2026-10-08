@@ -1,5 +1,6 @@
 import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { installNotificationRouteResponder } from './lib/relayPush';
+import { PortPreviewPage } from './pages/PortPreviewPage';
 import { PublicThreadPage } from './pages/PublicThreadPage';
 import {
   BrowserRouter,
@@ -669,6 +670,7 @@ export function App() {
         <DocumentTitleUpdater />
         <RoutePluginProvider>
           <Routes>
+            <Route path="/devices/:deviceId/ports/:mappingId" element={<RelayGate><PortPreviewPage /></RelayGate>} />
             <Route path="/s/:id" element={<PublicThreadPage />} />
             <Route path="/relay-guide" element={<RelayGuidePage />} />
             <Route path="/relay-portal" element={<RelayPortalPage />} />

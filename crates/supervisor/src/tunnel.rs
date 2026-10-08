@@ -185,6 +185,8 @@ async fn run_connected_tunnel_with_deadline(
                             let identity = message["deviceId"].as_str().map(|id| crate::peer_link::RelayIdentity {
                                 device_id: id.into(),
                                 device_name: message["deviceName"].as_str().unwrap_or("").into(),
+                                port_preview_base_url: message["portPreviewBaseUrl"].as_str().map(str::to_owned),
+                                public_base_url: message["publicBaseUrl"].as_str().map(str::to_owned),
                             });
                             peer_connection.connected(identity);
                         }
@@ -233,6 +235,9 @@ async fn run_connected_tunnel_with_deadline(
             event = activity.recv() => {
                 match event {
                     Ok(event) => {
+                        if event.payload["reason"] == "port_mappings_changed" {
+                            let _ = outgoing.send(json!({"type":"relay.heartbeat","portMappings":crate::ports::snapshot(&state)}));
+                        }
                         if event.payload["reason"] == "thread_created" || event.payload["reason"] == "child_deleted" {
                             let _ = outgoing.send(json!({"type":"relay.heartbeat","timestamp":now_rfc3339(),"threadLineage":thread_lineage(&state)}));
                         }
