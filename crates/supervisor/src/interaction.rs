@@ -61,6 +61,9 @@ pub(crate) async fn run(
     let all = input["all"] == true;
     let wait = clamp_wait(input["timeoutSeconds"].as_u64());
     match input.get("operation").and_then(Value::as_str).unwrap_or("") {
+        "automationCreate" | "automationPreview" | "automationList" | "automationShow"
+        | "automationRuns" | "automationPause" | "automationResume" | "automationCancel"
+        | "commandRun" | "commandShow" => crate::automations::cli(state, &input).await,
         "info" => {
             let identity = crate::peer_link::relay_identity(state);
             Ok(

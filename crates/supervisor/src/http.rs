@@ -213,6 +213,34 @@ pub fn router(state: AppState) -> Router {
             "/api/threads/{id}",
             get(get_thread).patch(rename_thread).delete(delete_thread),
         )
+        .route(
+            "/api/threads/{id}/automations",
+            get(crate::automations::list).post(crate::automations::create),
+        )
+        .route(
+            "/api/threads/{id}/automations/preview",
+            post(crate::automations::preview),
+        )
+        .route(
+            "/api/threads/{id}/automations/{automationId}",
+            get(crate::automations::show),
+        )
+        .route(
+            "/api/threads/{id}/automations/{automationId}/runs",
+            get(crate::automations::runs),
+        )
+        .route(
+            "/api/threads/{id}/automations/{automationId}/{operation}",
+            post(crate::automations::control),
+        )
+        .route(
+            "/api/threads/{id}/commands",
+            post(crate::automations::command_run),
+        )
+        .route(
+            "/api/threads/{id}/commands/{commandId}",
+            get(crate::automations::command_show),
+        )
         .route("/api/threads/{id}/search", get(thread_search))
         .route("/api/search", get(device_search))
         .route("/api/workspaces/{id}/search", get(workspace_search))

@@ -158,6 +158,14 @@ const RUNTIME_MIGRATIONS: &[Migration] = &[
             Ok(())
         },
     },
+    Migration {
+        version: 13,
+        name: "unified_automations",
+        apply: |conn| {
+            conn.execute_batch(include_str!("automation_schema.sql"))?;
+            Ok(())
+        },
+    },
 ];
 
 const NODE_0030_MIGRATIONS: &[&str] = &[

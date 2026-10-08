@@ -324,6 +324,27 @@ fn watch_entries(
 }
 
 impl Supervisor {
+    /// Conservative history projection for scheduler admission. Unknown native
+    /// timers remain a conflict until their successful cancellation is recorded.
+    pub(super) fn recorded_native_watch_conflict(&self, id: &str) -> Result<bool> {
+        let thread = self.get_thread(id)?;
+        if thread.provider != Provider::Claude && thread.agent_id.as_deref() != Some("claude") {
+            return Ok(false);
+        }
+        let records=self.db.with(|c|{let mut q=c.prepare("SELECT item_json,NULL FROM thread_history_items WHERE thread_id=?1 AND json_extract(item_json,'$.text') IN ('CronCreate','CronDelete','CronList') ORDER BY created_at,rowid")?;let rows=q.query_map([id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;Ok(rows)})?;
+        Ok(watch_entries(
+            records,
+            None,
+            None,
+            &[],
+            &HashMap::new(),
+            id,
+            chrono::Utc::now().timestamp_millis(),
+        )?
+        .iter()
+        .any(|w| matches!(w["status"].as_str(), Some("active" | "unconfirmed"))))
+    }
+
     pub async fn thread_watches(&self, id: &str) -> Result<Value> {
         let thread = self.get_thread(id)?;
         if thread.provider != Provider::Claude

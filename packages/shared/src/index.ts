@@ -1986,3 +1986,5 @@ export function mergeThreadHistoryItem(
   };
 }
 export type { DeviceMetricsDto, MemoryMetricsDto, GpuMetricsDto, PowerReadingDto, TemperatureReadingDto } from './deviceMetrics';
+
+export type { AutomationTrigger, AutomationCondition, AutomationCommandSpec, AutomationAction, AutomationDefinition, AutomationDto, AutomationRunDto } from "./automation";

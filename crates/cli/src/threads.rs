@@ -378,7 +378,7 @@ impl Client {
                 .build()?,
         })
     }
-    async fn request(&self, input: Value) -> Result<Value> {
+    pub(crate) async fn request(&self, input: Value) -> Result<Value> {
         self.request_for(input, 0).await
     }
     pub async fn skill(&self) -> Result<String> {
@@ -393,7 +393,7 @@ impl Client {
             .to_owned())
     }
     /// `wait_seconds` extends the HTTP timeout for operations that block server-side.
-    async fn request_for(&self, input: Value, wait_seconds: u64) -> Result<Value> {
+    pub(crate) async fn request_for(&self, input: Value, wait_seconds: u64) -> Result<Value> {
         let response = self
             .http
             .post(format!("{}/api/cli", self.url.trim_end_matches('/')))
@@ -432,7 +432,7 @@ impl Client {
             device_id: None,
         })
     }
-    async fn id(&self, value: &str) -> Result<String> {
+    pub(crate) async fn id(&self, value: &str) -> Result<String> {
         let target = self.target(value, None).await?;
         ensure!(
             target.device_id.is_none(),

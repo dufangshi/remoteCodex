@@ -1,0 +1,140 @@
+use anyhow::{ensure, Context, Result};
+use clap::{Args, Subcommand};
+use serde_json::{json, Value};
+use std::{io::Read, path::PathBuf};
+
+#[derive(Args)]
+pub struct DefinitionArgs {
+    #[arg(long, default_value = "self")]
+    pub thread: String,
+    /// Full typed trigger/condition/action definition as JSON.
+    #[arg(long, conflicts_with = "file")]
+    pub json: Option<String>,
+    /// JSON file, or - to read stdin. Conditions support all/any/not.
+    #[arg(long, required_unless_present = "json")]
+    pub file: Option<PathBuf>,
+    #[arg(long)]
+    pub request_id: Option<String>,
+}
+impl DefinitionArgs {
+    fn value(&self) -> Result<Value> {
+        let text = if let Some(s) = &self.json {
+            s.clone()
+        } else {
+            let p = self.file.as_ref().context("--file or --json required")?;
+            if p.as_os_str() == "-" {
+                let mut s = String::new();
+                std::io::stdin().take(262145).read_to_string(&mut s)?;
+                s
+            } else {
+                std::fs::read_to_string(p)?
+            }
+        };
+        ensure!(text.len() <= 262144, "definition exceeds 256 KiB");
+        Ok(serde_json::from_str(&text)?)
+    }
+}
+#[derive(Args)]
+pub struct Target {
+    #[arg(long, default_value = "self")]
+    pub thread: String,
+    pub id: String,
+}
+#[derive(Subcommand)]
+pub enum AutomationCommand {
+    /// Register a durable hook. Only an explicit prompt action wakes a thread.
+    Create(DefinitionArgs),
+    /// Validate a definition and show upcoming UTC times without registering it.
+    Preview(DefinitionArgs),
+    List {
+        #[arg(long, default_value = "self")]
+        thread: String,
+    },
+    Show(Target),
+    /// Pause future triggers and remove only this hook's unexecuted prompts.
+    Pause(Target),
+    /// Resume from the next future tick; missed paused ticks are discarded.
+    Resume(Target),
+    /// Permanently cancel future triggers and unexecuted actions; running work finishes.
+    Cancel(Target),
+    Runs {
+        #[arg(long, default_value = "self")]
+        thread: String,
+        id: String,
+        #[arg(long, default_value_t = 20)]
+        limit: u64,
+    },
+}
+#[derive(Subcommand)]
+pub enum CommandCommand {
+    /// Spawn and wait for a controlled command; ordinary PTY commands are not observed.
+    Run {
+        #[arg(long, default_value = "self")]
+        thread: String,
+        #[arg(long)]
+        command_key: Option<String>,
+        #[arg(long)]
+        request_id: Option<String>,
+        #[arg(long, default_value = ".")]
+        cwd: String,
+        #[arg(long, default_value_t = 60)]
+        timeout_seconds: u64,
+        /// Explicit shell program text, mutually exclusive with trailing argv.
+        #[arg(long, conflicts_with = "argv")]
+        shell: Option<String>,
+        #[arg(last = true, required_unless_present = "shell")]
+        argv: Vec<String>,
+    },
+    Show {
+        #[arg(long, default_value = "self")]
+        thread: String,
+        id: String,
+    },
+}
+impl crate::threads::Client {
+    pub async fn automation(&self, command: AutomationCommand) -> Result<Value> {
+        let mut v = match command {
+            AutomationCommand::Create(a) => {
+                json!({"operation":"automationCreate","threadId":self.id(&a.thread).await?,"definition":a.value()?,"clientRequestId":a.request_id})
+            }
+            AutomationCommand::Preview(a) => {
+                json!({"operation":"automationPreview","threadId":self.id(&a.thread).await?,"definition":a.value()?})
+            }
+            AutomationCommand::List { thread } => {
+                json!({"operation":"automationList","threadId":self.id(&thread).await?})
+            }
+            AutomationCommand::Runs { thread, id, limit } => {
+                json!({"operation":"automationRuns","threadId":self.id(&thread).await?,"automationId":id,"limit":limit})
+            }
+            AutomationCommand::Show(t) => self.automation_target("automationShow", t).await?,
+            AutomationCommand::Pause(t) => self.automation_target("automationPause", t).await?,
+            AutomationCommand::Resume(t) => self.automation_target("automationResume", t).await?,
+            AutomationCommand::Cancel(t) => self.automation_target("automationCancel", t).await?,
+        };
+        v["fromThreadId"] = json!(self.from);
+        self.request(v).await
+    }
+    async fn automation_target(&self, operation: &str, t: Target) -> Result<Value> {
+        Ok(json!({"operation":operation,"threadId":self.id(&t.thread).await?,"automationId":t.id}))
+    }
+    pub async fn command_execution(&self, command: CommandCommand) -> Result<Value> {
+        let mut v = match command {
+            CommandCommand::Run {
+                thread,
+                command_key,
+                request_id,
+                cwd,
+                timeout_seconds,
+                shell,
+                argv,
+            } => {
+                json!({"operation":"commandRun","threadId":self.id(&thread).await?,"input":{"commandKey":command_key,"clientRequestId":request_id,"cwd":cwd,"timeoutSeconds":timeout_seconds,"shell":shell,"argv":argv}})
+            }
+            CommandCommand::Show { thread, id } => {
+                json!({"operation":"commandShow","threadId":self.id(&thread).await?,"commandId":id})
+            }
+        };
+        v["fromThreadId"] = json!(self.from);
+        self.request_for(v, 300).await
+    }
+}

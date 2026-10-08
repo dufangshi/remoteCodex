@@ -410,6 +410,8 @@ impl Supervisor {
                 "UPDATE agent_tasks SET status=?3, result=?4, owner_thread_id=COALESCE(owner_thread_id,?5), updated_at=?6 WHERE root_thread_id=?1 AND number=?2",
                 params![root, number, new_status, result, me, now_rfc3339()],
             )?;
+            crate::service::automation::record_event(&tx, &format!("task:{root}:{number}:terminal"),
+                &json!({"kind":"taskEnded","rootThreadId":root,"taskNumber":number,"status":new_status,"closingMessage":result,"workspaceId":tx.query_row("SELECT workspace_id FROM threads WHERE id=?1",[&root],|r|r.get::<_,String>(0))?,"ancestry":[]}), &now_rfc3339())?;
             if let Some(creator) = creator.as_deref() {
                 notify(
                     &tx,

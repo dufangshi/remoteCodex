@@ -130,6 +130,26 @@ pub(crate) fn shared_thread_path_allowed(
     if !suffix.is_empty() && !suffix.starts_with('/') {
         return false;
     }
+    let automation: Vec<&str> = suffix.split('/').filter(|s| !s.is_empty()).collect();
+    if automation.first() == Some(&"automations") {
+        return match (method, automation.as_slice()) {
+            ("GET", ["automations"])
+            | ("GET", ["automations", _])
+            | ("GET", ["automations", _, "runs"]) => true,
+            ("POST", ["automations"])
+            | ("POST", ["automations", "preview"])
+            | ("POST", ["automations", _, "pause" | "resume" | "cancel"]) => control,
+            _ => false,
+        };
+    }
+    if automation.first() == Some(&"commands") {
+        // Command argv/output belong to device control access, not read-only shares.
+        return control
+            && matches!(
+                (method, automation.as_slice()),
+                ("POST", ["commands"]) | ("GET", ["commands", _])
+            );
+    }
     if method == "GET" && suffix.starts_with("/transport/stream/") {
         return true;
     }
@@ -576,5 +596,61 @@ mod tests {
                 &format!("{route}?owner=true")
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod automation_acl_tests {
+    use super::*;
+    #[test]
+    fn automation_routes_preserve_read_control_boundaries_and_reject_unknown_actions() {
+        for suffix in [
+            "/automations",
+            "/automations/hook",
+            "/automations/hook/runs",
+        ] {
+            assert!(shared_thread_path_allowed(
+                "GET",
+                &format!("/api/threads/t{suffix}"),
+                "t",
+                false
+            ));
+        }
+        for suffix in [
+            "/automations",
+            "/automations/preview",
+            "/automations/hook/pause",
+            "/automations/hook/resume",
+            "/automations/hook/cancel",
+            "/commands",
+        ] {
+            let path = format!("/api/threads/t{suffix}");
+            assert!(!shared_thread_path_allowed("POST", &path, "t", false));
+            assert!(shared_thread_path_allowed("POST", &path, "t", true));
+        }
+        assert!(!shared_thread_path_allowed(
+            "POST",
+            "/api/threads/t/automations/hook/arbitrary",
+            "t",
+            true
+        ));
+        assert!(!shared_thread_path_allowed(
+            "GET",
+            "/api/threads/t/commands/c",
+            "t",
+            false
+        ));
+        assert!(shared_thread_path_allowed(
+            "GET",
+            "/api/threads/t/commands/c",
+            "t",
+            true
+        ));
+        assert!(!shared_workspace_path_allowed(
+            "POST",
+            "/api/workspaces/w/automations",
+            "w",
+            true
+        ));
     }
 }
