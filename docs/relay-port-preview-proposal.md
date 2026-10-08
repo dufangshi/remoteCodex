@@ -56,6 +56,80 @@ restart; preview tabs may need **Open** again to obtain a fresh gateway session.
 For isolated local tests, use `http://preview.localhost:<relay-port>`; Chromium
 resolves its subdomains to loopback. Plain HTTP is for local development only.
 
+### Current production ingress
+
+The `lnz-study.com` preview ingress was enabled on 2026-10-08. Cloudflare proxies
+`*.lnz-study.com` to the existing `remote.lnz-study.com` ingress; its active
+Universal SSL certificate covers these first-level preview hosts. The origin
+keeps the existing main-site HTTP ingress path. This setup does not install a
+wildcard origin certificate or change the zone's SSL mode.
+
+On the Relay host, Nginx Proxy Manager runs with host networking. Its mounted
+`/opt/nginx-proxy-manager/data/nginx/custom/http.conf` includes
+`/data/nginx/custom/remote-codex-preview.conf`. That separate file only matches
+`p-<32 lowercase hex digits>.lnz-study.com`, preserving unrelated wildcard
+domains and existing NPM-managed services:
+
+```nginx
+map $http_upgrade $rc_preview_upgrade {
+    default upgrade;
+    '' close;
+}
+server {
+    listen 80;
+    listen [::]:80;
+    server_name "~^p-[a-f0-9]{32}\.lnz-study\.com$";
+    access_log off;
+    error_log /data/logs/remote-codex-preview-error.log warn;
+    client_max_body_size 64m;
+    location / {
+        proxy_pass http://127.0.0.1:18791;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $x_forwarded_proto;
+        proxy_set_header X-Forwarded-Scheme $x_forwarded_proto;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $rc_preview_upgrade;
+        proxy_connect_timeout 15s;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_cache off;
+        proxy_hide_header Cache-Control;
+        proxy_hide_header Expires;
+        add_header Cache-Control "private, no-store" always;
+        add_header Referrer-Policy "no-referrer" always;
+    }
+}
+```
+
+Access logging is disabled for this route so one-use launch tickets do not enter
+the origin's URL logs. `private, no-store` keeps authenticated preview responses
+out of shared caches. Any Cloudflare cache rules must also respect this policy.
+
+Validate and gracefully reload with
+`docker exec nginx-proxy-manager-app-1 nginx -t` followed by
+`docker exec nginx-proxy-manager-app-1 nginx -s reload`. The Relay environment
+file contains `REMOTE_CODEX_PORT_PREVIEW_BASE_URL=https://lnz-study.com`; Relay
+deployments preserve that file. Only `remote-codex-rust-relay.service` needs a
+restart when changing this variable. Existing device Supervisors reconnect.
+
+The pre-configuration environment and custom HTTP configuration are backed up
+under `/opt/remote-codex-rust-relay/preview-setup-backup-20261008`, with restricted
+permissions. To undo this setup, restore those two files, validate/reload NPM,
+remove the now-unused custom preview file, and restart the Relay. Do not copy
+credentials from the environment backup into documentation or command output.
+
+Production validation used an isolated temporary account, device Supervisor and
+loopback service. Public HTTPS returned the HTML with `private, no-store`, SSE
+delivered its first event, and WSS upgraded with an echoed message. Anonymous
+access returned 401; stopping the mapping produced 404 after the next device
+heartbeat. All test resources were removed. The 27 existing containers retained
+their IDs, and existing ingress routes retained their pre-change HTTP statuses.
+
 ## Data path and authentication
 
 ```text
