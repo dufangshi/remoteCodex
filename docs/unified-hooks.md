@@ -1,0 +1,195 @@
+# Device hooks / automations
+
+`remote-codex automation` (aliases `hooks`, `hook`), REST and the thread's
+**Automations** button use one Rust Supervisor registry and SQLite execution
+ledger. This works with Codex and ACP harnesses as well as Claude. Native Claude
+watches stay a separate read-only projection: they are never imported or duplicated.
+Recorded active/unconfirmed native watches block registering a Supervisor prompt
+against that same session until a successful cancellation is recorded.
+
+An automation belongs to its target thread. Its source can be a precise turn,
+lineage task or controlled command on another local thread. Only a registered
+`prompt` action wakes a thread; results/reminders and command execution reports
+always enter passive inbox, both when idle and during a turn. Reading an inbox
+never starts execution. Existing queue/inbox/task/wake rules remain in force.
+
+## CLI examples
+
+Read `remote-codex skill` and use `thread self` / `REMOTE_CODEX_THREAD_ID` for the
+Remote Codex thread ID. The following create schedules only when explicitly run.
+They require an existing local device connection and an open target thread.
+Use disposable threads/workspaces when experimenting.
+
+```sh
+# Every hour, starting an hour after registration. Busy ticks merge into one pending.
+remote-codex automation create --thread self --request-id hourly-check --json '{
+  "name":"Hourly check",
+  "trigger":{"kind":"interval","everySeconds":3600},
+  "action":{"kind":"prompt","text":"Check the authorized project and report findings."}
+}'
+
+# One UTC/offset date. Choose a future date explicitly.
+remote-codex hooks create --thread self --json '{
+  "name":"One reminder",
+  "trigger":{"kind":"at","at":"2030-01-01T12:00:00Z"},
+  "action":{"kind":"notifyInbox","subject":"Reminder","text":"Review the report.","messageKind":"status"}
+}'
+
+# Full JSON files and typed predicate combinations use the same server validator.
+# Fill SOURCE_THREAD_ID and TURN_ID from a real thread/turn before running this block.
+cat > turn-hook.json <<EOF_JSON
+{
+  "name":"Build finished",
+  "trigger":{"kind":"turnEnded","sourceThreadId":"$SOURCE_THREAD_ID","turnId":"$TURN_ID"},
+  "condition":{"kind":"all","conditions":[
+    {"kind":"statusIn","values":["completed"]},
+    {"kind":"not","condition":{"kind":"statusIn","values":["interrupted","failed"]}}
+  ]},
+  "action":{"kind":"notifyInbox","subject":"Build result","text":"The selected turn finished.","includeClosingMessage":true}
+}
+EOF_JSON
+remote-codex automation preview --thread self --file turn-hook.json
+remote-codex automation create --thread self --file turn-hook.json --request-id build-reminder
+
+# Successful lineage task #4: replace ROOT_ID with its root Remote Codex thread ID.
+remote-codex automation create --thread self --json "{
+  \"name\":\"Task result\",
+  \"trigger\":{\"kind\":\"taskEnded\",\"rootThreadId\":\"$ROOT_ID\",\"taskNumber\":4},
+  \"condition\":{\"kind\":\"statusIn\",\"values\":[\"completed\"]},
+  \"action\":{\"kind\":\"notifyInbox\",\"subject\":\"Task complete\",\"text\":\"\",\"includeClosingMessage\":true}
+}"
+```
+
+Immutable turn/task/command-ID subscriptions reject already ended sources with
+`sourceAlreadyEnded`. Set `replayExisting: true` to explicitly run once immediately
+instead. Register against the actual immutable turn ID, not "the next turn".
+`commandKey` subscriptions match each new controlled wrapper execution of that key.
+
+```sh
+# Register a script after this thread's controlled `focused-build` wrapper succeeds.
+# This example uses fixed argv, explicit cwd and a bounded timeout.
+cat > command-hook.json <<EOF_JSON
+{
+  "name":"After build",
+  "trigger":{"kind":"commandEnded","sourceThreadId":"$REMOTE_CODEX_THREAD_ID","commandKey":"focused-build"},
+  "condition":{"kind":"exitCodeEquals","value":0},
+  "action":{"kind":"runScript","argv":["/bin/sh","scripts/report-build.sh"],"cwd":".","timeoutSeconds":60}
+}
+EOF_JSON
+remote-codex hooks create --file command-hook.json --request-id after-focused-build
+remote-codex command run --thread self --command-key focused-build --request-id build-1 \
+  --cwd . --timeout-seconds 120 -- cargo check -p remote-codex-runtime
+# Inspect the commandId returned above; output and exit status persist.
+remote-codex command show --thread self COMMAND_ID
+
+# Time and precise completion events can execute scripts too; explicit shell is supported.
+remote-codex automation create --json '{
+  "name":"Hourly script",
+  "trigger":{"kind":"interval","everySeconds":3600},
+  "action":{"kind":"runScript","shell":"./scripts/check.sh > check-result.txt","cwd":".","timeoutSeconds":60}
+}'
+
+remote-codex automation list --thread self
+remote-codex automation show --thread self AUTOMATION_ID
+remote-codex automation runs --thread self AUTOMATION_ID --limit 20
+remote-codex automation pause --thread self AUTOMATION_ID
+remote-codex automation resume --thread self AUTOMATION_ID
+remote-codex automation cancel --thread self AUTOMATION_ID
+remote-codex inbox list --kind result --kind status
+```
+
+`argv` and `shell` are mutually exclusive. On Unix shell uses `/bin/sh -c`; on
+Windows it uses `cmd.exe /C`. Relative cwd resolves against the target workspace;
+absolute cwd is accepted under existing device access permissions. These are
+ordinary processes under the Supervisor's OS user, not a separate sandbox. No
+new grants, script hashes or trust approval workflow is required.
+
+Commands receive a cleared environment with PATH, command ID and (on Windows)
+standard OS/temp paths. Connection tokens, CLI config paths, HOME and upstream
+keys are not automatically copied into scripts. Stdout and stderr each retain
+at most 64 KiB while draining the pipe; excess is discarded. Timeout is 1–300
+seconds. The device allows at most four commands simultaneously. Unix timeout
+kills the owned process group; Windows uses taskkill /T /F (Windows execution is
+implemented but was not part of Linux validation).
+
+## Definition and reliability
+
+Triggers: `interval {everySeconds, anchorAt?}`, `at {at}`, `turnEnded
+{sourceThreadId, turnId}`, `taskEnded {rootThreadId, taskNumber}`, `commandEnded
+{sourceThreadId, commandId?, commandKey?}`. UTC interval anchors do not drift with
+execution duration or DST. Dates require RFC3339 with an offset. There is no cron,
+DST wall-clock scheduler, cross-device schedule or arbitrary PTY command observer.
+
+Typed conditions: `all/any {conditions}`, `not {condition}`, `statusIn {values}`,
+`exitCodeEquals {value}`, `workspaceId {value}`, `commandId {value}`. Conditions
+never run shell/JavaScript. Exit-code equality requires a known exit code and a
+`completed` or `failed` status, so a normal nonzero exit can match its exact code;
+unknown exits/timeouts never match. Condition nesting is capped
+at eight levels. Script argv/output are available only with existing control access.
+
+Default `missedRunPolicy` is `coalesceLatest`, `maxLatenessSeconds` is 86400.
+Optional `skip` skips accumulated missed ticks. Busy/downtime intervals advance
+nextRunAt while preserving at most one unexecuted occurrence per schedule; merged
+extra ticks increment missedCount. One running action may also have one pending
+occurrence. Scripts wait for the target's entire turn and existing continuation
+queue to finish. A queued prompt uses the normal whole-turn queue admission.
+
+Events commit alongside turn/task/command terminal state. Event keys and occurrence
+keys are unique. Action intent is saved in the run's immutable definition snapshot.
+Inbox/continuation acceptance and the run receipt commit in one local transaction:
+the run row is the local durable outbox. The database's existing exclusive process
+ownership plus transactional state guards avoids multiple dispatchers; no network
+lease or separate daemon is involved. Stable CLI request IDs return the original
+receipt/execution; conflicting definitions are rejected. A command request is never
+re-spawned when retried, even if the first request lost its response.
+
+`queued` means accepted, not successful execution. Prompt admission binds
+run → pendingSteerId → turnId atomically; turn terminal state records execution
+completion. Script intent is durable before spawn and real wait records exit/output.
+Restart changes starting/running commands without saved completion to `uncertain`
+and emits a passive result. They never auto-retry. A child may continue after an
+abrupt OS/process crash; inspect external effects and process state before deciding
+to create a new execution. External side effects cannot be exactly-once guaranteed.
+
+Command and turn events carry automation ancestry; repeated automation IDs or
+ancestry depth ≥3 are skipped. Script completions have no wrapper commandKey, so
+ordinary named wrapper hooks cannot recursively match their own script executions.
+No PTY/transcript text is interpreted as an executable event.
+
+Pause/cancel atomically remove only this automation's unexecuted queue entries.
+Running work is allowed to finish. Cancel is permanent; resume starts from future
+ticks and discards paused events. Resume on an already enabled definition is a
+no-op: retries preserve its event cursor, nextRunAt and anchor. The UI preserves
+the create request ID across lost-response retries of the same definition and
+target thread, clearing it after success. User Stop pauses that thread's prompt automations,
+so they do not secretly wake it again. Closed/missing targets and deleted sources
+pause schedules with a visible reason. Recovering threads defer actions and never
+silently reconnect or reopen. Native historical imports do not generate script events.
+
+Definitions, event journal and execution history are retained in the database;
+automatic history retention/pruning and editable definition revisions are future
+work. Create a replacement definition explicitly when changing a hook.
+
+## HTTP
+
+All public DTO fields are camelCase. Existing device/relay control permissions apply.
+
+```text
+GET/POST /api/threads/{threadId}/automations
+POST     /api/threads/{threadId}/automations/preview
+GET      /api/threads/{threadId}/automations/{automationId}
+POST     /api/threads/{threadId}/automations/{automationId}/pause|resume|cancel
+GET      /api/threads/{threadId}/automations/{automationId}/runs?limit=20
+POST     /api/threads/{threadId}/commands
+GET      /api/threads/{threadId}/commands/{commandId}
+```
+
+Create body: `{ "definition": { ... }, "clientRequestId": "stable-key" }`.
+Preview body: the definition directly. Command body: `{ "argv": ["..."],
+"cwd": ".", "timeoutSeconds": 60, "commandKey": "build",
+"clientRequestId": "build-1" }`. CLI operations use existing `/api/cli` and call
+these same runtime services. Read-only shares can inspect definitions/history;
+control is required to create/control hooks or access command execution/output.
+
+Web changes require the independent shared UI commit and a future relay UI deploy
+with that full thread_ui_sha. A device Supervisor restart alone does not publish UI.

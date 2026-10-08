@@ -130,6 +130,26 @@ pub(crate) fn shared_thread_path_allowed(
     if !suffix.is_empty() && !suffix.starts_with('/') {
         return false;
     }
+    let automation: Vec<&str> = suffix.split('/').filter(|s| !s.is_empty()).collect();
+    if automation.first() == Some(&"automations") {
+        return match (method, automation.as_slice()) {
+            ("GET", ["automations"])
+            | ("GET", ["automations", _])
+            | ("GET", ["automations", _, "runs"]) => true,
+            ("POST", ["automations"])
+            | ("POST", ["automations", "preview"])
+            | ("POST", ["automations", _, "pause" | "resume" | "cancel"]) => control,
+            _ => false,
+        };
+    }
+    if automation.first() == Some(&"commands") {
+        // Command argv/output belong to device control access, not read-only shares.
+        return control
+            && matches!(
+                (method, automation.as_slice()),
+                ("POST", ["commands"]) | ("GET", ["commands", _])
+            );
+    }
     if method == "GET" && suffix.starts_with("/transport/stream/") {
         return true;
     }
@@ -211,6 +231,8 @@ pub(crate) fn shared_workspace_path_allowed(
             "" | "/transport/key"
                 | "/files/tree"
                 | "/files/preview"
+                | "/files/capabilities"
+                | "/files/document"
                 | "/files/raw"
                 | "/files/download"
                 | "/artifacts"
@@ -218,18 +240,88 @@ pub(crate) fn shared_workspace_path_allowed(
             return true;
         }
         let parts: Vec<&str> = suffix.split('/').filter(|part| !part.is_empty()).collect();
-        return (parts.len() == 2 && parts[0] == "artifacts")
+        return (write && parts.len() == 3 && parts[0] == "files" && parts[1] == "operations")
+            || (parts.len() == 2 && parts[0] == "artifacts")
             || (parts.len() == 3 && parts[0] == "artifacts" && parts[2] == "download");
     }
     write
         && matches!(method, "POST" | "PUT" | "PATCH" | "DELETE")
-        && matches!(suffix, "/files" | "/files/upload" | "/files/move")
+        && matches!(
+            suffix,
+            "/files" | "/files/upload" | "/files/move" | "/files/save"
+        )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[test]
+    fn safe_file_routes_require_exact_workspace_and_write_for_operations() {
+        let base = "/api/workspaces/ws";
+        assert!(!shared_workspace_path_allowed(
+            "POST",
+            &format!("{base}/files"),
+            "ws",
+            false
+        ));
+        assert!(shared_workspace_path_allowed(
+            "POST",
+            &format!("{base}/files"),
+            "ws",
+            true
+        ));
+        assert!(!shared_workspace_path_allowed(
+            "POST",
+            &format!("{base}/files"),
+            "other",
+            true
+        ));
+        for suffix in ["/files/capabilities", "/files/document"] {
+            assert!(shared_workspace_path_allowed(
+                "GET",
+                &format!("{base}{suffix}"),
+                "ws",
+                false
+            ));
+            assert!(!shared_workspace_path_allowed(
+                "GET",
+                &format!("{base}{suffix}"),
+                "other",
+                true
+            ));
+        }
+        assert!(!shared_workspace_path_allowed(
+            "POST",
+            &format!("{base}/files/save"),
+            "ws",
+            false
+        ));
+        assert!(shared_workspace_path_allowed(
+            "POST",
+            &format!("{base}/files/save"),
+            "ws",
+            true
+        ));
+        assert!(!shared_workspace_path_allowed(
+            "GET",
+            &format!("{base}/files/operations/id"),
+            "ws",
+            false
+        ));
+        assert!(shared_workspace_path_allowed(
+            "GET",
+            &format!("{base}/files/operations/id"),
+            "ws",
+            true
+        ));
+        assert!(!shared_workspace_path_allowed(
+            "GET",
+            &format!("{base}/files/operations/id/extra"),
+            "ws",
+            true
+        ));
+    }
     #[test]
     fn global_search_is_denied_for_multi_user_hosted_isolation() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -504,5 +596,61 @@ mod tests {
                 &format!("{route}?owner=true")
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod automation_acl_tests {
+    use super::*;
+    #[test]
+    fn automation_routes_preserve_read_control_boundaries_and_reject_unknown_actions() {
+        for suffix in [
+            "/automations",
+            "/automations/hook",
+            "/automations/hook/runs",
+        ] {
+            assert!(shared_thread_path_allowed(
+                "GET",
+                &format!("/api/threads/t{suffix}"),
+                "t",
+                false
+            ));
+        }
+        for suffix in [
+            "/automations",
+            "/automations/preview",
+            "/automations/hook/pause",
+            "/automations/hook/resume",
+            "/automations/hook/cancel",
+            "/commands",
+        ] {
+            let path = format!("/api/threads/t{suffix}");
+            assert!(!shared_thread_path_allowed("POST", &path, "t", false));
+            assert!(shared_thread_path_allowed("POST", &path, "t", true));
+        }
+        assert!(!shared_thread_path_allowed(
+            "POST",
+            "/api/threads/t/automations/hook/arbitrary",
+            "t",
+            true
+        ));
+        assert!(!shared_thread_path_allowed(
+            "GET",
+            "/api/threads/t/commands/c",
+            "t",
+            false
+        ));
+        assert!(shared_thread_path_allowed(
+            "GET",
+            "/api/threads/t/commands/c",
+            "t",
+            true
+        ));
+        assert!(!shared_workspace_path_allowed(
+            "POST",
+            "/api/workspaces/w/automations",
+            "w",
+            true
+        ));
     }
 }

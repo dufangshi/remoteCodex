@@ -1,0 +1,71 @@
+{
+  "capturedAt": "2026-10-08T18:33:45.576858+00:00",
+  "source": "e2e/composer-compact.spec.ts",
+  "environment": "isolated Rust Supervisor with fake harness; actual workbench pages; fixture conversation prose",
+  "apiPort": 18216,
+  "webPort": 15216,
+  "database": ".temp/compact-composer/e2e.sqlite",
+  "screenshots": [
+    {
+      "file": "desktop-collapsed.png",
+      "sha256": "4d86f54223127bf542edd876479bec41fa3cb96671402ea7d87b36d1781db253",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 186271,
+      "state": "collapsed",
+      "project": "desktop-chromium"
+    },
+    {
+      "file": "desktop-expanded.png",
+      "sha256": "0b1602648a7c6d944704c0822950a9ec1063e25389ef71c0429a88413267bae5",
+      "width": 1440,
+      "height": 1000,
+      "bytes": 238390,
+      "state": "expanded",
+      "project": "desktop-chromium"
+    },
+    {
+      "file": "mobile-collapsed.png",
+      "sha256": "1664be5d4b122c5b8f417d31485f6ced324e3a6042d93511a792a63472d17abb",
+      "width": 390,
+      "height": 844,
+      "bytes": 73607,
+      "state": "collapsed",
+      "project": "mobile-chromium"
+    },
+    {
+      "file": "mobile-expanded.png",
+      "sha256": "9444f6be88e764394537f882a9693014f04aa61ca032f609874b5f1d2ead51ab",
+      "width": 390,
+      "height": 844,
+      "bytes": 111815,
+      "state": "expanded",
+      "project": "mobile-chromium"
+    }
+  ],
+  "detailCrops": [
+    {
+      "file": "desktop-collapsed-detail.png",
+      "source": "desktop-collapsed.png",
+      "box": [
+        300,
+        895,
+        1440,
+        1000
+      ],
+      "sha256": "27e8fcda63ae664c94beceb49770dd32f71fa3c6d2cd7675b66e38a8a682ffb5"
+    },
+    {
+      "file": "desktop-expanded-detail.png",
+      "source": "desktop-expanded.png",
+      "box": [
+        300,
+        750,
+        1440,
+        1000
+      ],
+      "sha256": "eb772fde72344797a5f866cf8a263d4433db8c5e89511c0bcd127d2338c83935"
+    }
+  ],
+  "revision": "Remove reference reply label and advanced tools hint"
+}

@@ -1,6 +1,6 @@
 //! Provider-independent local thread operations. Uses the existing prompt queue and KV store.
 mod agents;
-mod inbox;
+pub(crate) mod inbox;
 mod peer;
 mod tasks;
 mod transcript;
@@ -483,6 +483,9 @@ impl Supervisor {
                 let Some(state) = weak.upgrade() else {
                     break;
                 };
+                if let Err(error) = state.automation_tick(&now_rfc3339()).await {
+                    tracing::warn!(%error, "automation tick failed");
+                }
                 if let Err(error) = state.recover_cli_notifications() {
                     tracing::warn!(%error,"CLI notification recovery failed");
                 }
@@ -544,7 +547,7 @@ impl Supervisor {
     }
 }
 
-fn enqueue(
+pub(crate) fn enqueue(
     conn: &Connection,
     id: &str,
     thread: &str,

@@ -1,0 +1,34 @@
+{
+  "capturedAt": "2026-10-08T18:39:44.698318+00:00",
+  "environment": "Isolated fake Supervisor and mocked progress events; clock advanced to validate freshness",
+  "source": "e2e/thread-reading-polish.spec.ts overlapping live steps",
+  "screenshots": [
+    {
+      "file": "progress-desktop-chromium.png",
+      "sha256": "fce518981c1fd829ab1ed8a7479d6c468c038dea557888f86afc7bf7aa8df00a",
+      "width": 1280,
+      "height": 720
+    },
+    {
+      "file": "progress-detail.png",
+      "sha256": "9af13a4744eaf42d33ffb328fb31b0fdfee6b728732453edc8769005f682f676",
+      "width": 525,
+      "height": 93
+    },
+    {
+      "file": "progress-mobile-chromium.png",
+      "sha256": "7a8f2547b29a5c32a66e4061deae8db01a520d1474de974a4724b1510336724a",
+      "width": 393,
+      "height": 727
+    }
+  ],
+  "detailCrop": {
+    "source": "progress-desktop-chromium.png",
+    "box": [
+      275,
+      287,
+      800,
+      380
+    ]
+  }
+}

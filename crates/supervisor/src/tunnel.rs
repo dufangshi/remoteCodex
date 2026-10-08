@@ -619,6 +619,8 @@ pub(crate) async fn forward_local(
                     "Encrypted request is invalid, expired, or replayed. Reconnect to the device.",
                 ),
             };
+        let mut opened = opened;
+        opened.request["fileActor"] = payload["headers"]["x-rcd-file-actor"].clone();
         let response = if path.contains("/transport/stream/") {
             match transport
                 .streams
@@ -652,6 +654,8 @@ pub(crate) async fn forward_local(
         }
         return sealed;
     }
+    let mut payload = payload;
+    payload["fileActor"] = payload["headers"]["x-rcd-file-actor"].clone();
     dispatch_local(state, payload, peer).await
 }
 // Policy is inserted by the relay after authentication, never copied from client headers.
@@ -732,6 +736,9 @@ async fn dispatch_raw(
         .extension(crate::auth::TrustedRelayForward);
     if let Some(peer) = peer {
         request = request.extension(peer);
+    }
+    if let Some(actor) = payload["fileActor"].as_str().filter(|s| !s.is_empty()) {
+        request = request.extension(crate::file_documents::FileActor(format!("relay:{actor}")));
     }
     if let Some(headers) = payload.get("headers").and_then(Value::as_object) {
         for name in ["content-type", "accept", "if-none-match", "range"] {
@@ -1099,6 +1106,59 @@ pub(crate) mod tests {
             .as_str()
             .unwrap()
             .contains("encrypted owner request"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn file_receipts_bind_to_trusted_relay_actor_and_ignore_inner_actor_forgery() {
+        let (_dir, state) = state_with_relay_url("http://localhost:8788");
+        let workspace = state
+            .create_workspace(remote_codex_protocol::CreateWorkspaceInput {
+                abs_path: Some(state.config.workspace_root.to_string_lossy().into()),
+                git_url: None,
+                label: Some("files".into()),
+            })
+            .unwrap();
+        std::fs::write(state.config.workspace_root.join("a.txt"), "base").unwrap();
+        let doc = state.file_document(&workspace.id, "a.txt").unwrap();
+        let operation = uuid::Uuid::new_v4().to_string();
+        let saved = state
+            .file_save(
+                "relay:alice",
+                &workspace.id,
+                remote_codex_runtime::file_documents::SaveDocument {
+                    path: doc.path,
+                    workspace_revision: doc.workspace_revision,
+                    file_identity: doc.file_identity,
+                    expected_hash: doc.content_hash.unwrap(),
+                    content: "mine".into(),
+                    draft_revision: 1,
+                    operation_id: operation.clone(),
+                    operation_created_at: chrono::Utc::now().timestamp_millis() as u64,
+                },
+            )
+            .unwrap();
+        assert_eq!(saved["status"], "saved");
+        let path = format!(
+            "/api/workspaces/{}/files/operations/{operation}",
+            workspace.id
+        );
+        let own = forward_local(
+            &state,
+            json!({"method":"GET","path":path,"headers":{"x-rcd-file-actor":"alice"}}),
+            None,
+        )
+        .await;
+        assert_eq!(own["statusCode"], 200);
+        let forged=forward_local(&state,json!({"method":"GET","path":path,"fileActor":"alice","headers":{"x-rcd-file-actor":"bob"}}),None).await;
+        assert_eq!(forged["statusCode"], 410);
+        let unbound = forward_local(
+            &state,
+            json!({"method":"GET","path":path,"fileActor":"alice"}),
+            None,
+        )
+        .await;
+        assert_eq!(unbound["statusCode"], 403);
     }
 
     #[tokio::test]

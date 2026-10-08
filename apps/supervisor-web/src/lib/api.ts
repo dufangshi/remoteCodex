@@ -1,3 +1,4 @@
+import { confirmWorkspaceDocumentLeave, type WorkspaceDocumentSnapshot, type WorkspaceDocumentSaveInput, type WorkspaceSaveReceipt } from "@remote-codex/thread-ui";
 import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { encryptedBrowserFetch, encryptedRelaySocket } from './relayTransport';
 import type {
@@ -217,6 +218,7 @@ export function setSelectedRelayDeviceId(deviceId: string | null) {
   if (typeof window === 'undefined') {
     return;
   }
+  if (deviceId !== readSelectedRelayDeviceId() && !confirmWorkspaceDocumentLeave()) throw new Error(translate('files.keepEditing'));
   if (deviceId) {
     window.localStorage.setItem(RELAY_DEVICE_STORAGE_KEY, deviceId);
     return;
@@ -566,10 +568,13 @@ export function fetchRuntimeConfig() {
   return request<RuntimeConfigDto>('/api/config/runtime');
 }
 
-export function fetchAuthSession() {
-  return request<AuthSessionDto>('/api/auth/session', {
+let workspaceActorScope = "local:owner";
+export async function fetchAuthSession() {
+  const result = await request<AuthSessionDto>('/api/auth/session', {
     cache: 'no-store',
   });
+  if (result.mode !== 'relay') workspaceActorScope = `local:${result.username??'owner'}`;
+  return result;
 }
 
 export async function login(input: { username: string; password: string }) {
@@ -582,6 +587,7 @@ export async function login(input: { username: string; password: string }) {
 }
 
 export async function logout() {
+  if (!confirmWorkspaceDocumentLeave()) throw new Error(translate('files.keepEditing'));
   const result = await request<AuthSessionDto>('/api/auth/logout', {
     method: 'POST',
   });
@@ -589,10 +595,12 @@ export async function logout() {
   return result;
 }
 
-export function fetchRelaySession() {
-  return request<RelaySessionDto>('/relay/auth/session', {
+export async function fetchRelaySession() {
+  const result = await request<RelaySessionDto>('/relay/auth/session', {
     cache: 'no-store',
   });
+  workspaceActorScope = `relay:${result.user?.id??'anonymous'}`;
+  return result;
 }
 
 export async function relayLogin(input: {
@@ -669,6 +677,7 @@ export async function relayRegister(input: {
 }
 
 export async function relayLogout() {
+  if (!confirmWorkspaceDocumentLeave()) throw new Error(translate('files.keepEditing'));
   const result = await request<RelaySessionDto>('/relay/auth/logout', {
     method: 'POST',
   });
@@ -1312,6 +1321,11 @@ export function fetchThreads(includeAgentThreads = false) {
 export function renameWorkspaceNode(workspaceId: string, input: {fromPath: string; toPath: string}) {
   return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/files/move`, {method:'PATCH',body:JSON.stringify(input)});
 }
+export function createWorkspaceFile(workspaceId: string, path: string) {
+  return request<{ path: string }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/files`, {
+    method: 'POST', body: JSON.stringify({ path }),
+  });
+}
 export function deleteWorkspaceNode(workspaceId: string, path: string) {
   return request(`/api/workspaces/${encodeURIComponent(workspaceId)}/files?${new URLSearchParams({path})}`, {method:'DELETE'});
 }
@@ -1881,4 +1895,22 @@ function isShellEventEnvelope(
     typeof event.payload === 'object' &&
     event.payload !== null
   );
+}
+
+export function workspaceResourceScope() {
+  return JSON.stringify([window.location.origin, readSelectedRelayDeviceId(), workspaceActorScope]);
+}
+export function fetchWorkspaceDocument(workspaceId: string, path: string, signal?: AbortSignal) {
+  return request<WorkspaceDocumentSnapshot>(`/api/workspaces/${encodeURIComponent(workspaceId)}/files/document?${new URLSearchParams({path})}`, { cache: 'no-store', ...(signal ? {signal} : {}) });
+}
+export async function saveWorkspaceDocument(workspaceId: string, input: WorkspaceDocumentSaveInput): Promise<WorkspaceSaveReceipt> {
+  try { return await request<WorkspaceSaveReceipt>(`/api/workspaces/${encodeURIComponent(workspaceId)}/files/save`, {method:'POST', body: JSON.stringify(input)}); }
+  catch (error) {
+    if (error instanceof ApiError && error.payload.details && ['conflict','failedBeforeWrite'].includes(String(error.payload.details.status))) return error.payload.details as unknown as WorkspaceSaveReceipt;
+    if (error instanceof ApiError && [400,401,403,404,409,410,413,415,422,501,507].includes(error.statusCode)) return {status:'failedBeforeWrite',operationId:input.operationId,draftRevision:input.draftRevision,path:input.path,code:error.statusCode===401||error.statusCode===403?'forbidden':error.payload.code,message:error.payload.message};
+    throw error;
+  }
+}
+export function fetchWorkspaceSaveOperation(workspaceId: string, operationId: string) {
+  return request<WorkspaceSaveReceipt>(`/api/workspaces/${encodeURIComponent(workspaceId)}/files/operations/${encodeURIComponent(operationId)}`, { cache:'no-store' });
 }

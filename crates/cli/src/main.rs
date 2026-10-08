@@ -1,3 +1,4 @@
+mod automations;
 mod threads;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -247,6 +248,17 @@ enum Commands {
         #[command(subcommand)]
         command: threads::PreviewCommand,
     },
+    /// Durable device hooks: trigger -> typed condition -> prompt, inbox or script.
+    #[command(alias = "hooks", alias = "hook")]
+    Automation {
+        #[command(subcommand)]
+        command: automations::AutomationCommand,
+    },
+    /// Controlled command execution with persistent exit/output and completion hooks.
+    Command {
+        #[command(subcommand)]
+        command: automations::CommandCommand,
+    },
     /// Create, contact, and inspect local threads or same-owner device peers.
     Thread {
         #[command(subcommand)]
@@ -333,6 +345,31 @@ async fn main() -> Result<()> {
                 .preview(command)
                 .await?;
             println!("{}", serde_json::to_string_pretty(&value)?);
+        }
+        Commands::Automation { command } => println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &threads::Client::new(cli.connection)?
+                    .automation(command)
+                    .await?
+            )?
+        ),
+        Commands::Command { command } => {
+            let value = threads::Client::new(cli.connection)?
+                .command_execution(command)
+                .await?;
+            println!("{}", serde_json::to_string_pretty(&value)?);
+            if matches!(
+                value["state"].as_str(),
+                Some("failed" | "timedOut" | "uncertain")
+            ) {
+                std::process::exit(
+                    value["exitCode"]
+                        .as_i64()
+                        .filter(|c| (1..=255).contains(c))
+                        .unwrap_or(1) as i32,
+                );
+            }
         }
         Commands::Skill => {
             let text = match threads::Client::new(cli.connection) {

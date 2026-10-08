@@ -13,6 +13,8 @@ export type {
 } from './agent-providers';
 
 export type ApiErrorCode =
+  | 'fileAlreadyExists'
+  | 'permissionDenied'
   | 'reauthentication_required'
   | 'rate_limited'
   | 'bad_request'
@@ -1984,3 +1986,5 @@ export function mergeThreadHistoryItem(
   };
 }
 export type { DeviceMetricsDto, MemoryMetricsDto, GpuMetricsDto, PowerReadingDto, TemperatureReadingDto } from './deviceMetrics';
+
+export type { AutomationTrigger, AutomationCondition, AutomationCommandSpec, AutomationAction, AutomationDefinition, AutomationDto, AutomationRunDto } from "./automation";

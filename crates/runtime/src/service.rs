@@ -1,3 +1,4 @@
+pub(crate) mod automation;
 mod child_delete;
 mod claude_history;
 mod generation;
@@ -288,6 +289,7 @@ pub struct UploadedPromptAttachment {
 }
 
 pub struct Supervisor {
+    automation_gate: tokio::sync::Mutex<()>,
     pub upstream_gate: Arc<tokio::sync::Mutex<()>>,
     pub harness_install_gate: Arc<tokio::sync::Mutex<()>>,
     pub interaction: crate::interaction::InteractionState,
@@ -343,6 +345,7 @@ impl Supervisor {
             .map(|runtime| (runtime.provider(), runtime))
             .collect();
         let supervisor = Self {
+            automation_gate: Default::default(),
             upstream_gate: Default::default(),
             harness_install_gate: Default::default(),
             started_at: now_rfc3339(),
@@ -371,6 +374,9 @@ impl Supervisor {
         };
         if let Err(error) = supervisor.reconcile_stale_turns(None, false) {
             tracing::warn!(%error, "failed to reconcile stale turns at startup");
+        }
+        if let Err(error) = supervisor.recover_automation_commands() {
+            tracing::warn!(%error, "automation command recovery failed");
         }
         supervisor
     }
@@ -718,6 +724,16 @@ impl Supervisor {
                 ids
             };
             for thread_id in &thread_ids {
+                // Journal only the turns transitioned by this reconciliation;
+                // historical interrupted turns must never become new hook events.
+                let transitioned = {
+                    let mut query = tx.prepare("SELECT id FROM thread_turns WHERE thread_id=?1 AND status IN ('inProgress','recovering')")?;
+                    let rows = query.query_map([thread_id], |row| row.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+                    rows
+                };
+                if turn_status=="interrupted" {
+                    for turn in &transitioned {automation::turn_ended(&tx,thread_id,turn,"interrupted",&now)?;}
+                }
                 tx.execute(
                     "UPDATE thread_turns
                      SET status=?4, error=COALESCE(error, ?1),
@@ -989,12 +1005,19 @@ impl Supervisor {
         files::write_file(Path::new(&ws.abs_path), rel, content)
     }
 
+    pub fn workspace_create_file(&self, id: &str, rel: &str) -> Result<()> {
+        let _gate = crate::file_documents::mutation_guard();
+        let workspace = self.get_workspace(id)?;
+        files::create_empty_file(Path::new(&workspace.abs_path), rel)
+    }
+
     pub fn workspace_write_bytes(
         &self,
         id: &str,
         rel: &str,
         content: &[u8],
     ) -> Result<(String, u64)> {
+        let _gate = crate::file_documents::mutation_guard();
         let workspace = self.get_workspace(id)?;
         let root = PathBuf::from(&workspace.abs_path).canonicalize()?;
         let path = files::assert_within(&root, Path::new(rel))?;
@@ -2259,6 +2282,7 @@ impl Supervisor {
             let conn = &tx;
             if let Some(id) = pending_steer_id {
                 crate::interaction::bind_notification(conn, id, &turn_id)?;
+                automation::bind_prompt(conn, id, &turn_id, &now)?;
                 if conn.execute("DELETE FROM thread_pending_steers WHERE id=?1 AND thread_id=?2", params![id, thread.id])? != 1 {
                     bail!("conflict: Queued prompt was already consumed or cancelled");
                 }
@@ -2528,6 +2552,7 @@ impl Supervisor {
                 params![thread_id, turn_id],
             )?;
             crate::interaction::finish_notification(conn, thread_id, turn_id, status, now)?;
+            automation::turn_ended(conn, thread_id, turn_id, status, now)?;
             if self.config.relay_server_url.is_some() {
                 crate::relay_notifications::record(conn, thread_id, turn_id, status, now)?;
             }
@@ -2588,6 +2613,15 @@ impl Supervisor {
             let Some((id, prompt, payload)) = next else {
                 return Ok(());
             };
+            let allowed = self.db.with(|c| {
+                let tx = c.unchecked_transaction()?;
+                let allowed = automation::pending_allowed(&tx, &id, &now_rfc3339())?;
+                tx.commit()?;
+                Ok(allowed)
+            })?;
+            if !allowed {
+                continue;
+            }
             let input = payload
                 .map(|raw| serde_json::from_str::<SendThreadPromptInput>(&raw))
                 .transpose()?;
@@ -2796,6 +2830,7 @@ impl Supervisor {
             )?;
             Ok(())
         })?;
+        self.pause_thread_prompt_automations(thread_id, "userStop")?;
         let interrupted_turn_id = self.active_turn_id(thread_id)?;
         let had_live_turn = {
             if let Some(live) = live_turns.get(thread_id) {

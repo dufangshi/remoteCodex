@@ -1,3 +1,4 @@
+import { ThreadAutomationsControl } from './ThreadAutomationsControl';
 import { getLocale } from '@remote-codex/thread-ui/i18n';
 import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { useEffect, useId, useRef, useState } from 'react';
@@ -220,11 +221,12 @@ export function ThreadWatchesControl({ thread }: { thread: ThreadDto }) {
   useEffect(() => {
     setOpen(false);
   }, [thread.id]);
-  if (!snapshot.watches.length) return null;
+  if (!snapshot.watches.length) return <ThreadAutomationsControl thread={thread} />;
   const current = snapshot.watches.filter(isCurrent);
   const past = snapshot.watches.filter((w) => !isCurrent(w));
   return (
     <>
+      <ThreadAutomationsControl thread={thread} />
       <button
         ref={trigger}
         type="button"

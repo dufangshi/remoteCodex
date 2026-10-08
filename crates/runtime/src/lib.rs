@@ -5,6 +5,7 @@ pub mod config;
 pub mod db;
 pub mod device_metrics;
 pub mod fake;
+pub mod file_documents;
 pub mod files;
 pub mod history;
 pub mod import_id;

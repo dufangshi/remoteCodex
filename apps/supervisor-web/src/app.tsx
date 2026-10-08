@@ -1,3 +1,4 @@
+import { WorkspaceDocumentNavigationGuard } from "./components/WorkspaceDocumentNavigationGuard";
 import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { installNotificationRouteResponder } from './lib/relayPush';
 import { PortPreviewPage } from './pages/PortPreviewPage';
@@ -667,6 +668,7 @@ export function App() {
   return (
     <div className="theme-shell theme-scrollbar">
       <BrowserRouter>
+        <WorkspaceDocumentNavigationGuard>
         <DocumentTitleUpdater />
         <RoutePluginProvider>
           <Routes>
@@ -689,6 +691,7 @@ export function App() {
             />
           </Routes>
         </RoutePluginProvider>
+        </WorkspaceDocumentNavigationGuard>
       </BrowserRouter>
     </div>
   );

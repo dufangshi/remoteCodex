@@ -517,7 +517,7 @@ async fn migrates_node_0030_history_and_policies_idempotently() {
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )?;
-            assert_eq!(runtime_migration_count, 11);
+            assert_eq!(runtime_migration_count, 13);
             assert_eq!(legacy_metadata_count, 2);
             assert_eq!(
                 migrated_metadata.0,
@@ -542,7 +542,7 @@ async fn migrates_node_0030_history_and_policies_idempotently() {
                 |row| row.get(0),
             )?;
             assert_eq!(turns, 3);
-            assert_eq!(migrations, 11);
+            assert_eq!(migrations, 13);
             Ok(())
         })
         .unwrap();
@@ -720,11 +720,11 @@ fn migration_10_reapplies_over_columns_left_by_a_downgrade() {
         [],
     )
     .unwrap();
-    conn.execute_batch("DELETE FROM __remote_codex_runtime_migrations WHERE version=11;
+    conn.execute_batch("DELETE FROM __remote_codex_runtime_migrations WHERE version>=11;
         DROP TRIGGER search_history_insert; DROP TRIGGER search_history_update; DROP TRIGGER search_history_delete;
         DROP TRIGGER search_turn_delete; DROP TRIGGER search_thread_delete; DROP TRIGGER search_thread_insert;
         DROP TRIGGER search_thread_title; DROP TRIGGER search_thread_source;
-        DROP TABLE search_documents_fts; DROP TABLE search_documents;").unwrap();
+        DROP TABLE search_documents_fts; DROP TABLE search_documents; DROP TABLE file_save_operations;").unwrap();
     drop(conn);
 
     drop(Database::open(&path).expect("reapplying migration 10 must be idempotent"));

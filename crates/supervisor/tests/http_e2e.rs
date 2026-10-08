@@ -18,6 +18,74 @@ async fn spawn_supervisor(
     spawn_supervisor_seeded(providers, |_| {}).await
 }
 
+#[tokio::test]
+async fn explorer_create_file_never_overwrites_and_can_be_opened_as_document() {
+    let (_dir, port, root) = spawn_supervisor(vec![Provider::Codex]).await;
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{port}");
+    let proj = root.join("new-files");
+    std::fs::create_dir_all(proj.join("docs")).unwrap();
+    let ws = json(
+        &client,
+        client
+            .post(format!("{base}/api/workspaces"))
+            .json(&json!({"absPath":proj,"label":"new-files"})),
+    )
+    .await;
+    let id = ws["id"].as_str().unwrap();
+    let endpoint = format!("{base}/api/workspaces/{id}/files");
+    let response = client
+        .post(&endpoint)
+        .json(&json!({"path":"docs/new.md"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201);
+    assert_eq!(std::fs::read(proj.join("docs/new.md")).unwrap(), b"");
+    std::fs::write(proj.join("docs/new.md"), "keep").unwrap();
+    let response = client
+        .post(&endpoint)
+        .json(&json!({"path":"docs/new.md"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 409);
+    assert_eq!(
+        response.json::<Value>().await.unwrap()["code"],
+        "fileAlreadyExists"
+    );
+    assert_eq!(
+        std::fs::read_to_string(proj.join("docs/new.md")).unwrap(),
+        "keep"
+    );
+    let response = client
+        .post(&endpoint)
+        .json(&json!({"path":"../outside.md"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 400);
+    assert!(!root.join("outside.md").exists());
+    let response = client
+        .post(&endpoint)
+        .json(&json!({"path":"docs/second.md"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 201);
+    let doc = json(
+        &client,
+        client.get(format!(
+            "{base}/api/workspaces/{id}/files/document?path=docs/second.md"
+        )),
+    )
+    .await;
+    assert_eq!(doc["content"], "");
+    assert_eq!(doc["encoding"], "utf-8");
+    #[cfg(target_os = "linux")]
+    assert_eq!(doc["readOnlyReason"], Value::Null);
+}
+
 async fn spawn_supervisor_seeded(
     providers: Vec<Provider>,
     seed: impl Fn(&FakeRuntime),
@@ -1266,5 +1334,100 @@ async fn conversation_search_reads_bounded_messages_without_hydrating_history() 
             .unwrap()
             .status(),
         404
+    );
+}
+
+#[tokio::test]
+async fn file_document_http_conditional_save_conflict_and_receipt_use_real_disk() {
+    let (_dir, port, root) = spawn_supervisor(vec![Provider::Codex]).await;
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{port}");
+    let ws: Value = client
+        .post(format!("{base}/api/workspaces"))
+        .json(&json!({"absPath":root,"label":"safe files"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = ws["id"].as_str().unwrap();
+    std::fs::write(root.join("notes.txt"), "base").unwrap();
+    let caps: Value = client
+        .get(format!("{base}/api/workspaces/{id}/files/capabilities"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(caps["documentRead"], true);
+    let doc: Value = client
+        .get(format!(
+            "{base}/api/workspaces/{id}/files/document?path=notes.txt"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let operation = uuid::Uuid::new_v4().to_string();
+    let input = json!({"path":"notes.txt","workspaceRevision":doc["workspaceRevision"],"fileIdentity":doc["fileIdentity"],"expectedHash":doc["contentHash"],"content":"my draft","draftRevision":7,"operationId":operation,"operationCreatedAt":chrono::Utc::now().timestamp_millis()});
+    std::fs::write(root.join("notes.txt"), "agent change").unwrap();
+    let response = client
+        .post(format!("{base}/api/workspaces/{id}/files/save"))
+        .json(&input)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 409);
+    assert_eq!(response.headers()["cache-control"], "private, no-store");
+    let conflict: Value = response.json().await.unwrap();
+    assert_eq!(conflict["code"], "fileConflict");
+    assert_eq!(conflict["details"]["snapshot"]["content"], "agent change");
+    std::fs::write(root.join("notes.txt"), "later agent change").unwrap();
+    let receipt: Value = client
+        .get(format!(
+            "{base}/api/workspaces/{id}/files/operations/{operation}"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(receipt["snapshot"]["content"], "agent change");
+    assert_eq!(
+        std::fs::read_to_string(root.join("notes.txt")).unwrap(),
+        "later agent change"
+    );
+    let latest: Value = client
+        .get(format!(
+            "{base}/api/workspaces/{id}/files/document?path=notes.txt"
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let mut safe = input;
+    safe["operationId"] = json!(uuid::Uuid::new_v4().to_string());
+    safe["fileIdentity"] = latest["fileIdentity"].clone();
+    safe["expectedHash"] = latest["contentHash"].clone();
+    let saved: Value = client
+        .post(format!("{base}/api/workspaces/{id}/files/save"))
+        .json(&safe)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(saved["status"], "saved");
+    assert_eq!(
+        std::fs::read_to_string(root.join("notes.txt")).unwrap(),
+        "my draft"
     );
 }

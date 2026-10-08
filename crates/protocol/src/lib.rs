@@ -1,3 +1,5 @@
+mod automation;
+pub use automation::*;
 mod interaction;
 mod metrics;
 pub use interaction::{

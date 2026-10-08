@@ -24,7 +24,7 @@ use serde_json::{json, Value};
 use tokio::io::AsyncReadExt;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
-pub type AppState = Arc<Supervisor>;
+pub(crate) type AppState = Arc<Supervisor>;
 
 const MAX_PROMPT_ATTACHMENTS: usize = 10;
 const MAX_PROMPT_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
@@ -179,12 +179,31 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/workspaces/{id}/favorite", post(favorite_workspace))
         .route("/api/workspaces/{id}/open", post(open_workspace))
+        .route(
+            "/api/workspaces/{id}/files/capabilities",
+            get(crate::file_documents::capabilities),
+        )
+        .route(
+            "/api/workspaces/{id}/files/document",
+            get(crate::file_documents::document),
+        )
+        .route(
+            "/api/workspaces/{id}/files/save",
+            post(crate::file_documents::save)
+                .layer(axum::extract::DefaultBodyLimit::max(400 * 1024)),
+        )
+        .route(
+            "/api/workspaces/{id}/files/operations/{op}",
+            get(crate::file_documents::operation),
+        )
         .route("/api/workspaces/{id}/files/tree", get(workspace_tree))
         .route("/api/workspaces/{id}/files/preview", get(workspace_preview))
         .route("/api/workspaces/{id}/files/raw", get(workspace_raw))
         .route(
             "/api/workspaces/{id}/files",
-            axum::routing::put(workspace_write).delete(workspace_delete_file),
+            axum::routing::put(workspace_write)
+                .post(workspace_create_file)
+                .delete(workspace_delete_file),
         )
         .route("/api/threads", get(list_threads))
         .route("/api/threads/start", post(start_thread))
@@ -193,6 +212,34 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/threads/{id}",
             get(get_thread).patch(rename_thread).delete(delete_thread),
+        )
+        .route(
+            "/api/threads/{id}/automations",
+            get(crate::automations::list).post(crate::automations::create),
+        )
+        .route(
+            "/api/threads/{id}/automations/preview",
+            post(crate::automations::preview),
+        )
+        .route(
+            "/api/threads/{id}/automations/{automationId}",
+            get(crate::automations::show),
+        )
+        .route(
+            "/api/threads/{id}/automations/{automationId}/runs",
+            get(crate::automations::runs),
+        )
+        .route(
+            "/api/threads/{id}/automations/{automationId}/{operation}",
+            post(crate::automations::control),
+        )
+        .route(
+            "/api/threads/{id}/commands",
+            post(crate::automations::command_run),
+        )
+        .route(
+            "/api/threads/{id}/commands/{commandId}",
+            get(crate::automations::command_show),
         )
         .route("/api/threads/{id}/search", get(thread_search))
         .route("/api/search", get(device_search))
@@ -919,6 +966,44 @@ struct WriteFileBody {
     content: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CreateFileBody {
+    path: String,
+}
+
+async fn workspace_create_file(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Json(body): Json<CreateFileBody>,
+) -> Result<impl IntoResponse, ApiErr> {
+    let path = body.path;
+    let returned_path = path.clone();
+    tokio::task::spawn_blocking(move || state.workspace_create_file(&id, &path))
+        .await
+        .map_err(|e| map_err(e.into()))?
+        .map_err(
+            |e| match e.downcast_ref::<std::io::Error>().map(std::io::Error::kind) {
+                Some(std::io::ErrorKind::AlreadyExists) => err(
+                    StatusCode::CONFLICT,
+                    "fileAlreadyExists",
+                    "A file or folder already exists at this path.",
+                ),
+                Some(std::io::ErrorKind::PermissionDenied) => err(
+                    StatusCode::FORBIDDEN,
+                    "permissionDenied",
+                    "This directory is not writable.",
+                ),
+                _ => map_err(e),
+            },
+        )?;
+    Ok((
+        StatusCode::CREATED,
+        [("cache-control", "private, no-store")],
+        Json(json!({"path": returned_path})),
+    ))
+}
+
 async fn workspace_write(
     Path(id): Path<String>,
     State(state): State<AppState>,
@@ -938,6 +1023,7 @@ async fn workspace_delete_file(
     let path = query
         .path
         .ok_or_else(|| err(StatusCode::BAD_REQUEST, "bad_request", "path is required"))?;
+    let _gate = remote_codex_runtime::file_documents::mutation_guard();
     let ws = state.get_workspace(&id).map_err(map_err)?;
     let abs = remote_codex_runtime::files::assert_mutation_within(
         std::path::Path::new(&ws.abs_path),
@@ -2128,6 +2214,7 @@ async fn workspace_move(
     State(state): State<AppState>,
     Json(body): Json<MoveBody>,
 ) -> Result<Json<Value>, ApiErr> {
+    let _gate = remote_codex_runtime::file_documents::mutation_guard();
     let ws = state.get_workspace(&id).map_err(map_err)?;
     let from = remote_codex_runtime::files::assert_mutation_within(
         std::path::Path::new(&ws.abs_path),

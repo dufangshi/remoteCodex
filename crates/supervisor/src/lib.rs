@@ -1,6 +1,8 @@
 mod auth;
+mod automations;
 mod bounded_channel;
 mod export;
+mod file_documents;
 mod http;
 mod interaction;
 mod linked_files;

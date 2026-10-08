@@ -445,8 +445,8 @@ A harness-native timer such as Claude `CronCreate` / `/loop` is a separate, expl
 scheduled prompt, not a completion subscription. It can wake that native session
 while its harness process remains alive. Remote Codex recovers its finished reply
 and tool history and notifies open pages; intermediate scheduled output is backfilled
-after completion. Native timers are session-only and do not survive harness exit or
-Supervisor restart. Do not claim you configured a watch merely because you wrote
+after completion. Native timers require an active harness to execute; persistence/resume depends on
+the installed harness and task kind and is not confirmed by the history projection. Do not claim you configured a watch merely because you wrote
 that one will wake you: verify the scheduling tool's successful result and job ID.
 
 ## Execution receipts and steering failures
@@ -568,3 +568,36 @@ Managed sessions receive `REMOTE_CODEX_THREAD_ID`, `REMOTE_CODEX_URL`, and crede
 A normal shell may use `--cli-config PATH` / `REMOTE_CODEX_CLI_CONFIG`; otherwise the CLI discovers a protected `.cli.json` sibling of the configured Supervisor database. `--url` / `REMOTE_CODEX_URL` and `--token` / `REMOTE_CODEX_TOKEN` override connection fields. Prefer the environment or protected file over a command-line token. Managed credentials identify the parent for restricted child deletion; the machine connection file cannot grant that right. Agents sharing a user account and workspace still do not have filesystem isolation.
 
 Only loopback HTTP is accepted; redirects are refused. Run on the sending device and select another device explicitly when needed. A missing connection is a configuration issue, not a reason to copy credentials into a prompt. After Supervisor restart use the current connection file if inherited credentials are stale. Invalid model, unknown thread, missing caller, and unsupported steering need corrected input, not repeated dispatch. `idle` is not task success: inspect errors, pending input, unread mail, and the relevant result.
+
+
+## Durable device hooks (explicitly registered automations)
+
+Use `remote-codex automation` (aliases `hooks` / `hook`) for an authorized
+interval/at prompt, precise turn/task completion reminder, or script action.
+Definitions use typed JSON; use `automation create --file hook.json` or `--json`.
+Run `automation --help`, `automation create --help` and `command run --help` for
+current flags. The registry is shared with the Web Automations panel and REST.
+
+```bash
+remote-codex automation create --thread self --request-id hourly-check --json '{"name":"Hourly check","trigger":{"kind":"interval","everySeconds":3600},"action":{"kind":"prompt","text":"Check the authorized project."}}'
+remote-codex automation list --thread self
+remote-codex automation runs --thread self AUTOMATION_ID
+remote-codex automation pause --thread self AUTOMATION_ID
+remote-codex automation resume --thread self AUTOMATION_ID
+remote-codex automation cancel --thread self AUTOMATION_ID
+remote-codex command run --thread self --command-key build --cwd . --timeout-seconds 120 -- cargo check -p remote-codex-runtime
+```
+
+Only explicit prompt actions wake threads; ordinary results always remain passive
+inbox. Busy schedules wait for the entire turn, coalesce extra ticks and survive
+Supervisor restarts. Pause/cancel removes only that hook's unexecuted entries;
+resume starts from future ticks. User Stop pauses prompt automations.
+
+Command events observe only real `remote-codex command run` wrapper executions,
+never arbitrary PTY or transcript text. Scripts can be actions of time or completion
+triggers, with fixed argv or an explicit shell, cwd and timeout. Commands receive no
+automatic connection credentials. Inspect `uncertain` executions before retrying;
+spawned external side effects are not exactly-once and are never automatically
+rerun after a crash. CLI request IDs deduplicate acceptance/execution intent;
+`queued` is not completion. Native watches remain separate read-only evidence.
+See `docs/unified-hooks.md` for complete JSON/HTTP examples and boundaries.

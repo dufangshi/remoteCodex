@@ -1,3 +1,7 @@
+import { useThreadDrafts } from './useThreadDrafts';
+import { useWorkbenchReference } from './useWorkbenchReference';
+import { WorkbenchReferencePane } from '../components/WorkbenchReferencePane';
+import { WorkbenchCollaboration } from '../components/WorkbenchCollaboration';
 import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { DeviceMonitor } from '../components/DeviceMonitor';
 import { HarnessSettingsDialog } from '../components/HarnessSettingsDialog';
@@ -36,8 +40,11 @@ import { appSettingsSections } from '../components/AppShellSettingsDialog';
 import { useAppShellNav } from '../components/AppShellNavContext';
 import {
   ConfirmDialog,
+  confirmWorkspaceDocumentLeave,
+  LongTextDialog,
   ThreadActionsDialog,
   ThreadDetailSurface,
+  useWorkbenchPresentation,
   ThreadShellPanel,
   ThreadTimeline,
   type ThreadShellControlState,
@@ -75,6 +82,7 @@ import {
   fetchProviderHostFile,
   fetchRelayAccess,
   fetchRelayPortal,
+  fetchRelaySession,
   fetchThreadHistoryItemDetail,
   fetchThreadTurnDetail,
   fetchThreadShellState,
@@ -416,7 +424,10 @@ export function ThreadDetailPage() {
   const pageContextProviderRef = useRef<ThreadDto['provider'] | null>(null);
   const terminalTurnPendingRef = useRef<string | null>(null);
   const detailRef = useRef<ThreadDetailDto | null>(null);
-  const promptSubmissionInFlightRef = useRef(false);
+  const promptSubmissionOwnerRef = useRef({ routeKey, inFlight: false });
+  if (promptSubmissionOwnerRef.current.routeKey !== routeKey)
+    promptSubmissionOwnerRef.current = { routeKey, inFlight: false };
+  const promptSubmissionOwner = promptSubmissionOwnerRef.current;
   const interruptingRef = useRef(false);
   const pendingThreadSettingsRef = useRef<PendingThreadSettings | null>(null);
   const resolvedRequestIdsRef = useRef<Set<string>>(new Set());
@@ -456,7 +467,7 @@ export function ThreadDetailPage() {
   const [canJumpToNextTurn, setCanJumpToNextTurn] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
-  const [mutationBusy, setBusy] = useState(false);
+  const [mutationBusy, setBusy] = useScopedState(routeKey, false);
   const autoConnectionAttempt = useRef<{ key: string; promise: Promise<ThreadDetailDto> | null } | null>(null);
   const [autoConnectingRoute, setAutoConnectingRoute] = useState<string | null>(null);
   const busy = mutationBusy || autoConnectingRoute === routeKey;
@@ -547,20 +558,14 @@ export function ThreadDetailPage() {
       buildThreadImageAssetUrl(threadId, { path }),
     [],
   );
-  const [chatDraft, setChatDraft] = useState<{
-    prompt: string;
-    attachments: PromptAttachmentUpload[];
-  }>({
-    prompt: '',
-    attachments: [],
-  });
+  const [nativeResult, setNativeResult] = useScopedState<{ title: string; text: string } | null>(routeKey, null);
   const [shellControlState, setShellControlState] =
     useState<ThreadShellControlState | null>(null);
   const [pendingShellConnectionToggle, setPendingShellConnectionToggle] =
     useState(false);
-  const [settingsBusy, setSettingsBusy] = useState(false);
-  const [compactBusy, setCompactBusy] = useState(false);
-  const [respondingRequestId, setRespondingRequestId] = useState<string | null>(null);
+  const [settingsBusy, setSettingsBusy] = useScopedState(routeKey, false);
+  const [compactBusy, setCompactBusy] = useScopedState(routeKey, false);
+  const [respondingRequestId, setRespondingRequestId] = useScopedState<string | null>(routeKey, null);
   const [metaSessionCopyState, setMetaSessionCopyState] =
     useState<'idle' | 'copied' | 'failed'>('idle');
   const [realtimeConnection, setRealtimeConnection] =
@@ -571,10 +576,8 @@ export function ThreadDetailPage() {
       socketOpen: false,
       lastHealthyAt: null,
     });
-  const [optimisticTurn, setOptimisticTurn] = useState<OptimisticTurnState | null>(null);
-  const [optimisticSteers, setOptimisticSteers] = useState<OptimisticSteerState[]>(
-    [],
-  );
+  const [optimisticTurn, setOptimisticTurn] = useScopedState<OptimisticTurnState | null>(routeKey, null);
+  const [optimisticSteers, setOptimisticSteers] = useScopedState<OptimisticSteerState[]>(routeKey, []);
   useEffect(() => {
     const previews = optimisticTurn?.attachmentPreviews ?? [];
     return () => {
@@ -583,7 +586,7 @@ export function ThreadDetailPage() {
   }, [optimisticTurn]);
   const [deletingThread, setDeletingThread] = useState<ThreadDto | null>(null);
   const [deletingThreadBusy, setDeletingThreadBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useScopedState<string | null>(routeKey, null);
   const mcpProviderConfigFileName =
     backendManagementSchema?.hostConfigFiles.find((file) => file.roles?.includes('mcp'))
       ?.name ?? null;
@@ -652,6 +655,37 @@ export function ThreadDetailPage() {
     relayDeviceRouteActive && relayAccess?.kind === 'owner';
   const currentWorkspaceId =
     detail?.workspace.id ?? detail?.thread.workspaceId ?? null;
+  const [presentationAccount, setPresentationAccount] = useScopedState<string | null>(relayRouteDeviceId ?? 'local', relayDeviceRouteActive ? null : 'local');
+  const [presentationDeviceName, setPresentationDeviceName] = useScopedState<string | null>(relayRouteDeviceId ?? 'local', null);
+  useEffect(() => {
+    if (!relayDeviceRouteActive) return;
+    let alive = true;
+    void fetchRelaySession().then(session => { if (alive) setPresentationAccount(session.user?.id ?? null); }).catch(() => {});
+    void fetchRelayPortal().then(portal => { if (alive) setPresentationDeviceName(portal.devices.find(device => device.id === relayRouteDeviceId)?.name ?? null); }).catch(() => {});
+    return () => { alive = false; };
+  }, [relayRouteDeviceId, relayDeviceRouteActive, setPresentationAccount, setPresentationDeviceName]);
+  // Keep the workspace profile through a primary swap while the route is loading.
+  const presentationWorkspace = useRef<{ device: string | null; id: string | null }>({ device: relayRouteDeviceId, id: currentWorkspaceId });
+  if (presentationWorkspace.current.device !== relayRouteDeviceId || currentWorkspaceId) presentationWorkspace.current = { device: relayRouteDeviceId, id: currentWorkspaceId };
+  const presentationScope = presentationAccount && presentationWorkspace.current.id ? `remote-codex.presentation.v1:${JSON.stringify([window.location.origin, presentationAccount, relayRouteDeviceId ?? 'local', presentationWorkspace.current.id])}` : null;
+  const workbenchPresentation = useWorkbenchPresentation(presentationScope);
+  const referenceId = workbenchPresentation.value.referenceId === id ? null : workbenchPresentation.value.referenceId;
+  const [chatDraft, setChatDraft, referenceDraft, setReferenceDraft] = useThreadDrafts(routeKey, `${relayRouteDeviceId ?? 'local'}:${referenceId ?? ''}`);
+  const referenceController = useWorkbenchReference(relayRouteDeviceId ?? 'local', referenceId);
+  const referenceEventRef = useRef(referenceController.onEvent);
+  referenceEventRef.current = referenceController.onEvent;
+  const onCompareThread = useCallback((threadId: string) => {
+    if (threadId === activeThreadIdRef.current) return;
+    workbenchPresentation.update({ referenceId: threadId, mode: 'thread' });
+  }, [workbenchPresentation.update]);
+  const makeReferencePrimary = () => {
+    if (!referenceId) return;
+    // The file guard can cancel navigation. Keep reference membership unchanged
+    // until that decision succeeds, or cancellation would hide the chosen peer.
+    if (!confirmWorkspaceDocumentLeave()) return;
+    workbenchPresentation.update({ referenceId: id, mode: 'thread' });
+    navigate(currentThreadHref(referenceId));
+  };
   const effectiveWorkspaceAccess: 'none' | 'read' | 'write' =
     !relayDeviceRouteActive
       ? 'write'
@@ -1496,10 +1530,6 @@ export function ThreadDetailPage() {
     setDetail(null);
     setError(null);
     setLoading(true);
-    setChatDraft({
-      prompt: '',
-      attachments: [],
-    });
     setLoadingEarlier(false);
     setMetaSessionCopyState('idle');
     setOptimisticTurn(null);
@@ -1613,6 +1643,7 @@ export function ThreadDetailPage() {
     };
 
     const handleSocketEvent = (event: ThreadEventEnvelope) => {
+      referenceEventRef.current(event);
       if (event.threadId !== id) {
         return;
       }
@@ -2335,6 +2366,7 @@ export function ThreadDetailPage() {
             ...(currentDetail.thread.model ? { model: currentDetail.thread.model } : {}),
           },
         );
+        if (activeRouteRef.current !== routeKey) return false;
         const resumedDetail = {
           ...resumed,
           thread: {
@@ -2431,6 +2463,7 @@ export function ThreadDetailPage() {
         ...(input.attachments?.length ? { attachments: input.attachments } : {}),
       };
       const thread = await sendThreadPrompt(id, promptInput);
+      if (activeRouteRef.current !== routeKey) return true;
       const nextThread =
         pendingThreadSettingsRef.current &&
         Object.keys(pendingThreadSettingsRef.current).length > 0
@@ -2560,14 +2593,12 @@ export function ThreadDetailPage() {
   }
 
   async function handlePrompt(input: SendThreadPromptRequestInput) {
-    if (promptSubmissionInFlightRef.current) {
-      return false;
-    }
-    promptSubmissionInFlightRef.current = true;
+    if (activeRouteRef.current !== routeKey || promptSubmissionOwner.inFlight) return false;
+    promptSubmissionOwner.inFlight = true;
     try {
       return await performPromptSubmission(input);
     } finally {
-      promptSubmissionInFlightRef.current = false;
+      promptSubmissionOwner.inFlight = false;
     }
   }
 
@@ -2919,7 +2950,7 @@ export function ThreadDetailPage() {
     requestId: string,
     input: { answers: Record<string, { answers: string[] }> },
   ) => {
-    if (relayAccess?.kind === 'shared' && relayAccess.threadAccess === 'read') {
+    if (!relayThreadCanControl) {
       setError(translate("workbench.thisSharedSessionIsViewOnly"));
       return;
     }
@@ -2941,7 +2972,7 @@ export function ThreadDetailPage() {
     } finally {
       setRespondingRequestId(null);
     }
-  }, [id, relayAccess, runDetailMutation]);
+  }, [id, relayThreadCanControl, runDetailMutation]);
 
   const handleLoadHistoryItemDetail = useCallback(
     (itemId: string) => fetchThreadHistoryItemDetail(id, itemId),
@@ -3161,6 +3192,8 @@ export function ThreadDetailPage() {
         ? relayAccessState.error ?? translate("workbench.unableToVerifyRelayPermissions")
       : relayAccess?.kind === 'shared' && relayAccess.threadAccess === 'read'
         ? translate("workbench.thisSharedSessionIsViewOnly")
+      : !relayThreadCanControl
+        ? translate("workbench.checkingRelayPermissions")
       : null
     : null;
   const {
@@ -3352,7 +3385,7 @@ export function ThreadDetailPage() {
       backendProgress: backendProgress?.threadId === id ? backendProgress : null,
       backgroundAgentCount: detail?.activeSubagents?.filter((agent) => agent.isBackground && agent.status === 'running').length ?? 0,
       respondingRequestId,
-      onRespondToRequest: handleRespondToRequest,
+      ...(relayThreadCanControl ? { onRespondToRequest: handleRespondToRequest } : {}),
       scrollRequestKey,
       previousTurnScrollRequestKey,
       nextTurnScrollRequestKey,
@@ -3379,6 +3412,7 @@ export function ThreadDetailPage() {
       detail?.activeSubagents,
       handleLoadEarlierTurns,
       handleRespondToRequest,
+      relayThreadCanControl,
       liveItems,
       livePlan,
       backendProgress,
@@ -3563,7 +3597,7 @@ export function ThreadDetailPage() {
       renderNewThreadDialogContent,
       ...(relayThreadIsOwner ? { renameThread: handleRenameThread } : {}),
       ...(relayThreadIsOwner ? { deleteThread: setDeletingThread } : {}),
-      cancelPendingSteer: handleCancelPendingSteer,
+      ...(relayThreadCanControl ? { cancelPendingSteer: handleCancelPendingSteer } : {}),
       ...(relayThreadCanControl
         ? { steerPendingPrompt: handleSteerPendingPrompt }
         : {}),
@@ -3674,10 +3708,35 @@ export function ThreadDetailPage() {
 
   return (
     <>
+    {nativeResult && <LongTextDialog open title={nativeResult.title} text={nativeResult.text} onClose={() => setNativeResult(null)} />}
     {relayThreadIsOwner && relayRouteDeviceId && <PortMappingsControl key={relayRouteDeviceId} deviceId={relayRouteDeviceId} open={portsOpen} onOpenChange={setPortsOpen} />}
     <ThreadDetailSurface
       deviceMonitor={<DeviceMonitor key={relayRouteDeviceId ?? 'local'} />}
-      workbench={{ ...workbenchNavigation, statusActions: detail ? <><ThreadSubagentsControl key={`subagents-${detail.thread.id}`} detail={detail} /><ThreadWatchesControl key={`watches-${detail.thread.id}`} thread={detail.thread} /></> : null, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true), searchOpen, search: id && detail ? <ConversationSearch key={id} threadId={id} workspaceId={detail.thread.workspaceId}
+      workbench={{ ...workbenchNavigation, panels: {
+        deviceLabel: presentationDeviceName ?? (relayRouteDeviceId ? relayRouteDeviceId.slice(0, 8) : translate('workbench.localDeviceName')),
+        workspaceLabel: detail?.workspace.label ?? workbenchNavigation.workspacePath,
+        primaryTitle: detail?.thread.title ?? translate('workbench.loadingThreadDetail'),
+        primaryHarness: detail?.thread.agentId ?? detail?.thread.provider ?? '',
+        primaryStatus: detail ? threadStatusLabel(detail.thread.status) : '',
+        presentation: workbenchPresentation.value.referenceId === id ? { ...workbenchPresentation.value, mode: workbenchPresentation.value.mode === 'thread' ? 'focus' : workbenchPresentation.value.mode } : workbenchPresentation.value,
+        onPresentationChange: workbenchPresentation.update,
+        candidates: threads.filter(thread => thread.id !== id).map(thread => ({ id: thread.id, title: thread.title })),
+        referenceTitle: referenceController.detail?.thread.title ?? threads.find(thread => thread.id === referenceId)?.title ?? translate('workbench.loadingThreadDetail'),
+        referenceContent: referenceId ? <WorkbenchReferencePane key={`${relayRouteDeviceId}:${referenceId}`} controller={referenceController} onOpenThread={openThread} draft={referenceDraft} onDraftChange={setReferenceDraft} sendShortcut={shellNav?.sendShortcut ?? 'ctrlEnter'} /> : null,
+        collaborationContent: <WorkbenchCollaboration detail={detail} threads={threads} onCompare={onCompareThread} onOpen={openThread} sourceKey={routeKey} visible={workbenchPresentation.value.mode === 'collaboration'} liveItems={liveItems} onNativeResult={target => {
+          const source = routeKey;
+          void fetchThreadTurnDetail(id, target.turnId).then(turn => {
+            if (activeRouteRef.current !== source) return;
+            setDetail(current => current ? { ...current, turns: prependTurns(current.turns.map(existing => existing.id === turn.id ? turn : existing), [turn]) } : current);
+            const item = turn.items.find(item => item.id === target.itemId);
+            if (item) setNativeResult({ title: item.text, text: item.detailText ?? item.text });
+            workbenchPresentation.update({ mode: 'focus' });
+            setSearchTarget({ ...target, key: Date.now() });
+          }).catch(caught => { if (activeRouteRef.current === source) setError(actionErrorMessage(caught, translate('workbench.statusUnavailable'))); });
+        }} />,
+        onMakePrimary: makeReferencePrimary,
+        storageFailed: workbenchPresentation.storageFailed,
+      }, statusActions: detail ? <><ThreadSubagentsControl key={`subagents-${detail.thread.id}`} detail={detail} /><ThreadWatchesControl key={`watches-${detail.thread.id}`} thread={detail.thread} /></> : null, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView, terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view !== activeView) handleToggleView(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true), searchOpen, search: id && detail ? <ConversationSearch key={id} threadId={id} workspaceId={detail.thread.workspaceId}
         deviceLabel={relayRouteDeviceId ?? searchLabels.localDevice}
         allowGlobal={relayThreadIsOwner || (relayAccess?.scope === 'device' && (relayAccess.threadAccess === 'read' || relayAccess.threadAccess === 'control'))}
         onNavigate={match => {

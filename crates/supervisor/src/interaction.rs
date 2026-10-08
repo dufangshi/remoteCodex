@@ -64,6 +64,9 @@ pub(crate) async fn run(
         "previewCreate" | "previewList" | "previewCheck" | "previewStop" => {
             crate::preview_cli::run(state, &input).await
         }
+        "automationCreate" | "automationPreview" | "automationList" | "automationShow"
+        | "automationRuns" | "automationPause" | "automationResume" | "automationCancel"
+        | "commandRun" | "commandShow" => crate::automations::cli(state, &input).await,
         "info" => {
             let identity = crate::peer_link::relay_identity(state);
             Ok(

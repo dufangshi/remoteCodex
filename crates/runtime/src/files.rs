@@ -14,6 +14,77 @@ use zip::{CompressionMethod, ZipWriter};
 pub const DIRECTORY_DOWNLOAD_MAX_FILES_EXCLUSIVE: usize = 1_000;
 pub const DIRECTORY_DOWNLOAD_MAX_BYTES_EXCLUSIVE: u64 = 1_000_000_000;
 
+/// Create an empty file exclusively: never truncate an existing path or create
+/// missing directories. Unix parents are opened relative to directory handles,
+/// without following symlinks, just like the conditional document API.
+pub fn create_empty_file(root: &Path, rel: &str) -> Result<()> {
+    anyhow::ensure!(
+        !rel.is_empty()
+            && rel.len() <= 4096
+            && !rel.contains('\\')
+            && !rel.chars().any(char::is_control)
+            && !Path::new(rel).is_absolute()
+            && rel
+                .split('/')
+                .all(|part| !part.is_empty() && part != "." && part != "..")
+            && Path::new(rel)
+                .components()
+                .all(|c| matches!(c, Component::Normal(_))),
+        "invalidRelativePath"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::{
+            fd::{AsRawFd, FromRawFd},
+            unix::{ffi::OsStrExt, fs::OpenOptionsExt},
+        };
+        let mut parent = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(root.canonicalize()?)?;
+        let mut parts = Path::new(rel).components().peekable();
+        while let Some(Component::Normal(part)) = parts.next() {
+            let name = std::ffi::CString::new(part.as_bytes())?;
+            let directory = parts.peek().is_some();
+            let flags = libc::O_CLOEXEC
+                | libc::O_NOFOLLOW
+                | if directory {
+                    libc::O_RDONLY | libc::O_DIRECTORY
+                } else {
+                    libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL
+                };
+            let fd = unsafe { libc::openat(parent.as_raw_fd(), name.as_ptr(), flags, 0o644) };
+            if fd < 0 {
+                return Err(std::io::Error::last_os_error().into());
+            }
+            let file = unsafe { File::from_raw_fd(fd) };
+            if !directory {
+                file.sync_all()?;
+                parent.sync_all()?;
+                return Ok(());
+            }
+            parent = file;
+        }
+        bail!("invalidRelativePath")
+    }
+    #[cfg(not(unix))]
+    {
+        let root = root.canonicalize()?;
+        let path = assert_within(&root, Path::new(rel))?;
+        // The parent must already exist; create_new preserves collision safety.
+        let parent = path
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("invalidRelativePath"))?;
+        anyhow::ensure!(parent.is_dir(), "parentDirectoryMissing");
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)?
+            .sync_all()?;
+        Ok(())
+    }
+}
+
 pub enum WorkspaceDownload {
     File {
         path: PathBuf,
@@ -138,10 +209,33 @@ pub fn list_tree(root: &Path, rel: &str) -> Result<Vec<ThreadWorkspaceTreeNodeDt
 
 pub fn preview_file(root: &Path, rel: &str, limit: usize) -> Result<ThreadWorkspaceFilePreviewDto> {
     let path = assert_within(root, &PathBuf::from(rel))?;
-    let bytes = std::fs::read(&path)?;
-    let truncated = bytes.len() > limit;
-    let slice = if truncated { &bytes[..limit] } else { &bytes };
-    let content = String::from_utf8_lossy(slice).into_owned();
+    anyhow::ensure!(std::fs::metadata(&path)?.is_file(), "not a regular file");
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let mut file = options.open(&path)?;
+    let metadata = file.metadata()?;
+    anyhow::ensure!(metadata.is_file(), "not a regular file");
+    let limit = limit.min(64 * 1024);
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take((limit + 4) as u64)
+        .read_to_end(&mut bytes)?;
+    let truncated = metadata.len() > limit as u64;
+    let mut end = bytes.len().min(limit);
+    // Only a partial final UTF-8 sequence may be trimmed; never lossy decode.
+    let content = loop {
+        match std::str::from_utf8(&bytes[..end]) {
+            Ok(text) if !text.contains('\0') => break text.to_owned(),
+            Err(e) if truncated && e.error_len().is_none() => end = e.valid_up_to(),
+            _ => bail!("unsupportedEncodingOrBinaryFile"),
+        }
+    };
+    let slice = &bytes[..end];
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -151,7 +245,7 @@ pub fn preview_file(root: &Path, rel: &str, limit: usize) -> Result<ThreadWorksp
         name: name.clone(),
         content,
         language: language_for(&name),
-        size: bytes.len() as u64,
+        size: metadata.len(),
         truncated,
         next_offset: slice.len() as u64,
     })
@@ -319,6 +413,7 @@ pub fn write_file_with_scope(
     content: &str,
     scope: WriteScope,
 ) -> Result<()> {
+    let _gate = crate::file_documents::mutation_guard();
     let path = if scope == WriteScope::Unrestricted {
         if Path::new(rel).is_absolute() {
             PathBuf::from(rel)
@@ -363,6 +458,57 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
+
+    #[test]
+    fn create_file_is_exclusive_and_requires_a_valid_existing_parent() {
+        let dir = tempdir().unwrap();
+        fs::create_dir(dir.path().join("docs")).unwrap();
+        create_empty_file(dir.path(), "docs/新文件.md").unwrap();
+        fs::write(dir.path().join("docs/新文件.md"), "keep").unwrap();
+        let error = create_empty_file(dir.path(), "docs/新文件.md").unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<io::Error>().unwrap().kind(),
+            ErrorKind::AlreadyExists
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join("docs/新文件.md")).unwrap(),
+            "keep"
+        );
+        for invalid in [
+            "",
+            ".",
+            "../outside.txt",
+            "/absolute.txt",
+            "docs/../../outside",
+            "docs\\bad.txt",
+            "bad\nname",
+            "docs//double.txt",
+            "trailing/",
+            "docs/./dot.txt",
+        ] {
+            assert!(create_empty_file(dir.path(), invalid).is_err(), "{invalid}");
+        }
+        assert!(create_empty_file(dir.path(), "missing/file.txt").is_err());
+        assert!(!dir.path().join("missing").exists());
+        assert!(create_empty_file(dir.path(), "docs").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_file_rejects_symlink_parents_and_existing_symlink_targets() {
+        let dir = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("missing.txt"),
+            dir.path().join("dangling.txt"),
+        )
+        .unwrap();
+        assert!(create_empty_file(dir.path(), "link/outside.txt").is_err());
+        assert!(create_empty_file(dir.path(), "dangling.txt").is_err());
+        assert!(!outside.path().join("outside.txt").exists());
+        assert!(!outside.path().join("missing.txt").exists());
+    }
 
     #[test]
     fn workspace_write_rejects_escape() {

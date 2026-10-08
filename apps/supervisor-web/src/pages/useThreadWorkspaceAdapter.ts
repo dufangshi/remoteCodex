@@ -13,9 +13,13 @@ import {
   fetchWorkspaceFilePreview,
   fetchWorkspaceFileTree,
   uploadWorkspaceFile,
-  writeWorkspaceFile,
+  fetchWorkspaceDocument,
+  saveWorkspaceDocument,
+  fetchWorkspaceSaveOperation,
+  workspaceResourceScope,
   renameWorkspaceNode,
   deleteWorkspaceNode,
+  createWorkspaceFile,
 } from '../lib/api';
 
 interface UseThreadWorkspaceAdapterInput {
@@ -32,6 +36,7 @@ export function useThreadWorkspaceAdapter({
   allowLinkedFiles = false,
 }: UseThreadWorkspaceAdapterInput): ThreadWorkspaceAdapter | null {
   const { locale: i18nLocale } = useI18n();
+  const resourceScopeKey = workspaceResourceScope();
   return useMemo<ThreadWorkspaceAdapter | null>(() => {
     if (!workspaceId || access === 'none') {
       return null;
@@ -39,6 +44,17 @@ export function useThreadWorkspaceAdapter({
 
     const isLinked = (path: string) => path.startsWith('/') || /^[a-z]:[\\/]/i.test(path);
     return {
+      resourceScopeKey,
+      textRangeRead: false,
+      readDocument: async (input) => {
+        try { return await fetchWorkspaceDocument(workspaceId, input.path, input.signal); }
+        catch (error) {
+          if (error instanceof ApiError && [404,501].includes(error.statusCode)) {
+            return {path:input.path,name:input.path.split('/').pop()??input.path,language:'text',workspaceRevision:'unsupported',fileIdentity:'',contentHash:null,content:null,size:0,encoding:'unknown',bom:false,eol:'lf',readOnlyReason:'safeUnavailable',truncated:false};
+          }
+          throw error;
+        }
+      },
       ...(allowLinkedFiles ? {statLinkedFile: (input: {threadId: string; path: string}) => fetchLinkedFile(input.threadId, input.path)} : {}),
       listTree: (input) =>
         fetchWorkspaceFileTree(workspaceId, { path: input.path ?? '' }),
@@ -64,17 +80,28 @@ export function useThreadWorkspaceAdapter({
         isLinked(input.path) && allowLinkedFiles ? buildLinkedFileUrl(input.threadId, input.path) : buildWorkspaceRawFileUrl(workspaceId, { path: input.path }),
       ...(access === 'write'
         ? {
+            createFile: async (input) => {
+              try { return await createWorkspaceFile(workspaceId, input.path); }
+              catch (error) {
+                if (error instanceof ApiError) {
+                  const code = error.payload.code;
+                  if (code === 'fileAlreadyExists') throw new Error(translate('files.fileAlreadyExists'));
+                  if (code === 'permissionDenied') throw new Error(translate('files.createPermissionDenied'));
+                  if ([404,405,501].includes(error.statusCode)) throw new Error(translate('files.createUnavailable'));
+                }
+                throw error;
+              }
+            },
             uploadFile: (input) =>
               uploadWorkspaceFile(workspaceId, { file: input.file }),
             renameNode: async (input) => { await renameWorkspaceNode(workspaceId, input); },
             deleteNode: async (input) => { await deleteWorkspaceNode(workspaceId, input.path); },
-            writeFile: async (input) => {
+            saveDocument: (input) => {
               if (isLinked(input.path)) throw new Error(translate("files.linkedFilesAreReadOnlyPreviews"));
-              await writeWorkspaceFile(workspaceId, {
-                path: input.path,
-                content: input.content,
-              });
+              const {threadId: _threadId, workspaceId: _workspaceId, ...save} = input;
+              return saveWorkspaceDocument(workspaceId,save);
             },
+            getSaveOperation: (input) => fetchWorkspaceSaveOperation(workspaceId,input.operationId),
           }
         : {}),
       downloadNode: async (input) => {
@@ -103,5 +130,5 @@ export function useThreadWorkspaceAdapter({
         }
       },
     };
-  }, [access, allowLinkedFiles, setError, workspaceId, i18nLocale]);
+  }, [access, allowLinkedFiles, setError, workspaceId, i18nLocale, resourceScopeKey]);
 }

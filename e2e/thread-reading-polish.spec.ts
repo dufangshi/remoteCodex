@@ -36,7 +36,7 @@ test('opening a detached thread automatically connects once and hides the health
   expect(connections).toHaveLength(1);
 });
 
-test('overlapping live steps stay stable on expansion and idle output keeps running dots and a progress age', async ({ page, request }) => {
+test('overlapping live steps stay stable on expansion and idle output keeps freshness dots with hover and tap details', async ({ page, request }, testInfo) => {
   const id = await createThread(request);
   const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
   const startedAt = new Date(Date.now() - 60_000).toISOString();
@@ -68,11 +68,20 @@ test('overlapping live steps stay stable on expansion and idle output keeps runn
   const summary = page.locator('.thread-graph-worked-summary');
   const steps = summary.locator('.thread-execution-step-count');
   await expect(steps).toHaveText('1 steps');
-  await expect(page.locator('.thread-progress-age')).toHaveText(/Last progress · [5-9]\ds ago/);
+  const progress = page.locator('.thread-progress-indicator');
+  await expect(progress).toHaveAttribute('data-progress-freshness', 'stale');
+  await expect(page.locator('.thread-progress-age')).toHaveCount(0);
+  if (testInfo.project.name === 'mobile-chromium') await progress.tap();
+  else await progress.hover();
+  const tooltip = page.getByRole('tooltip');
+  await expect(tooltip).toContainText(/Last progress · [5-9]\ds ago/);
+  await expect(tooltip).toContainText('Last activity ');
+  await page.getByRole('textbox', { name: 'Prompt' }).click();
+  await expect(tooltip).toHaveCount(0);
   await expect(page.locator('.thread-graph-turn-footer .animate-pulse')).toHaveCount(3);
   await expect(page.getByRole('button', { name: 'Stop Current Turn', exact: true })).toBeVisible();
   emit('thread.item.completed', { turnId: turn.id, item: commands[0] });
-  await expect(page.locator('.thread-progress-age')).toHaveText(/Last progress · [01]s ago/);
+  await expect(progress).toHaveAttribute('data-progress-freshness', 'recent');
   await expect(steps).toHaveText('1 steps');
   await summary.getByRole('button', { name: /Expand turn 1$/ }).click();
   await expect(page.getByText('read inbox', { exact: true })).toBeVisible();
@@ -87,9 +96,21 @@ test('overlapping live steps stay stable on expansion and idle output keeps runn
   await expect(steps).toHaveText('2 steps');
   await page.reload();
   await expect(steps).toHaveText('2 steps');
-  await expect(page.locator('.thread-progress-age')).toBeVisible();
+  await expect(progress).toBeVisible();
   emit('thread.turn.token.updated', { turnId: turn.id, tokenUsage: { total: { inputTokens: 100, outputTokens: 10, totalTokens: 110, cachedInputTokens: 0 } } });
-  await expect(page.locator('.thread-progress-age')).toHaveText(/Last progress · [01]s ago/);
+  await expect(progress).toHaveAttribute('data-progress-freshness', 'recent');
+  await page.clock.install();
+  await page.clock.fastForward(7_000);
+  await expect(progress).toHaveAttribute('data-progress-freshness', 'quiet');
+  await page.clock.fastForward(15_000);
+  await expect(progress).toHaveAttribute('data-progress-freshness', 'stale');
+  if (process.env.PROGRESS_SCREENSHOT_DIR) {
+    await mkdir(process.env.PROGRESS_SCREENSHOT_DIR, { recursive: true });
+    if (testInfo.project.name === 'mobile-chromium') await progress.tap();
+    else await progress.hover();
+    await expect(tooltip).toBeVisible();
+    await page.screenshot({ path: path.join(process.env.PROGRESS_SCREENSHOT_DIR, `progress-${testInfo.project.name}.png`), scale: 'css' });
+  }
   completed = true;
   emit('thread.turn.completed', { turnId: turn.id, status: 'completed' });
   emit('thread.updated');

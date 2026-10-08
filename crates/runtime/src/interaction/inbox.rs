@@ -10,13 +10,13 @@ fn prefix(thread: &str) -> String {
 fn key(thread: &str, id: &str) -> String {
     format!("{}{id}", prefix(thread))
 }
-pub(super) struct Envelope<'a> {
+pub(crate) struct Envelope<'a> {
     pub subject: Option<&'a str>,
     pub kind: &'a str,
     pub in_reply_to: Option<&'a str>,
     pub topic_key: Option<&'a str>,
 }
-pub(super) fn store(
+pub(crate) fn store(
     conn: &Connection,
     thread: &str,
     id: &str,
