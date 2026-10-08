@@ -424,7 +424,10 @@ export function ThreadDetailPage() {
   const pageContextProviderRef = useRef<ThreadDto['provider'] | null>(null);
   const terminalTurnPendingRef = useRef<string | null>(null);
   const detailRef = useRef<ThreadDetailDto | null>(null);
-  const promptSubmissionInFlightRef = useRef(false);
+  const promptSubmissionOwnerRef = useRef({ routeKey, inFlight: false });
+  if (promptSubmissionOwnerRef.current.routeKey !== routeKey)
+    promptSubmissionOwnerRef.current = { routeKey, inFlight: false };
+  const promptSubmissionOwner = promptSubmissionOwnerRef.current;
   const interruptingRef = useRef(false);
   const pendingThreadSettingsRef = useRef<PendingThreadSettings | null>(null);
   const resolvedRequestIdsRef = useRef<Set<string>>(new Set());
@@ -464,7 +467,7 @@ export function ThreadDetailPage() {
   const [canJumpToNextTurn, setCanJumpToNextTurn] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
-  const [mutationBusy, setBusy] = useState(false);
+  const [mutationBusy, setBusy] = useScopedState(routeKey, false);
   const autoConnectionAttempt = useRef<{ key: string; promise: Promise<ThreadDetailDto> | null } | null>(null);
   const [autoConnectingRoute, setAutoConnectingRoute] = useState<string | null>(null);
   const busy = mutationBusy || autoConnectingRoute === routeKey;
@@ -555,15 +558,14 @@ export function ThreadDetailPage() {
       buildThreadImageAssetUrl(threadId, { path }),
     [],
   );
-  const [chatDraft, setChatDraft] = useThreadDrafts(routeKey);
   const [nativeResult, setNativeResult] = useScopedState<{ title: string; text: string } | null>(routeKey, null);
   const [shellControlState, setShellControlState] =
     useState<ThreadShellControlState | null>(null);
   const [pendingShellConnectionToggle, setPendingShellConnectionToggle] =
     useState(false);
-  const [settingsBusy, setSettingsBusy] = useState(false);
-  const [compactBusy, setCompactBusy] = useState(false);
-  const [respondingRequestId, setRespondingRequestId] = useState<string | null>(null);
+  const [settingsBusy, setSettingsBusy] = useScopedState(routeKey, false);
+  const [compactBusy, setCompactBusy] = useScopedState(routeKey, false);
+  const [respondingRequestId, setRespondingRequestId] = useScopedState<string | null>(routeKey, null);
   const [metaSessionCopyState, setMetaSessionCopyState] =
     useState<'idle' | 'copied' | 'failed'>('idle');
   const [realtimeConnection, setRealtimeConnection] =
@@ -574,10 +576,8 @@ export function ThreadDetailPage() {
       socketOpen: false,
       lastHealthyAt: null,
     });
-  const [optimisticTurn, setOptimisticTurn] = useState<OptimisticTurnState | null>(null);
-  const [optimisticSteers, setOptimisticSteers] = useState<OptimisticSteerState[]>(
-    [],
-  );
+  const [optimisticTurn, setOptimisticTurn] = useScopedState<OptimisticTurnState | null>(routeKey, null);
+  const [optimisticSteers, setOptimisticSteers] = useScopedState<OptimisticSteerState[]>(routeKey, []);
   useEffect(() => {
     const previews = optimisticTurn?.attachmentPreviews ?? [];
     return () => {
@@ -586,7 +586,7 @@ export function ThreadDetailPage() {
   }, [optimisticTurn]);
   const [deletingThread, setDeletingThread] = useState<ThreadDto | null>(null);
   const [deletingThreadBusy, setDeletingThreadBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useScopedState<string | null>(routeKey, null);
   const mcpProviderConfigFileName =
     backendManagementSchema?.hostConfigFiles.find((file) => file.roles?.includes('mcp'))
       ?.name ?? null;
@@ -670,6 +670,7 @@ export function ThreadDetailPage() {
   const presentationScope = presentationAccount && presentationWorkspace.current.id ? `remote-codex.presentation.v1:${JSON.stringify([window.location.origin, presentationAccount, relayRouteDeviceId ?? 'local', presentationWorkspace.current.id])}` : null;
   const workbenchPresentation = useWorkbenchPresentation(presentationScope);
   const referenceId = workbenchPresentation.value.referenceId === id ? null : workbenchPresentation.value.referenceId;
+  const [chatDraft, setChatDraft, referenceDraft, setReferenceDraft] = useThreadDrafts(routeKey, `${relayRouteDeviceId ?? 'local'}:${referenceId ?? ''}`);
   const referenceController = useWorkbenchReference(relayRouteDeviceId ?? 'local', referenceId);
   const referenceEventRef = useRef(referenceController.onEvent);
   referenceEventRef.current = referenceController.onEvent;
@@ -2363,6 +2364,7 @@ export function ThreadDetailPage() {
             ...(currentDetail.thread.model ? { model: currentDetail.thread.model } : {}),
           },
         );
+        if (activeRouteRef.current !== routeKey) return false;
         const resumedDetail = {
           ...resumed,
           thread: {
@@ -2459,6 +2461,7 @@ export function ThreadDetailPage() {
         ...(input.attachments?.length ? { attachments: input.attachments } : {}),
       };
       const thread = await sendThreadPrompt(id, promptInput);
+      if (activeRouteRef.current !== routeKey) return true;
       const nextThread =
         pendingThreadSettingsRef.current &&
         Object.keys(pendingThreadSettingsRef.current).length > 0
@@ -2588,14 +2591,12 @@ export function ThreadDetailPage() {
   }
 
   async function handlePrompt(input: SendThreadPromptRequestInput) {
-    if (promptSubmissionInFlightRef.current) {
-      return false;
-    }
-    promptSubmissionInFlightRef.current = true;
+    if (activeRouteRef.current !== routeKey || promptSubmissionOwner.inFlight) return false;
+    promptSubmissionOwner.inFlight = true;
     try {
       return await performPromptSubmission(input);
     } finally {
-      promptSubmissionInFlightRef.current = false;
+      promptSubmissionOwner.inFlight = false;
     }
   }
 
@@ -2947,7 +2948,7 @@ export function ThreadDetailPage() {
     requestId: string,
     input: { answers: Record<string, { answers: string[] }> },
   ) => {
-    if (relayAccess?.kind === 'shared' && relayAccess.threadAccess === 'read') {
+    if (!relayThreadCanControl) {
       setError(translate("workbench.thisSharedSessionIsViewOnly"));
       return;
     }
@@ -2969,7 +2970,7 @@ export function ThreadDetailPage() {
     } finally {
       setRespondingRequestId(null);
     }
-  }, [id, relayAccess, runDetailMutation]);
+  }, [id, relayThreadCanControl, runDetailMutation]);
 
   const handleLoadHistoryItemDetail = useCallback(
     (itemId: string) => fetchThreadHistoryItemDetail(id, itemId),
@@ -3189,6 +3190,8 @@ export function ThreadDetailPage() {
         ? relayAccessState.error ?? translate("workbench.unableToVerifyRelayPermissions")
       : relayAccess?.kind === 'shared' && relayAccess.threadAccess === 'read'
         ? translate("workbench.thisSharedSessionIsViewOnly")
+      : !relayThreadCanControl
+        ? translate("workbench.checkingRelayPermissions")
       : null
     : null;
   const {
@@ -3380,7 +3383,7 @@ export function ThreadDetailPage() {
       backendProgress: backendProgress?.threadId === id ? backendProgress : null,
       backgroundAgentCount: detail?.activeSubagents?.filter((agent) => agent.isBackground && agent.status === 'running').length ?? 0,
       respondingRequestId,
-      onRespondToRequest: handleRespondToRequest,
+      ...(relayThreadCanControl ? { onRespondToRequest: handleRespondToRequest } : {}),
       scrollRequestKey,
       previousTurnScrollRequestKey,
       nextTurnScrollRequestKey,
@@ -3407,6 +3410,7 @@ export function ThreadDetailPage() {
       detail?.activeSubagents,
       handleLoadEarlierTurns,
       handleRespondToRequest,
+      relayThreadCanControl,
       liveItems,
       livePlan,
       backendProgress,
@@ -3591,7 +3595,7 @@ export function ThreadDetailPage() {
       renderNewThreadDialogContent,
       ...(relayThreadIsOwner ? { renameThread: handleRenameThread } : {}),
       ...(relayThreadIsOwner ? { deleteThread: setDeletingThread } : {}),
-      cancelPendingSteer: handleCancelPendingSteer,
+      ...(relayThreadCanControl ? { cancelPendingSteer: handleCancelPendingSteer } : {}),
       ...(relayThreadCanControl
         ? { steerPendingPrompt: handleSteerPendingPrompt }
         : {}),
@@ -3716,7 +3720,7 @@ export function ThreadDetailPage() {
         onPresentationChange: workbenchPresentation.update,
         candidates: threads.filter(thread => thread.id !== id).map(thread => ({ id: thread.id, title: thread.title })),
         referenceTitle: referenceController.detail?.thread.title ?? threads.find(thread => thread.id === referenceId)?.title ?? translate('workbench.loadingThreadDetail'),
-        referenceContent: referenceId ? <WorkbenchReferencePane key={`${relayRouteDeviceId}:${referenceId}`} controller={referenceController} onOpenThread={openThread} /> : null,
+        referenceContent: referenceId ? <WorkbenchReferencePane key={`${relayRouteDeviceId}:${referenceId}`} controller={referenceController} onOpenThread={openThread} draft={referenceDraft} onDraftChange={setReferenceDraft} sendShortcut={shellNav?.sendShortcut ?? 'ctrlEnter'} /> : null,
         collaborationContent: <WorkbenchCollaboration detail={detail} threads={threads} onCompare={onCompareThread} onOpen={openThread} sourceKey={routeKey} visible={workbenchPresentation.value.mode === 'collaboration'} liveItems={liveItems} onNativeResult={target => {
           const source = routeKey;
           void fetchThreadTurnDetail(id, target.turnId).then(turn => {

@@ -1,47 +1,62 @@
 {
-  "uiSha": "ef9d702ba199937a96de513a272fb17eeeda6423",
+  "uiSha": "692202ac34f5d0a6a7ecc41280962cf790e5b615",
+  "supervisorBaseSha": "88128d2edd8ac91cb839075c875513c7e0210ae4",
   "screenshots": [
     {
       "path": "docs/assets/narrafork-preview/files/desktop-conflict.png",
       "width": 1440,
       "height": 1000,
-      "sha256": "0af853eb85af0f9a4045e3cea45d573a43b206ae48c572fdcf319ff544dd4227"
+      "sha256": "0af853eb85af0f9a4045e3cea45d573a43b206ae48c572fdcf319ff544dd4227",
+      "uiSha": "ef9d702ba199937a96de513a272fb17eeeda6423",
+      "capture": "preserved-file-editor-baseline"
     },
     {
       "path": "docs/assets/narrafork-preview/files/desktop-editor.png",
       "width": 1440,
       "height": 1000,
-      "sha256": "e1f2639b0820c83c0dd935d5c5c285ea8f0b2051498a7d687f3d4b22f9dc63c0"
+      "sha256": "e1f2639b0820c83c0dd935d5c5c285ea8f0b2051498a7d687f3d4b22f9dc63c0",
+      "uiSha": "ef9d702ba199937a96de513a272fb17eeeda6423",
+      "capture": "preserved-file-editor-baseline"
     },
     {
       "path": "docs/assets/narrafork-preview/files/mobile-editor.png",
       "width": 390,
       "height": 844,
-      "sha256": "658e5d03ba4a6104397d9ec5c11f4a29bd078e72c1e63798eedf1644d807e88e"
+      "sha256": "658e5d03ba4a6104397d9ec5c11f4a29bd078e72c1e63798eedf1644d807e88e",
+      "uiSha": "ef9d702ba199937a96de513a272fb17eeeda6423",
+      "capture": "preserved-file-editor-baseline"
     },
     {
       "path": "docs/assets/narrafork-preview/layout/desktop-collaboration.png",
       "width": 1440,
       "height": 1000,
-      "sha256": "25a1af5e1f42410e920c52046bbf7bab2f001d00ac3ca33e9f275132d56f1370"
+      "sha256": "821777834fcdc4903f063120393bdc6200e0302dc3e256bdf0f2cfb009ba7ff9",
+      "uiSha": "692202ac34f5d0a6a7ecc41280962cf790e5b615",
+      "capture": "dual-conversation-revision"
     },
     {
       "path": "docs/assets/narrafork-preview/layout/desktop-compare.png",
       "width": 1440,
       "height": 1000,
-      "sha256": "6b1b81ea9735ef1f32cc677270294820f7c34b2f4c6d8f0b10282ef7b6d92a09"
+      "sha256": "dcd4006d256750ab1bfedc077b5ee25946378a39ec8c38771dc8a9f3512973f8",
+      "uiSha": "692202ac34f5d0a6a7ecc41280962cf790e5b615",
+      "capture": "dual-conversation-revision"
     },
     {
       "path": "docs/assets/narrafork-preview/layout/mobile-main.png",
       "width": 390,
       "height": 844,
-      "sha256": "421db7b91e6ce739f860db951d37af09bc641b26c4a16756693864c15095ebb4"
+      "sha256": "7d23ecdc39fc3ae7e054ffde392eb617233541510b395d4da12645eb76d90184",
+      "uiSha": "692202ac34f5d0a6a7ecc41280962cf790e5b615",
+      "capture": "dual-conversation-revision"
     },
     {
       "path": "docs/assets/narrafork-preview/layout/mobile-reference.png",
       "width": 390,
       "height": 844,
-      "sha256": "a7f288282a3d5e2f5471d6010b6d79a3b5ce71613546eac96288144e969477cc"
+      "sha256": "f402a489d8653d97ae8e5f908c9c5a63d3aa4f1094af73c2d0e4acdd18f1dab4",
+      "uiSha": "692202ac34f5d0a6a7ecc41280962cf790e5b615",
+      "capture": "dual-conversation-revision"
     }
   ]
 }

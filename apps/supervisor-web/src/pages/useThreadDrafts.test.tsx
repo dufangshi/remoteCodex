@@ -21,3 +21,22 @@ it('keeps drafts by device and thread and ignores a departed composer callback',
   rerender({ source: 'other-device:a' });
   expect(result.current[0].prompt).toBe('');
 });
+
+it('shares both pane drafts including attachments across swaps and rejects stale pane callbacks', () => {
+  const { result, rerender } = renderHook(({ a, b }) => useThreadDrafts(a, b), { initialProps: { a: 'dev:a', b: 'dev:b' } });
+  const file = { file: new File(['review'], 'review.txt'), kind: 'file' as const, clientId: 'b-file', originalName: 'review.txt', placeholder: '[FILE review.txt]' };
+  act(() => {
+    result.current[1]({ prompt: 'A', attachments: [] });
+    result.current[3]({ prompt: 'B [FILE review.txt]', attachments: [file] });
+  });
+  const stale = result.current[3];
+  rerender({ a: 'dev:b', b: 'dev:a' });
+  expect(result.current[0].attachments).toEqual([file]);
+  expect(result.current[2].prompt).toBe('A');
+  act(() => stale({ prompt: '', attachments: [] }));
+  expect(result.current[0].prompt).toBe('B [FILE review.txt]');
+  rerender({ a: 'dev:b', b: 'dev:c' });
+  expect(result.current[2].prompt).toBe('');
+  rerender({ a: 'dev:b', b: 'dev:a' });
+  expect(result.current[2].prompt).toBe('A');
+});
