@@ -47,12 +47,24 @@ test('language switch synchronizes host and shared workbench, preserves draft, f
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
   await expect(page.getByText('English user title', { exact: true }).first()).toBeVisible();
+  // Exercise the combined search + i18n build, including cached result labels.
+  await page.getByRole('button', { name: '搜索会话', exact: true }).click();
+  await page.getByRole('combobox', { name: '搜索范围', exact: true }).selectOption('workspace');
+  await page.getByRole('combobox', { name: '搜索消息', exact: true }).fill('English user title');
+  const localizedResults = page.getByRole('listbox', { name: '匹配消息', exact: true });
+  await expect(localizedResults.getByRole('option')).toHaveCount(1);
+  await expect(localizedResults).toContainText('标题');
+  await page.getByRole('button', { name: '关闭搜索', exact: true }).click();
   await page.getByRole('button', { name: '打开设置', exact: true }).click();
   await page.getByRole('tab', { name: '偏好设置', exact: true }).click();
   await expect(page.getByRole('combobox', { name: '语言', exact: true })).toHaveValue('zh-CN');
   await page.getByRole('combobox', { name: '语言', exact: true }).selectOption('en');
   await expect(page.getByRole('tab', { name: 'Preferences', exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Search conversation', exact: true }).click();
+  await expect(page.getByRole('combobox', { name: 'Search scope', exact: true })).toHaveValue('workspace');
+  await expect(page.getByRole('listbox', { name: 'Matching messages', exact: true })).toContainText('Title');
+  await page.getByRole('button', { name: 'Close search', exact: true }).click();
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await expect(page.getByRole('button', { name: 'Toggle Explorer', exact: true })).toBeVisible();
