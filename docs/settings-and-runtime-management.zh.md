@@ -59,3 +59,45 @@
 - [main 平台兼容性检查](https://github.com/dufangshi/remoteCodex/actions/runs/34055939668)成功。
 - 15:54 最终核验：npm `latest=0.12.17`；实际下载 launcher tarball，SHA-512 与 npm integrity 一致，含独立更新器和 Web；四平台 native manifest 的 SHA-256 与 GitHub 发布资产一致。[版本页](https://github.com/dufangshi/remoteCodex/releases/tag/v0.12.17)指向固定 runtime 提交。
 - 公网 healthz 为 ok，已有 5 台 Supervisor 连接；匿名安全设置请求返回 401。当前真实设备 Supervisor 未升级、未重启。Windows Device Manager 版本未变。
+
+## 独立「上游」设置分类
+
+设置 → **上游 / Upstreams** 使用设备级 `/management/harnesses` 安装清单，
+默认只列出 base 已安装的 harness；“显示未安装”开关允许查看其他项，但不能启用。
+名称与清单保持一致，例如 OpenAI Codex、Claude Agent、DeepSeek Harness。
+Harnesses 页只负责安装、更新及 ACP 适配器，上游编辑统一在新 tab 中。
+
+顶部切换 harness，标题栏添加或导入 provider；卡片显示“启用 / 使用中”。
+支持搜索、编辑正在使用的 provider、复制、上移/下移、endpoint 测速、生成请求测试
+以及备份恢复。测速仅显示 HTTP 响应延迟与状态码，不发送生成请求，401 也不是成功鉴权。
+连接模式目前仅支持直接写入原生配置；不支持 CC Switch 本地代理/故障转移。
+
+表单移植 CC Switch 的 189 个直接 API 预设（Claude/Codex/Gemini），支持手填模型 ID
+及可选模型发现、Claude haiku/sonnet/opus 映射、自定义请求头、JSON provider 配置片段。
+Grok 保留现有核心字段适配器，目前不接受 JSON 扩展字段或额外请求头。DSH 官方
+Messages 插件自身不支持额外请求头，DSH 的自定义请求头适用于 OpenAI 兼容模式。
+OAuth、转换协议的代理及需要替换 URL 模板变量的预设未接入；账号登录和代理服务需要
+独立的后端能力。请求头、token 等配置在返回浏览器时脱敏；保留 `[stored privately]`
+即可继续使用已保存值，复制时不会继承这些凭据。用量脚本未接入，以免执行供应商脚本。
+
+每个 profile 使用现有私有存储，不另建数据库。切走前回填原生 provider 片段与核心
+参数；初次激活旧数据或新预设时保留未接管的调优。Claude 工具用 AWS/Google 凭据、
+hooks、MCP、权限和 helper 命令保持在原生文件中。Codex/Gemini 按 CC Switch 字段表
+剥离上一个 provider 的专属设置并保存以便切回来。
+编辑时读取当前 live 配置；保存检查记录版本与原生文件摘要。写入先暂存再于 rename
+前重读比对，检测并发修改返回 409，表单提供重新加载冲突对话框。多个原生文件不是
+跨文件事务；中途失败仅回滚仍然是本次写入内容的文件。比对与 rename 间仍有很小的
+系统级竞争窗口，与 CC Switch 的乐观检测语义一致。
+
+DSH 适配器管理 `$DSH_HOME`（默认 `~/.dsh`）内的 `.credentials.yaml` 和
+`profiles/acp/cordis.patch.yml`，支持 DeepSeek 官方 Anthropic Messages 及
+OpenAI Responses / Chat Completions。每个 profile 使用独立的 credential ref，保留其他 provider、
+patch 行与工具凭据。YAML 结构与 tags 保留，注释/排版可能改变，备份可恢复原始字节。
+ACP profile 的 HMR 被 DSH 禁用，因此启用或保存正在使用的上游会停止空闲 ACP 会话，
+下一轮创建进程重新加载；不重启正式 Supervisor。真实 DSH 进程的模型发现/切换应由
+整合分支验证，本分支不会修改 DSH bridge。
+
+相关 Rust 回归全部使用 tempfile，DSH 环境变量测试在隔离子进程设置 DSH_HOME。
+浏览器用 mock provider 接口和隔离 fake Supervisor，不改写真实原生配置。
+截图：`.local/upstreams-screenshots/{desktop,mobile}-{list,form}.png`。
+移植出处、固定 CC Switch revision 与 MIT 声明见 `THIRD_PARTY_NOTICES.md`。

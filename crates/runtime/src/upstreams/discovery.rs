@@ -127,6 +127,10 @@ fn reasoning_capabilities(row: &Value) -> Option<ReasoningCapabilities> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DiscoveryInput {
+    #[serde(default = "empty_config")]
+    pub settings_config: Value,
+    #[serde(default = "responses")]
+    pub api_type: String,
     #[serde(default)]
     pub id: String,
     pub harness: String,
@@ -146,15 +150,32 @@ pub fn discovery_profile(dir: &Path, input: DiscoveryInput) -> Result<Profile> {
         api_key: input.api_key,
         auth_type: input.auth_type,
         model: "discovery".into(),
-        api_type: responses(),
+        api_type: input.api_type,
         context_window: context_window(),
+        settings_config: input.settings_config,
+        sort_index: 0,
+        revision: None,
+        live_revision: None,
     };
-    if p.api_key.is_empty() && !p.id.is_empty() {
+    if !p.id.is_empty() {
         let saved = profile(dir, &p.id)?;
-        if saved.base_url != p.base_url || saved.harness != p.harness {
-            bail!("Enter an API key for the new upstream before loading models");
+        if saved.base_url == p.base_url && saved.harness == p.harness {
+            if p.api_key.is_empty() {
+                p.api_key = saved.api_key;
+            }
+            if p.settings_config.as_object().is_some_and(|v| v.is_empty()) {
+                p.settings_config = saved.settings_config;
+            } else {
+                provider_config::restore_redacted(&mut p.settings_config, &saved.settings_config);
+            }
+        } else {
+            if p.api_key.is_empty() {
+                bail!("Enter an API key for the new upstream before loading models");
+            }
+            provider_config::remove_redacted(&mut p.settings_config);
         }
-        p.api_key = saved.api_key;
+    } else {
+        provider_config::remove_redacted(&mut p.settings_config);
     }
     validate(&p, true)?;
     Ok(p)
@@ -342,6 +363,8 @@ mod tests {
         let p = super::super::tests::fixture("grok");
         upsert(dir.path(), p.clone()).unwrap();
         let input = |harness: &str, base_url: &str| DiscoveryInput {
+            settings_config: empty_config(),
+            api_type: responses(),
             id: p.id.clone(),
             harness: harness.into(),
             base_url: base_url.into(),

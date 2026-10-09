@@ -552,16 +552,6 @@ function DeviceRuntimeManagement({
             ))}
           </div>
           {harnesses.filter((h) => h.id === selectedHarness).map(row)}
-          {['codex', 'claude', 'gemini', 'grok'].includes(selectedHarness) ? (
-            <UpstreamManagement
-              key={apiRoot + selectedHarness}
-              apiRoot={apiRoot}
-              harness={selectedHarness}
-            />
-          ) : (
-            <p className="mt-4 rounded-xl border border-dashed border-[var(--theme-border)] p-4 text-xs text-[var(--theme-fg-muted)]">
-              {translate("devices.useThisHarnessSNativeConfigurationTo")}</p>
-          )}
         </>
       )}
       {view !== 'harnesses' && (
