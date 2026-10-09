@@ -609,6 +609,22 @@ fn normalize_item_status(status: &str) -> String {
 }
 
 pub(crate) fn find_codex_rollout(home: &Path, session_id: &str) -> Option<PathBuf> {
+    // Current Codex versions index rollout locations; avoid walking every session
+    // each time a native child is inspected. Older versions retain the fallback.
+    for sqlite in codex_state_files(home) {
+        if let Ok(conn) = open_readonly(&sqlite) {
+            if let Ok(path) = conn.query_row(
+                "SELECT rollout_path FROM threads WHERE id=?1",
+                params![session_id],
+                |row| row.get::<_, String>(0),
+            ) {
+                let path = PathBuf::from(path);
+                if path.is_file() {
+                    return Some(path);
+                }
+            }
+        }
+    }
     let sessions = home.join("sessions");
     if !sessions.is_dir() {
         return None;
@@ -1448,7 +1464,7 @@ fn open_readonly(path: &Path) -> rusqlite::Result<Connection> {
     )
 }
 
-fn codex_state_files(home: &Path) -> Vec<PathBuf> {
+pub(crate) fn codex_state_files(home: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     let dirs = match codex_sqlite_home(home) {
         Some(dir) => vec![dir],

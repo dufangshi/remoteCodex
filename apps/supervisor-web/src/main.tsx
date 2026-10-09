@@ -6,6 +6,7 @@ import 'streamdown/styles.css';
 
 import { App } from './app';
 import './index.css';
+import './native-subagents.css';
 import { initializeFontSize } from './lib/fontSize';
 
 // The host bundler resolves the worker asset before dependency optimization.

@@ -356,6 +356,32 @@ pub struct ThreadSubagentDto {
     pub is_background: Option<bool>,
 }
 
+/// Read-only native agent observability. Missing usage is unknown, never zero.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSubagentDto {
+    #[serde(flatten)]
+    pub agent: ThreadSubagentDto,
+    pub provider: String,
+    pub native_session_id: Option<String>,
+    pub model: Option<String>,
+    pub prompt: Option<String>,
+    pub updated_at: Option<String>,
+    pub latest_activity: Option<String>,
+    pub token_usage: Option<Value>,
+    pub price_estimate: Option<Value>,
+    pub activity_count: usize,
+    pub details_available: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSubagentDetailDto {
+    pub agent: NativeSubagentDto,
+    pub items: Vec<ThreadHistoryItemDto>,
+    pub has_earlier_items: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadGoalDto {
