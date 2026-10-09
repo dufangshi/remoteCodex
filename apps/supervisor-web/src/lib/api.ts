@@ -1161,7 +1161,7 @@ export function fetchAgentHarnessCatalog<T>(
  */
 export async function dshConsoleUrl(
   threadId: string,
-  target: { port: number; path: string },
+  target: { port: number; path: string; mappingId?: string },
   deviceId?: string | null,
 ) {
   if (!deviceId || deviceId === 'local') {
@@ -1174,19 +1174,23 @@ export async function dshConsoleUrl(
     return `http://${host === '[::1]' ? '127.0.0.1' : host}:${target.port}${target.path}`;
   }
   const device = `/relay/devices/${encodeURIComponent(deviceId)}`;
-  // One mapping per thread: a restarted DSH process listens on a new port.
-  const label = `DSH console ${threadId.slice(0, 8)}`;
-  type Mapping = { id: string; port: number; label: string };
-  const { mappings } = await request<{ mappings: Mapping[] }>(`${device}/api/port-mappings`);
-  await Promise.all(mappings
-    .filter((mapping) => mapping.label === label && mapping.port !== target.port)
-    .map((mapping) => request(`${device}/api/port-mappings/${mapping.id}`, { method: 'DELETE' })));
-  const mapping = mappings.find((entry) => entry.port === target.port)
-    ?? await request<Mapping>(`${device}/api/port-mappings`, {
-      method: 'POST',
-      body: JSON.stringify({ port: target.port, label }),
-    });
-  const { url } = await request<{ url: string }>(`${device}/port-mappings/${mapping.id}/open`, {
+  // The device maps its console port (and drops stopped consoles). Older
+  // devices leave it to the browser: one mapping per thread.
+  let mappingId = target.mappingId;
+  if (!mappingId) {
+    const label = `DSH console ${threadId.slice(0, 8)}`;
+    type Mapping = { id: string; port: number; label: string };
+    const { mappings } = await request<{ mappings: Mapping[] }>(`${device}/api/port-mappings`);
+    await Promise.all(mappings
+      .filter((mapping) => mapping.label === label && mapping.port !== target.port)
+      .map((mapping) => request(`${device}/api/port-mappings/${mapping.id}`, { method: 'DELETE' })));
+    mappingId = (mappings.find((entry) => entry.port === target.port)
+      ?? await request<Mapping>(`${device}/api/port-mappings`, {
+        method: 'POST',
+        body: JSON.stringify({ port: target.port, label }),
+      })).id;
+  }
+  const { url } = await request<{ url: string }>(`${device}/port-mappings/${mappingId}/open`, {
     method: 'POST',
     body: JSON.stringify({ path: target.path }),
   });

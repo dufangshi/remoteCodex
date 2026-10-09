@@ -568,7 +568,8 @@ pub(super) fn catalog_view(hello: &Value) -> Value {
 pub(super) fn session_meta(state: &Value) -> Value {
     json!({
         "presetLocked": state["presetLocked"].as_bool().unwrap_or(true),
-        "commands": state["commands"].as_array().cloned().unwrap_or_default(),
+        // Null when DSH could not list them: unknown, not "none".
+        "commands": state["commands"].as_array().map(|commands| Value::Array(commands.clone())).unwrap_or(Value::Null),
     })
 }
 
@@ -590,7 +591,7 @@ pub(super) fn harness_view(
                 "projections": projections,
                 "running": running,
                 "presetLocked": meta["presetLocked"].as_bool().unwrap_or(true),
-                "commands": meta["commands"].as_array().cloned().unwrap_or_default(),
+                "commands": meta["commands"].clone(),
             }),
         );
     }

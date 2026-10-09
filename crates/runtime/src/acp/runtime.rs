@@ -994,9 +994,34 @@ impl AcpRuntime {
                 }
             } else if wants_plan {
                 bail!("This DSH session has no plan mode (its run mode or profile leaves it out)");
+            } else {
+                bail!("DSH plan mode is on but this session has no /plan command to leave it");
             }
         }
         Ok(state)
+    }
+
+    /// The idle session's operation lock and policy, for panel actions that
+    /// must not interleave with a starting turn.
+    async fn dsh_operation(
+        &self,
+        session_id: &str,
+        process: &Arc<AcpProcess>,
+    ) -> Result<(tokio::sync::OwnedMutexGuard<()>, ProductSessionPolicy)> {
+        let sessions = self.inner.sessions.lock().await;
+        let live = sessions
+            .get(session_id)
+            .filter(|live| Arc::ptr_eq(&live.process, process))
+            .ok_or_else(|| anyhow!("ACP session changed during the harness action"))?;
+        if live.active.is_some() {
+            bail!("conflict: Wait for the turn to finish first");
+        }
+        let operation = live
+            .operation
+            .clone()
+            .try_lock_owned()
+            .map_err(|_| anyhow!("conflict: The session is busy."))?;
+        Ok((operation, Self::policy_from_live(live)))
     }
 
     /// Keep a bridge `session` reply: projection views plus panel metadata.
@@ -3002,12 +3027,48 @@ impl AgentRuntime for AcpRuntime {
                 Value::Null
             }
             PanelAction::SelectRunMode { id } => {
-                bridge
+                if turn_active {
+                    bail!("conflict: Wait for the turn to finish before changing the run mode");
+                }
+                // Hold the session so no prompt starts with half-switched tools.
+                let (_operation, policy) = self.dsh_operation(session_id, &process).await?;
+                let read = || bridge.call("session", json!({"sessionId": raw_session}));
+                let before = read().await?;
+                let selected = bridge
                     .call(
                         "selectPreset",
                         json!({"sessionId": raw_session, "preset": id}),
                     )
-                    .await?
+                    .await?;
+                // A mode without plan mode or goals would silently drop the
+                // thread's active plan restrictions or goal: switch back.
+                let after = read().await?;
+                let has = |name: &str| {
+                    after["commands"].as_array().map_or(true, |commands| {
+                        commands.iter().any(|command| command["name"] == name)
+                    })
+                };
+                let plan = super::deepseek::wants_plan(&policy)
+                    || before["projections"]["plan"]["active"].as_bool() == Some(true);
+                let missing = if plan && !has("plan") {
+                    Some("plan mode")
+                } else if goal_active && !has("goal") {
+                    Some("goals")
+                } else {
+                    None
+                };
+                if let Some(feature) = missing {
+                    if let Some(previous) = before["projections"]["agentPreset"].as_str() {
+                        bridge
+                            .call(
+                                "selectPreset",
+                                json!({"sessionId": raw_session, "preset": previous}),
+                            )
+                            .await?;
+                    }
+                    bail!("The {id} run mode has no {feature}; turn {feature} off in this thread first");
+                }
+                selected
             }
             PanelAction::Console => {
                 return Ok(json!({"console": bridge.call("console", json!({})).await?}));
@@ -3016,6 +3077,7 @@ impl AgentRuntime for AcpRuntime {
                 if turn_active {
                     bail!("conflict: Wait for the turn to finish before running a DSH command");
                 }
+                let _operation = self.dsh_operation(session_id, &process).await?;
                 bridge.command(&raw_session, &line).await?
             }
             PanelAction::Restart => {

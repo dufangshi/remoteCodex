@@ -339,6 +339,17 @@ describe('DeepSeek Harness plugin controls', () => {
     }
   });
 
+  it('keeps DSH panel actions read-only for thread controllers who do not own the device', async () => {
+    const runHarnessAction = vi.fn();
+    panel(live({ commands: [{ name: 'review', description: 'Review', hint: null }] }), runHarnessAction,
+      { harnessReadOnly: true, dshConsoleUrl: vi.fn() });
+    expect(await screen.findByRole('combobox', { name: 'Run mode' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Run /review' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Open console' })).toBeDisabled();
+    // The thread's own settings stay editable for them.
+    expect(screen.getByRole('combobox', { name: 'Workspace permissions' })).toBeEnabled();
+  });
+
   it('explains a plain ACP fallback and hides the console there', async () => {
     panel({ ...live({}), composition: 'acp', compositionError: 'web bundle failed', runModes: [], features: {} }, vi.fn(), { dshConsoleUrl: vi.fn() });
     expect(await screen.findByText(/no run modes or native console here/)).toHaveTextContent('web bundle failed');

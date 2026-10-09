@@ -5,6 +5,7 @@
 // writes stdout and never exports plugin configuration, environment or secrets.
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { createServer, request as httpRequest } from 'node:http';
+import { pipeline } from 'node:stream';
 import { connect } from 'node:net';
 import { dirname, join } from 'node:path';
 
@@ -203,7 +204,11 @@ export function apply(ctx, config) {
       socket.on('connect', () => socket.end(JSON.stringify({ token: config.token, error: String(error?.message ?? error) }) + '\n'));
     });
   });
-  ctx.on('dispose', () => { dispose(); socket?.destroy(); consoleServer?.close(); });
+  ctx.on('dispose', () => {
+    dispose();
+    socket?.destroy();
+    void consoleServer?.then(server => server.shutdown(), () => {});
+  });
 
   function receive(message) {
     if (message.answer !== undefined) {
@@ -275,12 +280,13 @@ export function apply(ctx, config) {
     const agent = liveRoot(sessionId);
     const projector = ctx.get('sessionProjections');
     const projections = projector?.snapshot(agent.session, PROJECTIONS).values ?? {};
-    const commands = await remote(ctx, 'commands', 'list', { agentId: sessionId }).catch(() => []);
+    // Unknown (null) rather than empty when DSH cannot list them right now.
+    const commands = await remote(ctx, 'commands', 'list', { agentId: sessionId }).catch(() => null);
     return {
       projections,
       running: running(agent),
       presetLocked: projector ? turnStarted(projector, agent) : true,
-      commands: commands.map(({ name, description, input }) => ({
+      commands: commands?.map(({ name, description, input }) => ({
         name, description: description ?? '', hint: input?.hint ?? null,
       })),
     };
@@ -294,8 +300,9 @@ export function apply(ctx, config) {
     if (!web?.port || typeof connection?.authenticatedUrl !== 'function') {
       throw new Error('This DSH composition has no native console');
     }
-    consoleServer ??= await startConsoleProxy(web.port);
-    const port = consoleServer.address().port;
+    // One proxy per process, even when two panels ask at once.
+    consoleServer ??= startConsoleProxy(web.port).catch(error => { consoleServer = null; throw error; });
+    const port = (await consoleServer).address().port;
     const url = new URL(connection.authenticatedUrl(`http://127.0.0.1:${port}/`));
     return { port, path: `${url.pathname}${url.search}` };
   }
@@ -327,6 +334,8 @@ function startConsoleProxy(targetPort) {
     }
     return next;
   };
+  const sockets = new Set();
+  const track = socket => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); };
   const server = createServer((req, res) => {
     const headers = forward(req.headers);
     if (!headers) return res.writeHead(403).end();
@@ -344,15 +353,18 @@ function startConsoleProxy(targetPort) {
           return res.end('<!doctype html><meta http-equiv="refresh" content="0;url=./"><title>DeepSeek Harness</title><a href="./">DeepSeek Harness</a>');
         }
         res.writeHead(reply.statusCode ?? 502, reply.headers);
-        reply.pipe(res);
+        // A failed or abandoned body ends both sides (e.g. EventSource streams).
+        pipeline(reply, res, () => {});
       },
     );
-    upstream.on('error', () => { if (!res.headersSent) res.writeHead(502); res.end(); });
-    req.pipe(upstream);
+    upstream.on('error', () => { if (!res.headersSent) res.writeHead(502).end(); else res.destroy(); });
+    res.on('close', () => upstream.destroy());
+    pipeline(req, upstream, () => {});
   });
   server.on('upgrade', (req, client, head) => {
     const headers = forward(req.headers);
     if (!headers) return client.destroy();
+    track(client);
     const upstream = connect({ host: '127.0.0.1', port: targetPort }, () => {
       const lines = Object.entries(headers).flatMap(([key, value]) =>
         (Array.isArray(value) ? value : [value]).map(item => `${key}: ${item}`));
@@ -361,9 +373,17 @@ function startConsoleProxy(targetPort) {
       upstream.pipe(client);
       client.pipe(upstream);
     });
+    track(upstream);
     upstream.on('error', () => client.destroy());
+    upstream.on('close', () => client.destroy());
     client.on('error', () => upstream.destroy());
+    client.on('close', () => upstream.destroy());
   });
+  server.shutdown = () => {
+    server.close();
+    server.closeAllConnections();
+    for (const socket of sockets) socket.destroy();
+  };
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', () => resolve(server));

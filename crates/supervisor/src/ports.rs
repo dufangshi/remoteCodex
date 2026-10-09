@@ -95,6 +95,34 @@ pub(crate) fn create_mapping(state: &Supervisor, port: u16, label: &str) -> Resu
     Ok(mapping)
 }
 
+const DSH_CONSOLE: &str = "DSH console ";
+
+/// A thread's native DSH console behind an owner-only preview. Console ports
+/// are ephemeral, so mappings of consoles that stopped listening are dropped
+/// first and they never pile up against the mapping limit.
+pub(crate) async fn dsh_console_mapping(
+    state: &Supervisor,
+    thread_id: &str,
+    port: u16,
+) -> Result<Mapping> {
+    for mapping in snapshot(state) {
+        if !mapping.label.starts_with(DSH_CONSOLE) || mapping.port == port {
+            continue;
+        }
+        let listening = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, mapping.port)),
+        )
+        .await
+        .is_ok_and(|connected| connected.is_ok());
+        if !listening {
+            remove_mapping(state, &mapping.id)?;
+        }
+    }
+    let short: String = thread_id.chars().take(8).collect();
+    create_mapping(state, port, &format!("{DSH_CONSOLE}{short}"))
+}
+
 pub(crate) async fn remove(
     State(state): State<Arc<Supervisor>>,
     Path(id): Path<String>,

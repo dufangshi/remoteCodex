@@ -239,3 +239,16 @@ test('the DeepSeek Harness plugin panel switches modes, runs plugin commands and
   await expect.poll(async () => (await harness(request, id)).session.presetLocked).toBe(true);
 });
 
+
+test('a run mode without plan mode cannot silently drop the thread plan', async ({ request }) => {
+  const id = await startThread(request, 'DSH plan and run mode');
+  expect((await request.patch(`${base}/api/threads/${id}/settings`, { data: { collaborationMode: 'plan' } })).ok()).toBeTruthy();
+  expect((await harness(request, id)).session.projections.plan.active).toBe(true);
+  const refused = await request.post(`${base}/api/threads/${id}/harness`, { data: { kind: 'selectRunMode', id: 'minimal' } });
+  expect(refused.ok()).toBeFalsy();
+  expect((await refused.json()).message).toMatch(/has no plan mode/);
+  // DSH is back on the previous mode, with plan mode still in force.
+  const after = await harness(request, id);
+  expect(after.session.projections.agentPreset).toBe('standard');
+  expect(after.session.projections.plan.active).toBe(true);
+});

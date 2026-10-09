@@ -22,11 +22,12 @@ import {
   fetchAgentBackendModels,
   fetchAgentBackendModelsFor,
   fetchAgentHarnessCatalog,
+  fetchRelayAccess,
   fetchWorkspaces,
   installOrUpdateAgentBackend,
   postThreadHarnessAction,
 } from '../../lib/api';
-import { currentRelayScopedPath } from '../../lib/relayRoutes';
+import { currentRelayDeviceIdFromPath, currentRelayScopedPath } from '../../lib/relayRoutes';
 
 function canStart(backend: AgentBackendDto) {
   return backend.enabled && backend.capabilities.sessions.resume && backend.capabilities.turns.start;
@@ -247,11 +248,16 @@ export function ThreadCreateForm({
         if (agentId !== 'deepseek') return;
         // The model probe booted DSH, so its run modes are cached by now.
         // They are optional: without them the thread uses DSH's default mode.
-        return fetchAgentHarnessCatalog<{ runModes?: DshRunMode[] }>('acp', {
+        // Applying one is a device-owner action on Relay.
+        const device = currentRelayDeviceIdFromPath();
+        const owner = device
+          ? fetchRelayAccess({ deviceId: device }).then((access) => access.kind === 'owner', () => false)
+          : Promise.resolve(true);
+        return Promise.all([owner, fetchAgentHarnessCatalog<{ runModes?: DshRunMode[] }>('acp', {
           agentId,
           cwd: selectedWorkspace.absPath,
-        }).then((catalog) => {
-          if (cancelled) return;
+        })]).then(([isOwner, catalog]) => {
+          if (cancelled || !isOwner) return;
           const modes = (catalog?.runModes ?? []).filter((mode) => !mode.broken);
           setRunModes(modes);
           setRunMode(modes.find((mode) => mode.isDefault)?.id ?? '');
@@ -344,7 +350,8 @@ export function ThreadCreateForm({
         ...(trimmed ? { title: trimmed } : {}),
       });
       const mode = runModes.find((entry) => entry.id === runMode);
-      if (provider === 'acp' && agentId === 'deepseek' && mode && !mode.isDefault) {
+      // Always explicit: the cached default can be stale once DSH's own default changes.
+      if (provider === 'acp' && agentId === 'deepseek' && mode) {
         setCreated(thread);
         await postThreadHarnessAction(thread.id, { kind: 'selectRunMode', id: mode.id });
       }

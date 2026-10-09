@@ -750,10 +750,21 @@ async fn thread_harness_action(
     State(state): State<AppState>,
     Json(action): Json<Value>,
 ) -> Result<Json<Value>, ApiErr> {
-    let result = state
+    let console = action["kind"] == "console";
+    let mut result = state
         .thread_harness_action(&id, action)
         .await
         .map_err(map_err)?;
+    // Relay browsers reach the console's loopback port through a preview.
+    let port = result["console"]["port"]
+        .as_u64()
+        .and_then(|port| u16::try_from(port).ok());
+    if let (true, true, Some(port)) = (console, state.config.relay_server_url.is_some(), port) {
+        let mapping = crate::ports::dsh_console_mapping(&state, &id, port)
+            .await
+            .map_err(map_err)?;
+        result["console"]["mappingId"] = json!(mapping.id);
+    }
     Ok(Json(result))
 }
 

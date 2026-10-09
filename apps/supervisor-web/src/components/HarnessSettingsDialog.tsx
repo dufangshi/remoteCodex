@@ -10,6 +10,7 @@ import {
   DshHarnessPanel,
   isDshHarness,
   type DshPanelAction,
+  type DshConsoleTarget,
   type DshPanelResult,
 } from './DshHarnessPanel';
 import { FormDialog } from './FormDialog';
@@ -27,8 +28,10 @@ export interface HarnessSettingsFieldsProps {
   loadCapabilities?: () => Promise<AgentCapabilitySnapshotDto>;
   /** Device-scoped typed panel action; defaults to the local supervisor. */
   runHarnessAction?: (action: DshPanelAction) => Promise<DshPanelResult>;
+  /** Harness panel actions are owner-only on Relay, even for thread controllers. */
+  harnessReadOnly?: boolean;
   /** Browser address of the native DSH console for this thread's device. */
-  dshConsoleUrl?: ((target: { port: number; path: string }) => Promise<string>) | undefined;
+  dshConsoleUrl?: ((target: DshConsoleTarget) => Promise<string>) | undefined;
 }
 
 export function HarnessSettingsDialog({
@@ -73,6 +76,7 @@ export function HarnessSettingsFields({
   loadCapabilities,
   runHarnessAction,
   dshConsoleUrl,
+  harnessReadOnly = false,
 }: HarnessSettingsFieldsProps) {
   useI18n();
   const [info, setInfo] = useState<{
@@ -185,7 +189,7 @@ export function HarnessSettingsFields({
         <p>{translate('settings.sessionSettingsCanBeChangedAfterThe')}</p>
       )}
       {isDshHarness(info) ? (
-        <DshHarnessPanel info={info} readOnly={readOnly} runAction={harnessAction}
+        <DshHarnessPanel info={info} readOnly={readOnly || harnessReadOnly} runAction={harnessAction}
           consoleUrl={dshConsoleUrl} />
       ) : (
       <p className="text-[var(--theme-fg-muted)]">

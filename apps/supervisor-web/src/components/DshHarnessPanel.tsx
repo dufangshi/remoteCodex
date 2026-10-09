@@ -90,6 +90,13 @@ export type DshPanelAction =
       value: SettingValue;
       revision: number;
     };
+/** Loopback proxy port and token path of the session's native DSH Web UI,
+ * plus the device's preview mapping when it is connected to a Relay. */
+export interface DshConsoleTarget {
+  port: number;
+  path: string;
+  mappingId?: string;
+}
 export interface DshPanelResult {
   result?: {
     application?: string;
@@ -98,8 +105,7 @@ export interface DshPanelResult {
   } | null;
   harness?: DshHarnessInfo;
   settings?: DshSettingsView[];
-  /** Loopback proxy port and token path of the session's native DSH Web UI. */
-  console?: { port: number; path: string };
+  console?: DshConsoleTarget;
 }
 
 export function isDshHarness(info: unknown): info is DshHarnessInfo {
@@ -211,7 +217,7 @@ export function DshHarnessPanel({
   readOnly: boolean;
   runAction: (action: DshPanelAction) => Promise<DshPanelResult>;
   /** Browser address for the console's loopback port; absent where it cannot open. */
-  consoleUrl?: ((target: { port: number; path: string }) => Promise<string>) | undefined;
+  consoleUrl?: ((target: DshConsoleTarget) => Promise<string>) | undefined;
 }) {
   useI18n();
   const [info, setInfo] = useState(initial);
@@ -626,7 +632,7 @@ export function DshPluginPanel({
   loadCapabilities: () => Promise<{ negotiated?: unknown }>;
   readOnly: boolean;
   runHarnessAction: (action: DshPanelAction) => Promise<DshPanelResult>;
-  dshConsoleUrl?: ((target: { port: number; path: string }) => Promise<string>) | undefined;
+  dshConsoleUrl?: ((target: DshConsoleTarget) => Promise<string>) | undefined;
 }) {
   useI18n();
   const [info, setInfo] = useState<DshHarnessInfo | null | undefined>(undefined);

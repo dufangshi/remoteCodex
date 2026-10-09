@@ -429,3 +429,51 @@ test('thread titles replace the prompt-derived DSH title once', async () => {
   } finally { await stop(server, dsh); }
 });
 
+test('the console proxy closes DSH streams with the browser and on dispose', async () => {
+  const { server, port, connection } = await supervisor();
+  let open = 0;
+  const web = createHttpServer((req, res) => {
+    open += 1;
+    req.socket.once('close', () => { open -= 1; });
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.write('data: hello\n\n');
+  });
+  web.listen(0, '127.0.0.1');
+  await once(web, 'listening');
+  const dsh = fakeDsh({
+    webServer: { port: web.address().port },
+    connection: { authenticatedUrl: base => `${base}?token=t` },
+  });
+  try {
+    apply(dsh.ctx, { port, token: 't' });
+    dsh.ready();
+    const socket = await connection;
+    const next = lines(socket);
+    await next();
+    // Two panels asking at once share one proxy.
+    socket.write(JSON.stringify({ id: 1, method: 'console', params: {} }) + '\n');
+    socket.write(JSON.stringify({ id: 2, method: 'console', params: {} }) + '\n');
+    const [a, b] = [await next(), await next()];
+    assert.equal(a.result.port, b.result.port);
+    const proxy = a.result.port;
+    const stream = () => new Promise(resolve => {
+      const req = httpRequest({ host: '127.0.0.1', port: proxy, path: '/plugins/events', headers: { host: `127.0.0.1:${proxy}` } },
+        res => res.once('data', () => resolve(req)));
+      req.end();
+    });
+    const first = await stream();
+    await stream();
+    assert.equal(open, 2);
+    first.destroy();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal(open, 1, 'a closed browser stream must close its DSH stream');
+    dsh.listeners.get('dispose')();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal(open, 0, 'dispose must close every proxied stream');
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    web.closeAllConnections();
+    await new Promise(resolve => web.close(resolve));
+  }
+});
+
