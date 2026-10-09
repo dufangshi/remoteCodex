@@ -118,8 +118,18 @@ test('keeps goal rounds inside one stoppable turn', async ({ request }) => {
 });
 
 test('panel toggles a plugin after backing up the profile', async ({ page, request }) => {
+  // Start from the shipped state even if an earlier run stopped midway.
+  const action = (data: Record<string, unknown>) => request.post(`${base}/api/threads/${threadId}/harness`, { data });
+  const shipped = (await (await action({ kind: 'refresh' })).json()).harness.plugins
+    .find((entry: { id: string }) => entry.id === 'include:repeat-tool-reminder');
+  if (!shipped.enabled) {
+    expect((await action({ kind: 'setPluginEnabled', id: 'include:repeat-tool-reminder', enabled: true })).ok()).toBeTruthy();
+    expect((await action({ kind: 'restart' })).ok()).toBeTruthy();
+    expect((await action({ kind: 'refresh' })).ok()).toBeTruthy();
+  }
   const backups = path.join(profile, '.remote-codex', 'backups');
-  const before = existsSync(backups) ? readdirSync(backups).length : 0;
+  // The profile keeps its newest 10 backups, so look for a new one, not a count.
+  const before = new Set(existsSync(backups) ? readdirSync(backups) : []);
   await page.goto(`/threads/${threadId}`);
   await page.getByRole('button', { name: 'Open slash toolbox' }).click();
   await page.getByRole('button', { name: /\/harness/ }).first().click();
@@ -132,7 +142,7 @@ test('panel toggles a plugin after backing up the profile', async ({ page, reque
   await expect(dialog.getByText('Disabled · applies after reconnect')).toBeVisible();
   // The reconnect offer appears once DSH confirms the saved change.
   await expect(dialog.getByRole('button', { name: 'Reconnect to apply' })).toBeVisible();
-  expect(readdirSync(backups).length).toBe(before + 1);
+  expect(readdirSync(backups).filter(name => !before.has(name))).toHaveLength(1);
   expect(readFileSync(path.join(profile, 'cordis.patch.yml'), 'utf8')).toContain('id: repeat-tool-reminder');
   // Reconnect restarts the DSH process; the new one loads the saved profile.
   await dialog.getByRole('button', { name: 'Reconnect to apply' }).click();

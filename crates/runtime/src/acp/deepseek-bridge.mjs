@@ -308,6 +308,11 @@ function turnStarted(projections, agent) {
   return boundary !== undefined && (boundary.openTurnStartSeq !== null || boundary.lastTurn > 0);
 }
 
+function loginRedirect(req, reply) {
+  return req.method === 'GET' && /^\/\?/.test(req.url ?? '') && reply.statusCode === 303
+    && reply.headers.location === './' && Boolean(reply.headers['set-cookie']);
+}
+
 function startConsoleProxy(targetPort) {
   const authority = `127.0.0.1:${targetPort}`;
   const forward = headers => {
@@ -327,7 +332,20 @@ function startConsoleProxy(targetPort) {
     if (!headers) return res.writeHead(403).end();
     const upstream = httpRequest(
       { host: '127.0.0.1', port: targetPort, method: req.method, path: req.url, headers },
-      reply => { res.writeHead(reply.statusCode ?? 502, reply.headers); reply.pipe(res); },
+      reply => {
+        if (loginRedirect(req, reply)) {
+          // DSH's token login sets a SameSite=Strict cookie and 303s to './'.
+          // When the console was opened from another site (a Relay app domain,
+          // another host name), the browser drops that cookie on the redirect.
+          // Continue from the page itself instead, which is same-site.
+          reply.resume();
+          const { location: _, 'content-length': __, ...kept } = reply.headers;
+          res.writeHead(200, { ...kept, 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
+          return res.end('<!doctype html><meta http-equiv="refresh" content="0;url=./"><title>DeepSeek Harness</title><a href="./">DeepSeek Harness</a>');
+        }
+        res.writeHead(reply.statusCode ?? 502, reply.headers);
+        reply.pipe(res);
+      },
     );
     upstream.on('error', () => { if (!res.headersSent) res.writeHead(502); res.end(); });
     req.pipe(upstream);

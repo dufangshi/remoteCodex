@@ -351,10 +351,16 @@ test('the native console proxy forwards loopback pages only, with DSH as the aut
     const self = `127.0.0.1:${proxy}`;
     // Same-origin page (loopback or a Relay preview, which presents loopback).
     const ok = await get(proxy, { host: self, origin: `http://${self}` }, path);
-    assert.equal(ok.status, 303);
-    assert.equal(ok.headers.location, './');
-    assert.match(String(ok.headers['set-cookie']), /dsh=1/);
+    // The token login keeps DSH's cookie but continues from the page itself,
+    // so a cross-site opener cannot make the browser drop it.
+    assert.equal(ok.status, 200);
+    assert.equal(ok.headers.location, undefined);
+    assert.match(String(ok.headers['set-cookie']), /dsh=1; Path=\/; HttpOnly; SameSite=Strict/);
+    assert.equal(ok.headers['cache-control'], 'no-store');
+    assert.match(ok.body, /http-equiv="refresh" content="0;url=\.\/"/);
     assert.deepEqual(seen.at(-1), { host: `127.0.0.1:${webPort}`, origin: `http://127.0.0.1:${webPort}`, url: path });
+    // Other redirects pass through untouched.
+    assert.equal((await get(proxy, { host: self }, '/elsewhere')).status, 303);
     // A cross-origin page keeps its Origin, so DSH's own fence refuses it.
     await get(proxy, { host: self, origin: 'http://evil.example' });
     assert.equal(seen.at(-1).origin, 'http://evil.example');

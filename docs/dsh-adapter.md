@@ -214,15 +214,23 @@ DSH 的运行模式就是 agent preset：每种模式是一套工具与 persona 
 - 只接受 `localhost` / `127.0.0.1` / `[::1]` 的 Host；DNS rebinding 或公网名一律 403。
 - 把 Host 改写成 DSH 的地址；只有同源请求才改写 Origin。跨源页面保留原 Origin，因此仍会被 DSH 自己的 Host/Origin 围栏拒绝。
 - 鉴权完全沿用 DSH：打开带一次性启动 token 的地址，DSH 换发绑定 authority 的 `SameSite=Strict` cookie，再 303 跳到 `./`。
+- 问题：从别的站点打开控制台时（relay 应用域名、另一个主机名），浏览器在这次 303 跳转上会丢掉 Strict cookie，用户看到“需要认证”。E2E 中实际复现过。
+- 处理：代理把这一个登录 303 改成 200 页面，保留 DSH 的 `Set-Cookie`，页面再用 meta refresh 跳到 `./`。这次跳转由页面自己发起，属于同站，cookie 正常带上。其他响应原样转发。
 
-**本地访问。** 控制台使用当前页面的回环主机名。原因是 `localhost` 与 `127.0.0.1` 属于不同站点，跨站跳转时浏览器不会带上 Strict cookie，用户会看到“需要认证”（E2E 中实际复现并修复）。从局域网 IP 访问 Supervisor 时控制台不可达，界面会说明原因。
+**本地访问。** 控制台使用当前页面的回环主机名。从局域网 IP 访问 Supervisor 时控制台不可达，界面会说明原因。
 
 **远程访问（relay）。** 走现有的仅 owner 端口预览：
 
 1. 为该线程的控制台端口建映射，标签为 `DSH console <线程前 8 位>`；同一线程的旧端口映射会先删除。
 2. 调用 `POST /relay/devices/{device}/port-mappings/{id}/open {path}`，在新标签页打开 `p-<id>.<base>`。
 
-relay 会把 Host/Origin 改写成 `127.0.0.1:<端口>`，正好通过代理围栏；DSH 的跳转用相对路径。设备侧的围栏有单元测试，但没有接真实 relay 做端到端验证。
+relay 会把 Host/Origin 改写成 `127.0.0.1:<端口>`，正好通过代理围栏；DSH 的跳转用相对路径。
+
+已用本地 relay 做端到端验证（`e2e/dsh-console-relay.spec.ts`）：
+
+- 起一个独立 relay，加一个连接它、运行真实 DSH 的 Supervisor。
+- 应用页在 `127.0.0.1`，预览在 `p-<id>.preview.localhost`，两者跨站。
+- 浏览器从线程页的插件面板打开控制台，经过 launch ticket 和 DSH 登录，加载出 DSH 界面；运行模式数据经预览的 WebSocket 取回。
 
 **为什么不嵌入 iframe。** relay 当前对所有页面设置 `X-Frame-Options: DENY` 和 CSP `frame-ancestors 'none'`、`frame-src 'self' blob:`，主页面无法嵌入 `p-*` 源。要嵌入，需要为预览源放开 `frame-src` 并调整 `frame-ancestors`，这是安全策略决策，留给用户确认。
 
@@ -243,7 +251,7 @@ relay 会把 Host/Origin 改写成 `127.0.0.1:<端口>`，正好通过代理围�
 ## 路线图
 
 - **P1**
-  - 接真实 relay 端到端验证控制台；决定是否放开 iframe 嵌入。
+  - 决定是否放开 iframe 嵌入（relay 安全策略）。
   - 设备级 DSH 设置页：用一个短生命周期的“管理 bridge 进程”，不依赖某个线程；重连前用 `--dump-config` 预检；恢复备份。provider/凭据并入「上游」tab。
   - 工具富展示，修正图片能力对应的默认模型，MCP 透传，子代理与后台任务面板。
 - **P2**
@@ -267,10 +275,10 @@ pnpm --filter @remote-codex/supervisor-web typecheck
 # 真实 DSH + scripted provider，无需模型密钥（dsh 需在 PATH）
 E2E_REAL_DSH=1 E2E_DSH_SCRIPTED=1 E2E_DSH_HOME=/absolute/isolated-dsh-home \
   E2E_API_PORT=18875 E2E_WEB_PORT=15179 E2E_WORKSPACE_ROOT=/absolute/isolated-workspaces \
-  pnpm exec playwright test e2e/dsh-bridge.spec.ts --project=desktop-chromium
+  pnpm exec playwright test e2e/dsh-bridge.spec.ts e2e/dsh-console-relay.spec.ts --project=desktop-chromium
 ```
 
-scripted spec 在 desktop 与 mobile Chromium 上各 7 个用例全部通过，覆盖：
+`e2e/dsh-bridge.spec.ts` 与 `e2e/dsh-console-relay.spec.ts` 在 desktop 与 mobile Chromium 上各 8 个用例全部通过，覆盖：
 
 - 只读阻止写入；
 - 流式与无重复；
@@ -279,6 +287,7 @@ scripted spec 在 desktop 与 mobile Chromium 上各 7 个用例全部通过，�
 - 面板插件开关：写前备份、重启后新进程确实生效、应用 bundle 被拒绝；
 - 新建对话选「极简」：模型实际只拿到 `bash`，首轮后锁定，plan/compact 控件关闭；
 - 插件侧栏面板：切换到 PTC，运行 DSH 插件注册的 `/e2e-echo`（夹具 `e2e/fixtures/dsh-e2e-command.mjs`），线程负责的命令不可在面板执行，原生控制台在新标签页完成 token 登录并显示 DSH 界面。
+- `e2e/dsh-console-relay.spec.ts`：经本地 relay 的仅 owner 端口预览打开控制台（应用与预览跨站）。
 
 Playwright 配置在真实 DSH 运行时设置 `DSH_TELEMETRY_DISABLED=1`。
 
@@ -292,4 +301,4 @@ Playwright 配置在真实 DSH 运行时设置 `DSH_TELEMETRY_DISABLED=1`。
 - UTF-8 跨读取被拆坏；
 - bridge 关闭后调用仍等到超时。
 
-真实模型的 `e2e/dsh.spec.ts` 需要 DeepSeek 或其他 provider 凭据，本次未运行；Windows 与真实 relay 也未运行。本分支未改 runtime 版本号；正式部署需要配套的共享 UI 提交与 relay 部署。
+真实模型的 `e2e/dsh.spec.ts` 需要 DeepSeek 或其他 provider 凭据，本次未运行；Windows 与线上 relay 也未运行。本分支未改 runtime 版本号；正式部署需要配套的共享 UI 提交与 relay 部署。
