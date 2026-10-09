@@ -1,10 +1,12 @@
 import { useMemo } from 'react';
-import { ThreadTimeline, ThreadComposer, type ThreadComposerProps } from '@remote-codex/thread-ui';
+import { ThreadTimeline, ThreadComposer, createWorkspacePathResolver, type ThreadComposerProps } from '@remote-codex/thread-ui';
 import { translate as t, useI18n } from '@remote-codex/thread-ui/i18n';
 import {
   buildThreadImageAssetUrl,
   fetchThreadHistoryItemDetail,
   fetchThreadTurnDetail,
+  fetchWorkspaceFileTree,
+  fetchLinkedFile,
 } from '../lib/api';
 import type { useWorkbenchReference } from '../pages/useWorkbenchReference';
 import { resolveThreadContextUsage } from '../pages/threadDetailModel';
@@ -41,8 +43,12 @@ export function WorkbenchReferencePane({
       onOpenLinkedThread: onOpenThread,
       ...(onOpenWorkspaceFile ? {onOpenWorkspaceFile} : {}),
       workspaceRootPath: detail?.workspace.absPath,
+      ...(detail ? { resolveWorkspacePath: createWorkspacePathResolver({
+        listTree: input => fetchWorkspaceFileTree(detail.workspace.id, { path: input.path ?? null }, controller.deviceId),
+        ...(controller.deviceId === 'local' || controller.access?.kind === 'owner' ? { statLinkedFile: (input: {threadId: string; path: string}) => fetchLinkedFile(input.threadId, input.path, controller.deviceId) } : {}),
+      }, { threadId: detail.thread.id, workspaceId: detail.workspace.id }, detail.workspace.absPath) } : {}),
     }),
-    [threadId, onOpenThread, controller.deviceId, onOpenWorkspaceFile, detail?.workspace.absPath],
+    [threadId, onOpenThread, controller.deviceId, onOpenWorkspaceFile, detail?.workspace.absPath, detail?.workspace.id, controller.access?.kind],
   );
   return (
     <>
