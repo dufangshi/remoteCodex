@@ -215,3 +215,44 @@ it('continues history discovery and child updates even when the parent is idle',
     vi.useRealTimers();
   }
 });
+
+it.each([
+  { provider: 'claude' as const, agentId: null },
+  { provider: 'acp' as const, agentId: 'claude' },
+])(
+  'discovers Claude native history through $provider without a live runtime fallback',
+  async (backend) => {
+    const claude = {
+      ...agent,
+      provider: 'claude',
+      name: 'Claude native review',
+      status: 'completed',
+    };
+    vi.mocked(request).mockImplementation(async (url) =>
+      String(url).endsWith('/subagents')
+        ? { agents: [claude] }
+        : { ...inspected, agent: claude },
+    );
+    render(
+      <ThreadSubagentsControl
+        detail={{
+          ...detail,
+          thread: { ...detail.thread, ...backend, status: 'idle' },
+        }}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Subagents (0)' }),
+    );
+    const panel = screen.getByRole('dialog', { name: 'Native subagents' });
+    fireEvent.click(
+      within(panel).getByRole('button', { name: /Claude native review/ }),
+    );
+    await waitFor(() =>
+      expect(
+        within(panel).getByText(/exec_command\s+cargo test/),
+      ).toBeVisible(),
+    );
+    expect(within(panel).getByText('Last update')).toBeVisible();
+  },
+);

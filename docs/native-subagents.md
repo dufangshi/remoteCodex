@@ -1,7 +1,7 @@
 # Native subagent inspection
 
 The native agents button now supports both Claude Agent/Task and Codex native
-subagents. Its list retains completed agents; select an agent to inspect its task,
+subagents, including both the direct Claude provider and its ACP adapter. Its list retains completed agents; select an agent to inspect its task,
 model, status, recent assistant messages, tool commands and results, token total,
 estimated USD cost, start time and latest native transcript update. Cost details
 support mouse hover and touch. The panel refreshes every three seconds while

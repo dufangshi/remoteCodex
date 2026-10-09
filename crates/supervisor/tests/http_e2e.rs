@@ -232,6 +232,59 @@ async fn native_subagent_http_reads_scoped_transcripts_and_rejects_other_parent(
 }
 
 #[tokio::test]
+async fn native_subagent_http_supports_direct_claude_without_acp_agent_id() {
+    let (dir, port, root, state) = spawn_supervisor_state(vec![Provider::Claude], |_| {}).await;
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{port}");
+    let workspace = json(
+        &client,
+        client
+            .post(format!("{base}/api/workspaces"))
+            .json(&json!({"absPath":root,"label":"Claude native"})),
+    )
+    .await;
+    let thread = json(&client, client.post(format!("{base}/api/threads/start")).json(&json!({"workspaceId":workspace["id"],"provider":"claude","model":"ios-e2e-stream","approvalMode":"yolo"}))).await;
+    let id = thread["id"].as_str().unwrap();
+    assert!(thread["agentId"].is_null());
+    let session = state.get_thread(id).unwrap().provider_session_id.unwrap();
+    let raw_session = session.rsplit("::").next().unwrap();
+    let parent = dir
+        .path()
+        .join("claude-home/projects/demo")
+        .join(format!("{raw_session}.jsonl"));
+    let child = parent.with_extension("").join("subagents/agent-a123.jsonl");
+    std::fs::create_dir_all(child.parent().unwrap()).unwrap();
+    let parent_records = [
+        json!({"type":"assistant","sessionId":raw_session,"timestamp":"2026-10-09T00:00:00Z","message":{"content":[{"type":"tool_use","id":"toolu-1","name":"Agent","input":{"description":"Native review","prompt":"Review code","run_in_background":true}}]}}),
+        json!({"type":"user","sessionId":raw_session,"timestamp":"2026-10-09T00:00:00Z","toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"a123"},"message":{"content":[{"type":"tool_result","tool_use_id":"toolu-1"}]}}),
+    ];
+    std::fs::write(
+        &parent,
+        parent_records
+            .iter()
+            .map(|v| format!("{v}\n"))
+            .collect::<String>(),
+    )
+    .unwrap();
+    let result = json!({"type":"assistant","agentId":"a123","timestamp":"2026-10-09T00:00:01Z","message":{"id":"msg-1","model":"claude-sonnet-4-5","stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":10},"content":[{"type":"text","text":"Native review complete"}]}});
+    std::fs::write(child, format!("{result}\n")).unwrap();
+    let list = json(
+        &client,
+        client.get(format!("{base}/api/threads/{id}/subagents")),
+    )
+    .await;
+    assert_eq!(list["agents"][0]["provider"], "claude");
+    assert_eq!(list["agents"][0]["status"], "completed");
+    assert_eq!(list["agents"][0]["tokenUsage"]["total"]["totalTokens"], 110);
+    let detail = json(
+        &client,
+        client.get(format!("{base}/api/threads/{id}/subagents/toolu-1")),
+    )
+    .await;
+    assert_eq!(detail["items"][0]["text"], "Native review complete");
+}
+
+#[tokio::test]
 async fn device_metrics_api_returns_warmed_cached_native_samples() {
     let (_dir, port, _) = spawn_supervisor(vec![Provider::Codex]).await;
     let response = reqwest::get(format!("http://127.0.0.1:{port}/api/device/metrics"))
