@@ -42,6 +42,16 @@ fn yaml_doc(path: &Path, default: &str) -> Result<Yaml> {
 fn models_with(rows: &[Yaml], id: &str, path: &[&str], model: Value) -> Result<Value> {
     let selected = model["id"].clone();
     let mut models = vec![model];
+    for entry in previous_models(rows, id, path)? {
+        if entry["id"] != selected {
+            models.push(entry);
+        }
+    }
+    Ok(Value::Array(models))
+}
+
+/// Model entries an earlier switch wrote for this entry.
+fn previous_models(rows: &[Yaml], id: &str, path: &[&str]) -> Result<Vec<Value>> {
     let existing = rows
         .iter()
         .rev()
@@ -51,13 +61,76 @@ fn models_with(rows: &[Yaml], id: &str, path: &[&str], model: Value) -> Result<V
                 .try_fold(row.get("config")?, |value, key| value.get(*key))
         })
         .and_then(Yaml::as_sequence);
+    let mut models = Vec::new();
     for entry in existing.into_iter().flatten() {
         let entry: Value = serde_json::to_value(entry)?;
-        if entry["id"].is_string() && entry["id"] != selected {
+        if entry["id"].is_string() {
             models.push(entry);
         }
     }
-    Ok(Value::Array(models))
+    Ok(models)
+}
+
+/// DSH's reasoning levels; Codex-only levels (`ultra`) have no DSH equivalent.
+const DSH_EFFORTS: [&str; 6] = ["minimal", "low", "medium", "high", "xhigh", "max"];
+
+/// One OpenAI-compatible model as DSH's pi-ai provider declares it. Context
+/// window, reasoning levels and inputs come from the model's real facts when
+/// known. The output cap is left to the route (see `changes`).
+fn compatible_model(
+    id: &str,
+    configured_window: Option<i64>,
+    meta: Option<&super::model_meta::ModelMeta>,
+    previous: Option<&Value>,
+) -> Value {
+    let window = configured_window
+        .or_else(|| meta.and_then(|meta| meta.context_window))
+        .or_else(|| previous.and_then(|entry| entry["contextWindow"].as_i64()));
+    let mut model = json!({"id": id, "name": id});
+    if let Some(window) = window {
+        model["contextWindow"] = json!(window);
+    }
+    let efforts: serde_json::Map<String, Value> = meta
+        .map(|meta| {
+            meta.efforts
+                .iter()
+                .filter(|effort| DSH_EFFORTS.contains(&effort.as_str()))
+                .map(|effort| (effort.clone(), json!(effort)))
+                .collect()
+        })
+        .unwrap_or_default();
+    if !efforts.is_empty() {
+        model["reasoningEfforts"] = Value::Object(efforts);
+    } else if let Some(previous) = previous
+        .map(|entry| &entry["reasoningEfforts"])
+        .filter(|v| !v.is_null())
+    {
+        model["reasoningEfforts"] = previous.clone();
+    }
+    match meta.filter(|meta| !meta.input.is_empty()) {
+        Some(meta) => model["input"] = json!(meta.input),
+        None => {
+            if let Some(input) = previous
+                .map(|entry| &entry["input"])
+                .filter(|v| v.is_array())
+            {
+                model["input"] = input.clone();
+            }
+        }
+    }
+    model
+}
+
+/// Gateways also fail mid-stream with errors DSH does not classify (for
+/// example `upstream_http2_stream_error`). Retry those with backoff before
+/// the turn fails, as DSH already does for its known transient codes.
+fn retry_policy() -> Value {
+    json!({
+        "mode": "normal",
+        "maxRetries": 6,
+        "retryableCodes": ["EMPTY_RESPONSE", "RATE_LIMIT", "SERVER", "TIMEOUT", "TRANSPORT", "PI_AI_ERROR"],
+        "backoff": {"initialDelayMs": 1000, "maxDelayMs": 20000, "jitterRatio": 0.2},
+    })
 }
 
 fn set_entry(rows: &mut Vec<Yaml>, id: &str, config: Value) -> Result<()> {
@@ -95,10 +168,6 @@ fn set_entry(rows: &mut Vec<Yaml>, id: &str, config: Value) -> Result<()> {
     }
     Ok(())
 }
-/// Output cap for compatible models: room for long code edits, within what
-/// OpenAI-style APIs accept.
-const MAX_OUTPUT_TOKENS: i64 = 32_768;
-
 pub fn changes(p: &Profile, root: &Path) -> Result<Vec<(PathBuf, String)>> {
     let paths = paths(p, root)?;
     let key_ref = credential_ref(p);
@@ -135,21 +204,45 @@ pub fn changes(p: &Profile, root: &Path) -> Result<Vec<(PathBuf, String)>> {
         )?;
         "deepseek-official"
     } else {
-        let models = models_with(
-            rows,
-            "llm-pi-ai",
-            &["providers", "remote-codex", "models"],
-            json!({"id":p.model,"name":p.model,"contextWindow":p.context_window,"maxTokens":p.context_window.min(MAX_OUTPUT_TOKENS)}),
-        )?;
+        // The form's untouched default window is not a fact about the model.
+        let configured = (p.context_window != super::context_window()).then_some(p.context_window);
+        let meta = super::model_meta::lookup(&p.model);
+        let mut models = vec![compatible_model(&p.model, configured, meta.as_ref(), None)];
+        for previous in
+            previous_models(rows, "llm-pi-ai", &["providers", "remote-codex", "models"])?
+        {
+            let Some(id) = previous["id"].as_str().filter(|id| *id != p.model) else {
+                continue;
+            };
+            let meta = super::model_meta::lookup(id);
+            models.push(compatible_model(id, None, meta.as_ref(), Some(&previous)));
+        }
+        if models[0].get("contextWindow").is_none() {
+            models[0]["contextWindow"] = json!(p.context_window);
+        }
+        let mut route = json!({
+            "displayName":p.name, "baseURL":p.base_url,"apiKeyEnv":key_ref,
+            "api":if p.api_type == "responses" {"openai-responses"} else {"openai-completions"},
+            "models":models,
+            "headers":p.settings_config.get("headers").cloned().unwrap_or(json!({})),
+            "retryPolicy": retry_policy(),
+        });
+        // DSH would send its 32k default as `max_output_tokens`. Like Codex,
+        // send none on the Responses API so the model's own limit applies.
+        if p.api_type == "responses" {
+            route["compat"] = json!({"supportsMaxOutputTokens": false});
+        }
+        // The model's own default level, used until a thread picks one.
+        if let Some(level) = meta
+            .and_then(|meta| meta.default_effort)
+            .filter(|level| DSH_EFFORTS.contains(&level.as_str()))
+        {
+            route["reasoning"] = json!(level);
+        }
         set_entry(
             rows,
             "llm-pi-ai",
-            json!({"providers":{"remote-codex":{
-                "displayName":p.name, "baseURL":p.base_url,"apiKeyEnv":key_ref,
-                "api":if p.api_type == "responses" {"openai-responses"} else {"openai-completions"},
-                "models":models,
-                "headers":p.settings_config.get("headers").cloned().unwrap_or(json!({}))
-            }}}),
+            json!({"providers":{"remote-codex": route}}),
         )?;
         "remote-codex"
     };
@@ -356,6 +449,42 @@ mod tests {
         );
     }
     #[test]
+    fn compatible_models_carry_real_facts_and_no_output_cap() {
+        let meta = super::super::model_meta::ModelMeta {
+            context_window: Some(272000),
+            efforts: vec!["low".into(), "xhigh".into(), "max".into(), "ultra".into()],
+            default_effort: Some("low".into()),
+            input: vec!["text".into(), "image".into()],
+        };
+        let model = compatible_model("gpt-6-astra", None, Some(&meta), None);
+        assert_eq!(
+            model,
+            json!({"id":"gpt-6-astra","name":"gpt-6-astra","contextWindow":272000,
+                "reasoningEfforts":{"low":"low","xhigh":"xhigh","max":"max"},
+                "input":["text","image"]})
+        );
+        // An explicit window wins; an earlier entry keeps what it had.
+        let previous = json!({"id":"old","contextWindow":128000,"maxTokens":4096,"reasoningEfforts":{"high":"high"}});
+        assert_eq!(
+            compatible_model("x", Some(64000), Some(&meta), None)["contextWindow"],
+            64000
+        );
+        let kept = compatible_model("old", None, None, Some(&previous));
+        assert_eq!(
+            kept,
+            json!({"id":"old","name":"old","contextWindow":128000,"reasoningEfforts":{"high":"high"}})
+        );
+        assert_eq!(
+            retry_policy()["retryableCodes"]
+                .as_array()
+                .unwrap()
+                .last()
+                .unwrap(),
+            "PI_AI_ERROR"
+        );
+    }
+
+    #[test]
     fn switching_the_model_keeps_earlier_models_for_existing_threads() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("isolated-dsh-home");
@@ -381,6 +510,12 @@ mod tests {
             .map(|m| m["id"].as_str().unwrap().to_string())
             .collect();
         assert_eq!(ids, ["second", "first"]);
+        let route = &pi["config"]["providers"]["remote-codex"];
+        // Responses routes send no output cap (the model's own limit applies)
+        // and retry unclassified gateway failures with backoff.
+        assert_eq!(route["compat"]["supportsMaxOutputTokens"].as_bool(), Some(false));
+        assert_eq!(route["retryPolicy"]["mode"].as_str(), Some("normal"));
+        assert!(route["models"][0].get("maxTokens").is_none());
         let acp = rows
             .iter()
             .find(|v| v["id"].as_str() == Some("acp"))

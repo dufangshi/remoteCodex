@@ -291,15 +291,21 @@ relay 会把 Host/Origin 改写成 `127.0.0.1:<端口>`，正好通过代理围�
 1. **审批卡死。** 原生组合里 DSH 的 Web 网关会接住 `approval/request` 和 `user-questions/request`，并等待 DSH 网页客户端回答；没有客户端时永远不放行，触发提权的回合因此挂起。现在 bridge 对根会话及其子代理统一作答：审批转成线程的权限请求（yolo 自动允许，否则「允许一次 / 拒绝」，无法展示时拒绝），提问归到根会话所在的回合。
 2. **模型列表。** 有启用中的上游时，模型列表改用上游目录的裸 id，而 DSH 只接受 `["provider","model"]`，建线程直接失败。现在 DSH 始终以自己的 ACP 选项为准。
 3. **切换上游模型后旧线程无法恢复，排队消息每 5 秒重试一次。** 现在 DSH 适配器写入新模型时保留此前写入过的模型。
-4. **兼容上游的输出上限被写死为 4096 tokens。** 改为 32768。
+4. **输出上限、上下文窗口和推理档位都不是真实值。**
+   - 适配器曾写死 `maxTokens: 4096`。DSH 会把它作为 `max_output_tokens` 发出；即使不写，也会发送 pi-ai 默认的 32768。
+   - 现在 Responses 上游设置 `compat.supportsMaxOutputTokens: false`，不再发送上限，由模型自身的上限决定，与 Codex 一致。实测该网关本来就忽略这个参数。Chat Completions 上游没有对应开关，仍用 DSH 默认值。
+   - 上下文窗口、推理档位（`reasoningEfforts`）、默认档位和输入模态来自 PATH 上所有 Codex CLI 的 `codex debug models`，按版本合并、新版优先。例如 `gpt-6-astra`：272000 上下文；low/medium/high/xhigh/max 五档，默认 low；支持图片。
+   - 推理档位声明后，Remote Codex 线程的推理强度选择器会出现。录制代理实测，选择的 low/xhigh/high 都作为 `reasoning.effort` 发给了上游。
+   - 表单里未改动的默认上下文 500000 不再当作模型事实。
 5. **没有每回合用量。** DSH 的 ACP 只报上下文占用。现在 bridge 监听 `session/event` 中 `assistant/message` 的用量（含子代理），按互斥计数映射后计入回合。
 6. **工具分类。** DSH 工具都是 `kind:"other"`：`todo_write` 被当成文件变更，`write` 不显示路径，`bash` 不显示为命令。现在按输入判断。
 7. **PTC 在没有 TypeScript 支持的 Node 上必然失败。** 发行版打包的 Node 可能不带 TypeScript 支持，例如本机的 22.22.1。现在 bridge 把 PTC 标记为不可用并写明原因，界面上显示为置灰。
 
 **仍存在的现象。**
 
-- 网关偶发 `upstream_http2_stream_error`，回合标记为失败，可在同一线程继续。
-- 自定义 DSH 上游的模型没有推理强度选项（未声明 reasoning）。
+- 网关偶发的 `upstream_http2_stream_error` 现在会自动重试：DSH 原本把它归为不可重试的 `PI_AI_ERROR`，现在 provider 的 `retryPolicy` 包含这个错误码，最多重试 6 次，指数退避（1 秒起，最长 20 秒）。故障注入代理实测：前两次失败后第三次成功，回合正常完成。
+- Codex 专有的 `ultra` 档位在 DSH 中没有对应级别。
+- 机器上同时存在 `/usr/local/bin/codex`（0.154）与 `~/.local/bin/codex`（0.160），而 Supervisor 的 `augment_path()` 把 `/usr/local/bin` 排在前面。
 - 压缩完成后，界面上的上下文用量要到下一次模型调用才刷新。
 - 我们注入的上下文提示会引导模型优先使用 `remote-codex` CLI 协作，与 DSH 自带的子代理工具形成竞争。
 

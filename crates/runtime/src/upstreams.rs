@@ -13,6 +13,7 @@ use toml_edit::{value, DocumentMut};
 mod cc_switch;
 mod discovery;
 mod dsh;
+mod model_meta;
 mod provider_config;
 mod write_engine;
 pub use discovery::{discover_models, discovery_profile, DiscoveryInput};
