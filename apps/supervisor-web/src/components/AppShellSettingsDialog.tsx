@@ -3,6 +3,7 @@ import { LanguageSwitcher } from '@remote-codex/thread-ui/i18n';
 import { FormDialog } from './FormDialog';
 import { useFontSize } from '../lib/fontSize';
 import { RuntimeManagement } from './RuntimeManagement';
+import { UpstreamsSettings } from './UpstreamsSettings';
 import { ModelPricingSettings } from './ModelPricingSettings';
 import { ComposerShortcutSettings } from './ComposerShortcutSettings';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -1011,6 +1012,7 @@ export function AppShellSettingsDialog({
               ) : null}
             </section>
           )}
+          {section === 'upstreams' && <UpstreamsSettings />}
           {(section === 'device' || section === 'harnesses') && (
             <RuntimeManagement view={section} />
           )}
@@ -1375,6 +1377,11 @@ export function appSettingsSections(): SettingsSection[] {
       label: translate("files.harnesses"),
       description:
         translate("files.manageAgentsAndSwitchTheirUpstreamProviders"),
+    },
+    {
+      id: 'upstreams',
+      label: translate('settings.upstreamsTab'),
+      description: translate('settings.upstreamsDescription'),
     },
     {
       id: 'device',

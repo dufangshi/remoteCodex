@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { request } from '../lib/api';
 import { FormDialog } from './FormDialog';
+import { UpstreamProviderCard } from './UpstreamProviderCard';
 import { UpstreamModelPicker } from './UpstreamModelPicker';
 
 type Profile = {
@@ -82,12 +83,18 @@ export function UpstreamManagement({
   apiRoot,
   harness,
   templatesOnly = false,
+  appearance = 'standard',
 }: {
   apiRoot: string;
   harness?: string;
   templatesOnly?: boolean;
+  appearance?: 'standard' | 'switch';
 }) {
   useI18n();
+  const [search, setSearch] = useState('');
+  const harnessOptions = Object.entries(labels).filter(
+    ([id]) => !harness || id === harness,
+  );
   const [deleting, setDeleting] = useState<Profile | null>(null);
   const [data, setData] = useState<Snapshot>({
     profiles: [],
@@ -184,6 +191,16 @@ export function UpstreamManagement({
       setBusy(false);
     }
   }
+  // Search adapted from CC Switch ProviderList.tsx (MIT, Jason Young).
+  const keyword = search.trim().toLowerCase();
+  const visibleProfiles = data.profiles.filter(
+    (p) =>
+      (!harness || p.harness === harness) &&
+      (!keyword ||
+        [p.name, p.baseUrl, p.model].some((v) =>
+          v.toLowerCase().includes(keyword),
+        )),
+  );
   const disabled = busy || job?.state === 'running';
   function download() {
     const template = {
@@ -215,6 +232,7 @@ export function UpstreamManagement({
   }
   function openImport(next: 'config' | 'template') {
     setMode(next);
+    setImportHarness(harness ?? 'codex');
     setText(next === 'template' ? JSON.stringify(sample, null, 2) : '');
     setPreview(null);
     setError('');
@@ -222,7 +240,7 @@ export function UpstreamManagement({
   }
   return (
     <section
-      className="mt-6 border-t border-[var(--theme-border)] pt-5"
+      className={appearance === 'switch' ? 'mt-5 min-w-0' : 'mt-6 border-t border-[var(--theme-border)] pt-5'}
       aria-label={templatesOnly ? translate("settings.deviceTemplates") : translate("settings.upstreamManagement")}
     >
       {!templatesOnly && (
@@ -259,10 +277,28 @@ export function UpstreamManagement({
               <p className="my-5 rounded-lg border border-dashed border-[var(--theme-border)] p-4 text-sm text-[var(--theme-fg-muted)]">
                 {translate("settings.addAnAPIProviderOrImportAn")}</p>
             )}
+          {appearance === 'switch' && <>
+            <input type="search" className={`${field} my-4`} aria-label={translate('settings.upstreamsSearch')} placeholder={translate('settings.upstreamsSearch')} value={search} onChange={(e) => setSearch(e.target.value)} />
+            <p className="mb-2 text-xs font-medium text-[var(--theme-fg-muted)]">{translate('settings.upstreamsDirect')}</p>
+            {keyword && !visibleProfiles.length && <p className="py-4 text-sm text-[var(--theme-fg-muted)]">{translate('settings.upstreamsNoMatches')}</p>}
+          </>}
           <div className="mt-3 space-y-3">
-            {data.profiles
-              .filter((p) => !harness || p.harness === harness)
-              .map((p) => (
+            {visibleProfiles.map((p) => appearance === 'switch' ? (
+                <UpstreamProviderCard key={p.id} name={p.name} baseUrl={p.baseUrl} model={p.model}
+                  active={data.active[p.harness] === p.id} disabled={disabled}
+                  onActivate={() => void perform(async () => {
+                    await api(`upstreams/${p.id}`, { action: 'activate' });
+                    await load();
+                    setNotice(translate('settings.configurationAppliedIdleSessionsWereRestartedThe', { value1: labels[p.harness] }));
+                  })}
+                  onEdit={() => setEditor({ ...p, apiKey: '' })}
+                  onDuplicate={() => setEditor({ ...p, id: '', apiKey: '' })}
+                  onTest={() => void perform(async () => {
+                    const r = await api<{ latencyMs: number }>(`upstreams/${p.id}`, { action: 'test' });
+                    setNotice(translate('settings.connectionSucceededMs', { value1: p.name, value2: r.latencyMs }));
+                  })}
+                  onDelete={() => setDeleting(p)} />
+              ) : (
                 <article
                   key={p.id}
                   className="rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-3"
@@ -513,7 +549,7 @@ export function UpstreamManagement({
               />
             </label>
             <label className="block text-sm">
-              Harness
+              {translate("settings.upstreamsHarness")}
               <select
                 className={field}
                 value={editor.harness}
@@ -521,7 +557,7 @@ export function UpstreamManagement({
                   setEditor({ ...editor, harness: e.target.value, model: '' })
                 }
               >
-                {Object.entries(labels).map(([id, label]) => (
+                {harnessOptions.map(([id, label]) => (
                   <option key={id} value={id}>
                     {label}
                   </option>
@@ -651,13 +687,13 @@ export function UpstreamManagement({
             {mode === 'config' && (
               <>
                 <label className="block text-sm">
-                  Harness
+                  {translate("settings.upstreamsHarness")}
                   <select
                     className={field}
                     value={importHarness}
                     onChange={(e) => setImportHarness(e.target.value)}
                   >
-                    {Object.entries(labels).map(([id, label]) => (
+                    {harnessOptions.map(([id, label]) => (
                       <option key={id} value={id}>
                         {label}
                       </option>

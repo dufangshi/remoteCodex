@@ -8,6 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use toml_edit::{value, DocumentMut};
+mod cc_switch;
 mod discovery;
 pub use discovery::{discover_models, discovery_profile, DiscoveryInput};
 pub(crate) use discovery::{normalize_effort, DiscoveredModel};
@@ -501,6 +502,17 @@ fn changes(p: &Profile, root: &Path) -> Result<Vec<(PathBuf, String)>> {
         "claude" => {
             let path = root.join("settings.json");
             let mut doc = json_doc(&path)?;
+            // CC Switch's provider projection removes stale routing/auth/model
+            // fields while retaining user-owned settings. Backups restore them.
+            doc.as_object_mut()
+                .unwrap()
+                .retain(|key, _| !cc_switch::claude_floor_top(key));
+            if let Some(env) = doc.get_mut("env") {
+                let env = env.as_object_mut().ok_or_else(|| {
+                    anyhow!("Existing configuration section env must be an object")
+                })?;
+                env.retain(|key, _| !cc_switch::claude_floor_env(key));
+            }
             let (auth, other) = if p.auth_type == "bearer" {
                 ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY")
             } else {
@@ -1180,6 +1192,54 @@ mod tests {
             assert_eq!(doc["permissions"]["allow"][0], "Read");
         }
     }
+    #[test]
+    fn claude_switch_clears_provider_overrides_and_restore_recovers_them() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("claude");
+        let store = temp.path().join("store");
+        let original = json!({
+            "model": "old-model", "apiKeyHelper": "old-helper",
+            "hooks": {"SessionStart": []}, "permissions": {"allow": ["Read"]},
+            "env": {
+                "ANTHROPIC_DEFAULT_SONNET_MODEL": "old-sonnet",
+                "ANTHROPIC_AUTH_TOKEN": "old-token",
+                "CLAUDE_CODE_USE_BEDROCK": "1", "AWS_PROFILE": "old-profile",
+                "CLAUDE_CODE_OAUTH_TOKEN": "old-oauth",
+                "CLAUDE_CODE_USE_NATIVE_FILE_SEARCH": "1", "USER_SETTING": "keep"
+            }
+        })
+        .to_string();
+        private_write(&root.join("settings.json"), original.as_bytes()).unwrap();
+        let p = fixture("claude");
+        upsert(&store, p.clone()).unwrap();
+        activate_at(&store, &p, &root).unwrap();
+        let doc = json_doc(&root.join("settings.json")).unwrap();
+        assert!(doc.get("model").is_none());
+        assert!(doc.get("apiKeyHelper").is_none());
+        for key in [
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "CLAUDE_CODE_USE_BEDROCK",
+            "AWS_PROFILE",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+        ] {
+            assert!(
+                doc["env"].get(key).is_none(),
+                "provider field {key} survived"
+            );
+        }
+        assert_eq!(doc["env"]["ANTHROPIC_MODEL"], p.model);
+        assert_eq!(doc["env"]["CLAUDE_CODE_USE_NATIVE_FILE_SEARCH"], "1");
+        assert_eq!(doc["env"]["USER_SETTING"], "keep");
+        assert_eq!(doc["permissions"]["allow"][0], "Read");
+        assert!(doc["hooks"].is_object());
+        remove(&store, &p.id).unwrap();
+        assert_eq!(
+            read(&root.join("settings.json")).unwrap().unwrap(),
+            original
+        );
+    }
+
     #[test]
     fn templates_reject_commands_and_insecure_destinations() {
         let mut p = fixture("codex");

@@ -59,3 +59,27 @@
 - [main 平台兼容性检查](https://github.com/dufangshi/remoteCodex/actions/runs/34055939668)成功。
 - 15:54 最终核验：npm `latest=0.12.17`；实际下载 launcher tarball，SHA-512 与 npm integrity 一致，含独立更新器和 Web；四平台 native manifest 的 SHA-256 与 GitHub 发布资产一致。[版本页](https://github.com/dufangshi/remoteCodex/releases/tag/v0.12.17)指向固定 runtime 提交。
 - 公网 healthz 为 ok，已有 5 台 Supervisor 连接；匿名安全设置请求返回 401。当前真实设备 Supervisor 未升级、未重启。Windows Device Manager 版本未变。
+
+## 独立「上游」设置分类
+
+设置 → **上游 / Upstreams** 使用设备级 `/management/harnesses` 安装清单：
+只有基础 CLI 已安装的 harness 才显示；仅安装 ACP adapter 不算安装了基础 CLI。
+列表刷新失败时提示重试，不显示猜测的默认 harness。Relay 首页需先打开具体设备。
+
+选择 Codex、Claude Code、Gemini CLI 或 Grok Build 后，可以搜索、添加、导入、
+编辑、复制、测试连接和切换上游，或展开配置备份恢复之前的配置。
+导入和编辑的 harness 选项锁定为当前选择；复制不会带出原 API key。
+已安装但尚无上游适配器的 harness 显示原生配置提示。
+
+界面参考 CC Switch 的 provider 列表、紧凑卡片和操作菜单。
+源码在 `.local/vendor/cc-switch`（git ignore），固定参考 revision
+`889b797d8aa252299221ed6569f992bda0a31a72`；MIT 许可见 `THIRD_PARTY_NOTICES.md`。
+Rust 移植了 Claude 上游专属字段判定，切换时清除旧的认证、路由、模型覆盖，
+保留用户 hooks、权限、MCP 和非上游功能开关。原备份可完整恢复这些字段。
+现有 `profiles.json`、私密原子写入和 Supervisor 的维护锁继续使用；
+没有引入 CC Switch 的 Tauri、数据库、OAuth 账户管理、代理或故障转移队列。
+
+专项验证：`e2e/upstreams-settings.spec.ts`，分别选择 `desktop-chromium` 和
+`mobile-chromium`；截图写入 `.local/upstreams-screenshots/desktop.png` 和
+`mobile.png`。浏览器使用 mock 上游接口，不对外发送真实凭据或改写原生配置。
+Rust 上游回归使用 tempfile 内的配置和存储目录。
