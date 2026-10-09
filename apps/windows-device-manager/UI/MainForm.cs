@@ -73,7 +73,7 @@ internal sealed class MainForm : Form
             AutoSize = true,
             Font = new Font("Segoe UI", 18F, FontStyle.Bold),
             Location = new Point(0, 0),
-            Text = "Remote Codex device",
+            Text = "Pockymoe device",
         });
         header.Controls.Add(new Label
         {
@@ -299,11 +299,11 @@ internal sealed class MainForm : Form
             Dock = DockStyle.Fill,
             ForeColor = MutedColor,
             Margin = Padding.Empty,
-            Text = "Node.js, Codex, codex-acp and Remote Codex will be checked on connect.",
+            Text = "Node.js, Codex, codex-acp and Pockymoe will be checked on connect.",
         };
         runtimeLayout.Controls.Add(_runtimeValue, 1, 0);
         _checkUpdateButton = CreateNeutralButton("Check", 88);
-        _checkUpdateButton.AccessibleName = "Check for Remote Codex updates";
+        _checkUpdateButton.AccessibleName = "Check for Pockymoe updates";
         _checkUpdateButton.Dock = DockStyle.Fill;
         _checkUpdateButton.Margin = new Padding(8, 0, 0, 2);
         _checkUpdateButton.Click += CheckUpdateClicked;
@@ -320,7 +320,7 @@ internal sealed class MainForm : Form
             Dock = DockStyle.Fill,
             ForeColor = MutedColor,
             Margin = Padding.Empty,
-            Text = "Check npm for a newer Remote Codex release.",
+            Text = "Check npm for a newer Pockymoe release.",
         };
         runtimeLayout.Controls.Add(_runtimeUpdateLabel, 1, 1);
         runtimeLayout.SetColumnSpan(_runtimeUpdateLabel, 3);
@@ -573,7 +573,7 @@ internal sealed class MainForm : Form
     {
         using var dialog = new FolderBrowserDialog
         {
-            Description = "Select the root folder Remote Codex can access",
+            Description = "Select the root folder Pockymoe can access",
             SelectedPath = Directory.Exists(_workspaceTextBox.Text)
                 ? _workspaceTextBox.Text
                 : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -633,8 +633,8 @@ internal sealed class MainForm : Form
             ? "A token is configured. Leave this blank to keep it."
             : "Paste the one-time-visible token from the Relay portal.";
         _runtimeValue.Text = _controller.Runtime?.IsUsable == true
-            ? $"Node.js 22  |  Codex  |  codex-acp  |  Remote Codex {_controller.CurrentRemoteCodexVersion}"
-            : "Node.js, Codex, codex-acp and Remote Codex will be checked on connect.";
+            ? $"Node.js 22  |  Codex  |  codex-acp  |  Pockymoe {_controller.CurrentRemoteCodexVersion}"
+            : "Node.js, Codex, codex-acp and Pockymoe will be checked on connect.";
         _runtimeUpdateLabel.Text = _controller.RuntimeUpdateMessage;
     }
 

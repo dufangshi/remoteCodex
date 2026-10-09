@@ -2,7 +2,7 @@ namespace RemoteCodex.DeviceManager;
 
 internal static class ProductManifest
 {
-    public const string ProductName = "Remote Codex Device";
+    public const string ProductName = "Pockymoe Device";
     public const string DefaultRelayUrl = "wss://remote-codex.lnz-study.com";
     public const int DefaultSupervisorPort = 45680;
 

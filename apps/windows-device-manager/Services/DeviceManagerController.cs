@@ -38,7 +38,7 @@ internal sealed class DeviceManagerController
     public bool IsBusy { get; private set; }
     public bool HasSavedToken => RelayConfiguration.HasToken;
     public string? AvailableRemoteCodexVersion { get; private set; }
-    public string RuntimeUpdateMessage { get; private set; } = "Check npm for a newer Remote Codex release.";
+    public string RuntimeUpdateMessage { get; private set; } = "Check npm for a newer Pockymoe release.";
     public string CurrentRemoteCodexVersion => Runtime?.RemoteCodexVersion
         ?? ProductManifest.RemoteCodexVersion;
 
@@ -190,19 +190,19 @@ internal sealed class DeviceManagerController
             if (RuntimeProvisioner.IsNewerVersion(latestVersion, CurrentRemoteCodexVersion))
             {
                 AvailableRemoteCodexVersion = latestVersion;
-                RuntimeUpdateMessage = $"Remote Codex {latestVersion} is available.";
+                RuntimeUpdateMessage = $"Pockymoe {latestVersion} is available.";
             }
             else
             {
-                RuntimeUpdateMessage = $"Remote Codex {CurrentRemoteCodexVersion} is up to date.";
+                RuntimeUpdateMessage = $"Pockymoe {CurrentRemoteCodexVersion} is up to date.";
             }
-            _logger.Info("Remote Codex update check completed.");
+            _logger.Info("Pockymoe update check completed.");
             OnChanged();
         }
         catch (Exception exception)
         {
             RuntimeUpdateMessage = $"Update check failed: {AppLogger.Redact(exception.Message)}";
-            _logger.Error("Remote Codex update check failed", exception);
+            _logger.Error("Pockymoe update check failed", exception);
             OnChanged();
             throw;
         }
@@ -217,7 +217,7 @@ internal sealed class DeviceManagerController
     {
         if (Runtime?.IsUsable != true || string.IsNullOrWhiteSpace(AvailableRemoteCodexVersion))
         {
-            throw new InvalidOperationException("Check for an available Remote Codex update first.");
+            throw new InvalidOperationException("Check for an available Pockymoe update first.");
         }
 
         await _operationLock.WaitAsync(cancellationToken);
@@ -231,7 +231,7 @@ internal sealed class DeviceManagerController
             if (wasRunning)
             {
                 State = SupervisorState.Starting;
-                Report(new("Remote Codex", "Stopping the Supervisor before updating...", ProvisioningStepState.Running, 10));
+                Report(new("Pockymoe", "Stopping the Supervisor before updating...", ProvisioningStepState.Running, 10));
                 await _supervisor.StopAsync(originalRuntime, cancellationToken);
             }
 
@@ -244,7 +244,7 @@ internal sealed class DeviceManagerController
 
             if (wasRunning)
             {
-                Report(new("Remote Codex", "Restarting the Supervisor with the updated runtime...", ProvisioningStepState.Running, 90));
+                Report(new("Pockymoe", "Restarting the Supervisor with the updated runtime...", ProvisioningStepState.Running, 90));
                 await _supervisor.StartAsync(Runtime, ConfigurationFromSettings(), cancellationToken);
                 State = SupervisorState.Running;
             }
@@ -254,9 +254,9 @@ internal sealed class DeviceManagerController
             }
 
             AvailableRemoteCodexVersion = null;
-            RuntimeUpdateMessage = $"Remote Codex {Runtime.RemoteCodexVersion} is installed.";
+            RuntimeUpdateMessage = $"Pockymoe {Runtime.RemoteCodexVersion} is installed.";
             Report(new("Ready", RuntimeUpdateMessage, ProvisioningStepState.Complete, 100));
-            _logger.Info("Remote Codex update completed successfully.");
+            _logger.Info("Pockymoe update completed successfully.");
         }
         catch (Exception exception)
         {
@@ -276,7 +276,7 @@ internal sealed class DeviceManagerController
                     _logger.Error("Unable to restore the previous Supervisor after an update failure", restartException);
                 }
             }
-            _logger.Error("Remote Codex update failed", exception);
+            _logger.Error("Pockymoe update failed", exception);
             OnChanged();
             throw;
         }

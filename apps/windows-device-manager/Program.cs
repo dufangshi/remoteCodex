@@ -57,7 +57,7 @@ internal static class Program
             catch (Exception exception)
             {
                 MessageBox.Show(
-                    $"Remote Codex Device could not install itself.\n\n{exception.Message}",
+                    $"Pockymoe Device could not install itself.\n\n{exception.Message}",
                     ProductManifest.ProductName,
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);

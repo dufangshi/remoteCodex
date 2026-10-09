@@ -47,7 +47,7 @@ internal sealed class RelaySupervisorService(ProcessRunner runner, AppLogger log
         CancellationToken cancellationToken)
     {
         var managedNpmPrefix = runtime.ManagedNpmPrefix
-            ?? throw new InvalidOperationException("The managed Remote Codex npm prefix is unavailable.");
+            ?? throw new InvalidOperationException("The managed Pockymoe npm prefix is unavailable.");
         var nodeDirectory = Path.GetDirectoryName(runtime.NodePath)
             ?? throw new InvalidOperationException("The managed Node.js directory is unavailable.");
         var currentPath = Environment.GetEnvironmentVariable("PATH");

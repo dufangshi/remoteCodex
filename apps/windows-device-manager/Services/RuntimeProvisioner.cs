@@ -64,7 +64,7 @@ internal sealed class RuntimeProvisioner
             || versionElement.GetString() is not { Length: > 0 } version
             || !TryParseVersion(version, out _))
         {
-            throw new InvalidOperationException("The npm registry returned an invalid Remote Codex version.");
+            throw new InvalidOperationException("The npm registry returned an invalid Pockymoe version.");
         }
         return version;
     }
@@ -119,7 +119,7 @@ internal sealed class RuntimeProvisioner
     {
         if (!TryParseVersion(version, out _))
         {
-            throw new ArgumentException("The requested Remote Codex version is invalid.", nameof(version));
+            throw new ArgumentException("The requested Pockymoe version is invalid.", nameof(version));
         }
 
         var remoteCodex = await EnsureRemoteCodexVersionAsync(
@@ -303,7 +303,7 @@ internal sealed class RuntimeProvisioner
         IProgress<ProvisioningProgress> progress,
         CancellationToken cancellationToken)
     {
-        progress.Report(new("Remote Codex", "Checking the managed Remote Codex runtime...", ProvisioningStepState.Running, 56));
+        progress.Report(new("Pockymoe", "Checking the managed Pockymoe runtime...", ProvisioningStepState.Running, 56));
         var savedState = RuntimeState.Load(_logger);
         if (savedState?.IsUsable == true
             && !string.IsNullOrWhiteSpace(savedState.RemoteCodexVersion)
@@ -315,8 +315,8 @@ internal sealed class RuntimeProvisioner
                 cancellationToken))
         {
             progress.Report(new(
-                "Remote Codex",
-                $"Remote Codex {savedState.RemoteCodexVersion} is ready.",
+                "Pockymoe",
+                $"Pockymoe {savedState.RemoteCodexVersion} is ready.",
                 ProvisioningStepState.Complete,
                 76));
             return new RemoteCodexRuntime(
@@ -350,11 +350,11 @@ internal sealed class RuntimeProvisioner
             && (!bundled || await BundledNativeMatchesAsync(nativeBinaryPath!, cancellationToken))
             && await IsExpectedRemoteCodexAsync(nodePath, entryPath, version, cancellationToken))
         {
-            progress.Report(new("Remote Codex", $"Remote Codex {version} is ready.", ProvisioningStepState.Complete, 76));
+            progress.Report(new("Pockymoe", $"Pockymoe {version} is ready.", ProvisioningStepState.Complete, 76));
             return new RemoteCodexRuntime(entryPath, version, codexCommandPath, nativeBinaryPath);
         }
 
-        progress.Report(new("Remote Codex", $"Installing Remote Codex {version} privately...", ProvisioningStepState.Running, 62));
+        progress.Report(new("Pockymoe", $"Installing Pockymoe {version} privately...", ProvisioningStepState.Running, 62));
         var npmCliPath = NpmCliPathFor(nodePath);
         if (!File.Exists(npmCliPath))
         {
@@ -410,7 +410,7 @@ internal sealed class RuntimeProvisioner
             if (!install.Success || !nativeReady || !runtimeReady)
             {
                 throw new InvalidOperationException(
-                    $"Remote Codex installation failed (npm={install.Success}, native={nativeReady}, runtime={runtimeReady}). {install.CombinedOutput}".Trim());
+                    $"Pockymoe installation failed (npm={install.Success}, native={nativeReady}, runtime={runtimeReady}). {install.CombinedOutput}".Trim());
             }
 
             if (Directory.Exists(prefix))
@@ -429,10 +429,10 @@ internal sealed class RuntimeProvisioner
 
         if (!await IsExpectedRemoteCodexAsync(nodePath, entryPath, version, cancellationToken))
         {
-            throw new InvalidOperationException("Remote Codex failed verification after installation.");
+            throw new InvalidOperationException("Pockymoe failed verification after installation.");
         }
 
-        progress.Report(new("Remote Codex", $"Remote Codex {version} installed.", ProvisioningStepState.Complete, 76));
+        progress.Report(new("Pockymoe", $"Pockymoe {version} installed.", ProvisioningStepState.Complete, 76));
         return new RemoteCodexRuntime(entryPath, version, codexCommandPath, nativeBinaryPath);
     }
 
