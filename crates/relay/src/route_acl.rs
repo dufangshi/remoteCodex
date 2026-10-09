@@ -579,6 +579,19 @@ mod tests {
     }
 
     #[test]
+    fn harness_panel_actions_stay_owner_only() {
+        // They edit the device's harness profile, not just one shared thread.
+        for control in [false, true] {
+            assert!(!shared_thread_path_allowed(
+                "POST",
+                "/api/threads/t/harness",
+                "t",
+                control
+            ));
+        }
+    }
+
+    #[test]
     fn supervisor_restart_requires_device_owner_even_for_control_grants() {
         let mut access = owner_access();
         let route = "/api/management/supervisor/restart";
