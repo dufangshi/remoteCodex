@@ -104,6 +104,10 @@ Rust 重写后，插件系统原本只剩“设备级开关终端按钮”的作
   - interrupt 先 `session/cancel`；有激活 goal 时再尽力执行 `/goal pause`。DSH 可能已自行暂停，那时失败也不影响停止结果。
   - 模式命令在全局会话锁之外执行，超时 20 秒。
 - **goal / compact：** 产品的 goal 流程把 `/goal …` 作为一个回合执行；`set_goal` 映射为 edit/pause/clear；compact 走 `/compact`，不再发 prompt。
+- **标题：** DSH 原本用第一条 prompt 给会话起名，而这条 prompt 带有 Remote Codex 的上下文前缀，所以控制台的会话列表里全是 `[remoteCodex: …`。
+  - 现在每个回合开始前，如果线程标题有变化，bridge 调 `sessionTitle.rename` 把线程标题写给 DSH。
+  - 这相当于用户手动命名：标题被固定，DSH 不再自动生成。
+  - 同步尽力而为，超时 2 秒，失败不影响回合。
 
 **面板动作：** `POST /api/threads/{id}/harness` 只接受类型化动作，不存在原样转发任意 RPC 的入口：
 
@@ -155,6 +159,7 @@ relay ACL 默认拒绝共享用户访问该路径（有回归测试）。`GET /a
 | DSH 插件自带界面、模式编辑器、DSH 设置页等全部 Web 功能 | ✓ 原生控制台（新标签页） | 同进程 Web 主机 + 回环代理 |
 | 凭据、provider 配置 | 原生控制台里可用；Remote Codex 的「上游」tab 在另一分支 | 计划只写入、不读取 |
 | 插件安装/卸载 | 原生控制台里可用；Remote Codex 面板未做 | pnpm 长任务 |
+| 会话标题 | ✓ 线程标题同步到 DSH | `sessionTitle.rename` |
 | 工具富展示（diff、位置） | 未做 | bridge 转发 presentation |
 | MCP 透传、子代理/后台任务面板 | 未做 | 目前 `mcpServers: []` |
 | load/fork/回放 | DSH ACP 不支持 | — |
@@ -238,7 +243,6 @@ relay 会把 Host/Origin 改写成 `127.0.0.1:<端口>`，正好通过代理围�
 ## 路线图
 
 - **P1**
-  - 线程标题同步到 DSH 会话（bridge 调 `sessionTitle.rename`）。目前控制台的会话列表里，标题带 Remote Codex 的上下文前缀。
   - 接真实 relay 端到端验证控制台；决定是否放开 iframe 嵌入。
   - 设备级 DSH 设置页：用一个短生命周期的“管理 bridge 进程”，不依赖某个线程；重连前用 `--dump-config` 预检；恢复备份。provider/凭据并入「上游」tab。
   - 工具富展示，修正图片能力对应的默认模型，MCP 透传，子代理与后台任务面板。
@@ -254,7 +258,8 @@ relay 会把 Host/Origin 改写成 `127.0.0.1:<端口>`，正好通过代理围�
 cargo test -p remote-codex-runtime --lib                 # 123 通过（含组合发现、按会话控件、流式对账、权限 fail closed）
 cargo test -p remote-codex-relay --lib route_acl          # 10 通过：harness 动作仅限 owner，运行模式目录可共享
 cargo test -p remote-codex-supervisor --lib               # 62 通过
-node --test scripts/dsh-bridge.test.mjs                  # 9 通过：白名单、问答、流式、备份、运行模式绑定与锁定、控制台代理围栏
+cargo test -p remote-codex-runtime --test acp_turn --test thread_interaction   # 7 + 13 通过
+node --test scripts/dsh-bridge.test.mjs                  # 10 通过：白名单、问答、流式、备份、运行模式绑定与锁定、控制台代理围栏、标题同步
 pnpm --filter @remote-codex/supervisor-web exec vitest run src/components/HarnessSettingsDialog.test.tsx   # 13 通过
 pnpm --filter @remote-codex/thread-ui exec vitest run src/plugins src/components/workbench/WorkbenchPanels.test.tsx src/i18n   # 17 通过
 pnpm --filter @remote-codex/supervisor-web typecheck

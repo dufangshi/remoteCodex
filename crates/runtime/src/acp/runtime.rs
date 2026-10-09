@@ -81,6 +81,8 @@ struct LiveSession {
     dsh_projections: serde_json::Map<String, Value>,
     /// Commands and the run-mode lock from the last bridge session read.
     dsh_session: Value,
+    /// Thread title last given to the DSH session.
+    dsh_title: Option<String>,
     dsh_running: bool,
     /// `DSH_PERMISSION_MODE` the process booted with.
     dsh_env_preset: Option<String>,
@@ -472,6 +474,7 @@ impl AcpRuntime {
             harness_info,
             dsh_projections: Default::default(),
             dsh_session: Value::Null,
+            dsh_title: None,
             dsh_running: false,
             dsh_env_preset,
             session_id,
@@ -1876,6 +1879,7 @@ impl AgentRuntime for AcpRuntime {
             needs_context,
             dsh,
             mut dsh_goal_active,
+            dsh_title,
         ) = {
             let sessions = self.inner.sessions.lock().await;
             let live = sessions
@@ -1894,8 +1898,38 @@ impl AgentRuntime for AcpRuntime {
                     .get("goal")
                     .and_then(super::deepseek::goal_state)
                     .is_some_and(|goal| goal.status == "active"),
+                live.dsh_title.clone(),
             )
         };
+        // DSH titles a session from its first prompt, which carries the Remote
+        // Codex context; give it the thread's title instead. Best effort.
+        let title = input
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|title| !title.is_empty());
+        if let (Some(bridge), Some(title)) = (&dsh, title) {
+            if dsh_title.as_deref() != Some(title) {
+                let renamed = tokio::time::timeout(
+                    Duration::from_secs(2),
+                    bridge.call("rename", json!({"sessionId": session_id, "title": title})),
+                )
+                .await;
+                if matches!(renamed, Ok(Ok(_))) {
+                    if let Some(live) = self
+                        .inner
+                        .sessions
+                        .lock()
+                        .await
+                        .get_mut(&input.provider_session_id)
+                    {
+                        live.dsh_title = Some(title.to_string());
+                    }
+                } else {
+                    tracing::debug!(session_id, "DSH session title was not updated");
+                }
+            }
+        }
         // The goal wire prompt is a DSH command: it starts autonomous rounds
         // that this turn follows until DSH is idle. ACP does not parse commands.
         let dsh_goal_command = dsh
@@ -2499,6 +2533,7 @@ impl AgentRuntime for AcpRuntime {
                     turn_id: format!("compact-{}", Uuid::new_v4()),
                     hidden: true,
                     images: Vec::new(),
+                    title: None,
                 },
                 bus,
                 cancel,
@@ -2649,6 +2684,7 @@ impl AgentRuntime for AcpRuntime {
                 harness_info: None,
                 dsh_projections: Default::default(),
                 dsh_session: Value::Null,
+                dsh_title: None,
                 dsh_running: false,
                 dsh_env_preset: None,
                 session_id: new_id,

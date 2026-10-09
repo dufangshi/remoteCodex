@@ -2424,6 +2424,7 @@ impl Supervisor {
                     turn_id: turn_id.clone(),
                     hidden: false,
                     images,
+                    title: Some(title.clone().unwrap_or_else(|| thread.title.clone())),
                 },
                 bus.clone(),
                 cancel.clone(),

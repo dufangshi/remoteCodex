@@ -250,6 +250,15 @@ export function apply(ctx, config) {
         return { agentPreset: await registry.select(liveRoot(params.sessionId), String(params.preset)) };
       }
       case 'console': return openConsole();
+      case 'rename': {
+        // An explicit title pins it: DSH stops generating one from the prompt.
+        const titles = ctx.get('sessionTitle');
+        if (typeof titles?.rename !== 'function') throw new Error('This DSH composition has no session titles');
+        const { session } = liveRoot(params.sessionId);
+        const title = String(params.title ?? '').trim();
+        if (titles.get?.(session)?.title === title) return { title };
+        return { title: titles.rename(session, title).title };
+      }
       case 'settings': return settings(ctx);
       case 'updateSetting': return updateSetting(ctx, params);
       default: throw new Error(`Unknown bridge method ${method}`);

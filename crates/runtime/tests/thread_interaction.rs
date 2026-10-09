@@ -313,6 +313,7 @@ async fn cli_identity_is_rebound_when_a_loaded_session_changes_thread_context() 
         performance_mode: None,
         hidden: false,
         images: vec![],
+        title: None,
     };
     for text in ["first", "second"] {
         s.with_cli_context(

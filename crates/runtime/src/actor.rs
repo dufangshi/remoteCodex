@@ -132,6 +132,8 @@ pub struct StartTurnInput {
     pub turn_id: String,
     pub hidden: bool,
     pub images: Vec<PromptImage>,
+    /// The thread's title, for harnesses that list their own sessions (DSH).
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]

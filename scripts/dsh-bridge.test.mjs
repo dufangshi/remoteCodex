@@ -391,3 +391,35 @@ test('compositions without a Web host report no console or run modes', async () 
     assert.match((await next()).error.message, /no run modes/);
   } finally { await stop(server, dsh); }
 });
+
+test('thread titles replace the prompt-derived DSH title once', async () => {
+  const { server, port, connection } = await supervisor();
+  const titles = new Map();
+  const renamed = [];
+  const dsh = fakeDsh({
+    sessionTitle: {
+      get: session => titles.get(session.id),
+      rename: (session, title) => {
+        renamed.push(title);
+        titles.set(session.id, { title });
+        return { title };
+      },
+    },
+  });
+  try {
+    apply(dsh.ctx, { port, token: 't' });
+    dsh.ready();
+    const socket = await connection;
+    const next = lines(socket);
+    await next();
+    const send = message => socket.write(JSON.stringify(message) + '\n');
+    send({ id: 1, method: 'rename', params: { sessionId: 'session-1', title: ' Fix the parser ' } });
+    assert.deepEqual((await next()).result, { title: 'Fix the parser' });
+    send({ id: 2, method: 'rename', params: { sessionId: 'session-1', title: 'Fix the parser' } });
+    await next();
+    assert.deepEqual(renamed, ['Fix the parser']);
+    send({ id: 3, method: 'rename', params: { sessionId: 'gone', title: 'x' } });
+    assert.match((await next()).error.message, /not live/);
+  } finally { await stop(server, dsh); }
+});
+
