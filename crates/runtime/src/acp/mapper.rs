@@ -198,14 +198,15 @@ impl TurnMapper {
         if pending.is_some() {
             return pending;
         }
-        // ACP outran the bridge's end frame: freeze the live attempt now.
+        // ACP outran the bridge: freeze the live attempt even if this kind has
+        // no segment yet, so late frames cannot add a second copy.
         let stream = self.stream.as_mut()?;
-        let index = if thought {
-            stream.thought
-        } else {
-            stream.agent
-        }?;
         stream.reconciled = true;
+        let index = if thought {
+            stream.thought.take()
+        } else {
+            stream.agent.take()
+        }?;
         let segments = if thought {
             &self.thought_segments
         } else {
@@ -503,10 +504,13 @@ impl TurnMapper {
         } else {
             "completed"
         };
-        for segment in &mut self.agent_segments {
-            segment.status = Some(status.into());
-        }
-        for segment in &mut self.thought_segments {
+        // A discarded live attempt stays failed beside its retry.
+        for segment in self
+            .agent_segments
+            .iter_mut()
+            .chain(self.thought_segments.iter_mut())
+            .filter(|segment| segment.status.as_deref() != Some("failed"))
+        {
             segment.status = Some(status.into());
         }
         if self.agent_segments.is_empty()
@@ -1066,7 +1070,25 @@ mod stream_tests {
             .is_empty());
         let items = mapper.finish(false);
         assert_eq!(items.len(), 2);
+        assert_eq!(items[0].status.as_deref(), Some("failed"));
         assert_eq!(items[1].text, "ok");
+        assert_eq!(items[1].status.as_deref(), Some("completed"));
+    }
+
+    #[test]
+    fn committed_text_before_its_first_live_frame_is_not_duplicated() {
+        let mut mapper = TurnMapper::new("turn");
+        mapper.stream_start("a1");
+        // The whole short reply arrives in the final flush, after ACP's chunk.
+        assert_eq!(
+            mapper.apply(&chunk("agent_message_chunk", "Hi")).deltas[0].1,
+            "Hi"
+        );
+        assert!(mapper.stream_text("a1", "text", "Hi").deltas.is_empty());
+        assert!(mapper.stream_end("a1", true).items.is_empty());
+        let items = mapper.finish(false);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].text, "Hi");
     }
 
     #[test]

@@ -14,7 +14,12 @@ function fakeDsh(overrides = {}) {
   const agent = { id: 'session-1', session: { id: 'session-1' } };
   const calls = [];
   const services = {
-    agents: { roots: () => [agent], get: id => (id === agent.id ? agent : undefined) },
+    agents: {
+      roots: () => [agent],
+      list: () => [agent],
+      isOwnedBy: () => false,
+      get: id => (id === agent.id ? agent : undefined),
+    },
     sessionProjections: {
       onChanged: () => () => {},
       snapshot: () => ({ values: { plan: { active: false, pending: false }, permissions: { currentValue: 'workspace-write' } } }),
@@ -124,8 +129,12 @@ test('remote calls and commands are allowlisted; settings accept scalars only', 
     assert.equal((await next()).result.result.text, '/plan off');
     send({ id: 4, method: 'updateSetting', params: { ns: 'llm-pi-ai', key: 'providers', value: 'x' } });
     assert.match((await next()).error.message, /not editable/);
-    send({ id: 5, method: 'updateSetting', params: { ns: 'agent-loop', key: 'maxParallelToolCalls', value: '!!js 1' } });
+    send({ id: 5, method: 'updateSetting', params: { ns: 'permission', key: 'defaultPreset', value: '!!js 1', revision: 1 } });
     assert.match((await next()).error.message, /YAML tags/);
+    send({ id: 7, method: 'updateSetting', params: { ns: 'agent-loop', key: 'maxParallelToolCalls', value: '4', revision: 1 } });
+    assert.match((await next()).error.message, /expects a number/);
+    send({ id: 8, method: 'updateSetting', params: { ns: 'agent-loop', key: 'maxParallelToolCalls', value: 4 } });
+    assert.match((await next()).error.message, /revision is required/);
     send({ id: 6, method: 'session', params: { sessionId: 'session-1' } });
     const session = (await next()).result;
     assert.deepEqual(session.commands.map(command => command.name), ['plan']);
@@ -184,5 +193,51 @@ test('profile edits are backed up first and application bundles stay locked', as
     await next();
     const [backup] = readdirSync(join(dir, '.remote-codex', 'backups'));
     assert.equal(readFileSync(join(dir, '.remote-codex', 'backups', backup, 'cordis.patch.yml'), 'utf8'), '[ { id: web, disabled: true } ]\n');
+  } finally { await stop(server, dsh); }
+});
+
+test('background subagents keep their root session busy', async () => {
+  const { server, port, connection } = await supervisor();
+  const dsh = fakeDsh();
+  const child = { id: 'child-1', status: 'idle' };
+  dsh.agent.status = 'idle';
+  dsh.ctx.agents.list = () => [dsh.agent, child];
+  dsh.ctx.agents.isOwnedBy = (id, owner) => id === 'child-1' && owner === dsh.agent;
+  try {
+    apply(dsh.ctx, { port, token: 't' });
+    dsh.ready();
+    const next = lines(await connection);
+    await next();
+    const status = dsh.listeners.get('agent/status');
+    status({ agent: dsh.agent, status: 'running' });
+    assert.deepEqual(await next(), { event: 'status', sessionId: 'session-1', status: 'running' });
+    // The root goes idle while its background child still runs: still busy.
+    child.status = 'running';
+    status({ agent: dsh.agent, status: 'idle' });
+    status({ agent: child, status: 'idle' });
+    assert.deepEqual(await next(), { event: 'status', sessionId: 'session-1', status: 'idle' });
+  } finally { await stop(server, dsh); }
+});
+
+test('replies keep multibyte text split across reads', async () => {
+  const { server, port, connection } = await supervisor();
+  const dsh = fakeDsh();
+  try {
+    apply(dsh.ctx, { port, token: 't' });
+    dsh.ready();
+    const socket = await connection;
+    const next = lines(socket);
+    await next();
+    const asked = dsh.listeners.get('user-questions/request')(
+      { agent: dsh.agent, questions: [{ id: 'q', question: '继续?' }] },
+      () => Promise.reject(new Error('fell through')),
+    );
+    const question = await next();
+    const reply = Buffer.from(JSON.stringify({ answer: question.questionId, result: { answers: [{ id: 'q', selected: [], custom: '先写测试' }] } }) + '\n');
+    const cut = reply.indexOf(Buffer.from('写')) + 1;
+    socket.write(reply.subarray(0, cut));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    socket.write(reply.subarray(cut));
+    assert.equal((await asked).answers[0].custom, '先写测试');
   } finally { await stop(server, dsh); }
 });

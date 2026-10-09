@@ -759,13 +759,9 @@ export function ThreadDetailPage() {
   }, [toolsUseReference, toolsDevice, toolsDetail?.workspace.id, relayRouteDeviceId, detail?.workspace.id, workbenchPresentation.update, setFocusedPane]);
   const closeTerminal = useCallback(() => setTerminalOpen(false), [setTerminalOpen]);
   const loadToolsCapabilities = useCallback(() => fetchThreadCapabilitySnapshot(toolsDetail!.thread.id, toolsDevice), [toolsDetail?.thread.id, toolsDevice]);
-  // Harness panel actions and reconnects stay on the device that owns the thread.
+  // Harness panel actions stay on the device that owns the thread.
   const harnessPanel = useCallback((threadId: string, deviceId: string | null | undefined) => ({
     runHarnessAction: (action: DshPanelAction) => postThreadHarnessAction<DshPanelResult>(threadId, action, deviceId),
-    onReconnect: async () => {
-      await disconnectThread(threadId, deviceId);
-      await resumeThread(threadId, {}, deviceId);
-    },
   }), []);
   const loadDialogCapabilities = useCallback(() => fetchThreadCapabilitySnapshot(harnessSettingsTarget!.threadId, harnessSettingsTarget!.deviceId), [harnessSettingsTarget?.threadId, harnessSettingsTarget?.deviceId]);
   const openReferenceThread = useCallback((threadId: string) => navigate(threadHref(threadId, referenceDevice === 'local' ? null : referenceDevice)), [navigate, referenceDevice]);

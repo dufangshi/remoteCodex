@@ -124,13 +124,24 @@ test('panel toggles a plugin after backing up the profile', async ({ page, reque
   await dialog.getByLabel('Filter plugins').fill('repeat-tool-reminder');
   const plugin = dialog.getByRole('checkbox', { name: 'Enable @deepseek-ai/dsh-repeat-tool-reminder' });
   await plugin.uncheck();
+  await expect(dialog.getByText('Disabled · applies after reconnect')).toBeVisible();
+  // The reconnect offer appears once DSH confirms the saved change.
   await expect(dialog.getByRole('button', { name: 'Reconnect to apply' })).toBeVisible();
   expect(readdirSync(backups).length).toBe(before + 1);
   expect(readFileSync(path.join(profile, 'cordis.patch.yml'), 'utf8')).toContain('id: repeat-tool-reminder');
+  // Reconnect restarts the DSH process; the new one loads the saved profile.
+  await dialog.getByRole('button', { name: 'Reconnect to apply' }).click();
+  await expect(dialog.getByRole('button', { name: 'Reconnect to apply' })).toHaveCount(0);
+  await expect(plugin).not.toBeChecked();
+  await expect(dialog.getByText('Disabled · applies after reconnect')).toHaveCount(0);
+  // The old process kept running the plugin; only a new one reports it off.
+  const live = (await harness(request)).plugins.find((entry: { id: string }) => entry.id === 'include:repeat-tool-reminder');
+  expect(live.enabled).toBe(false);
   const restored = await (await request.post(`${base}/api/threads/${threadId}/harness`, {
     data: { kind: 'setPluginEnabled', id: 'include:repeat-tool-reminder', enabled: true },
   })).json();
   expect(restored.result.application).toBe('restart-required');
+  expect((await request.post(`${base}/api/threads/${threadId}/harness`, { data: { kind: 'restart' } })).ok()).toBeTruthy();
   const blocked = await request.post(`${base}/api/threads/${threadId}/harness`, {
     data: { kind: 'setBundleEnabled', name: '@deepseek-ai/dsh-headless', enabled: true },
   });

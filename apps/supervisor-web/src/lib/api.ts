@@ -1581,8 +1581,8 @@ export function resumeThread(id: string, input: ResumeThreadInput = {},
   });
 }
 
-export function disconnectThread(id: string, deviceId?: string | null) {
-  return deviceRequest<ThreadDetailDto>(deviceId, `/api/threads/${id}/disconnect`, {
+export function disconnectThread(id: string) {
+  return request<ThreadDetailDto>(`/api/threads/${id}/disconnect`, {
     method: 'POST',
   });
 }

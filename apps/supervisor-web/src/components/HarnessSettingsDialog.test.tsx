@@ -140,19 +140,21 @@ describe('DeepSeek Harness panel', () => {
   };
   const dshSnapshot = { negotiated: { harness: dsh } } as unknown as AgentCapabilitySnapshotDto;
 
-  it('shows live DSH state and routes typed actions, then offers a reconnect', async () => {
+  it('shows live DSH state and routes typed actions, then restarts to apply them', async () => {
+    const applied = { ...dsh, plugins: dsh.plugins.map((plugin) => ({ ...plugin, enabled: plugin.id !== 'include:repeat' })) };
     const runHarnessAction = vi.fn(async (action: { kind: string }) => {
       if (action.kind === 'settings')
-        return { settings: [{ ns: 'session-log-deepseek', revision: 4, fields: [{ key: 'enabled', value: true, overridden: false }] }] };
+        return { settings: [{ ns: 'session-log-deepseek', revision: 4, fields: [{ key: 'enabled', type: 'boolean', value: true, overridden: false }] }] };
       if (action.kind === 'updateSetting')
-        return { result: { ns: 'session-log-deepseek', revision: 5, fields: [{ key: 'enabled', value: false, overridden: true }] } };
+        return { result: { ns: 'session-log-deepseek', revision: 5, fields: [{ key: 'enabled', type: 'boolean', value: false, overridden: true }] } };
+      if (action.kind === 'restart') return { result: { restarted: true } };
+      if (action.kind === 'refresh') return { result: null, harness: applied };
       return { result: { application: 'restart-required' }, harness: dsh };
     });
-    const onReconnect = vi.fn(async () => {});
     render(
       <HarnessSettingsFields thread={thread} models={models} busy={false}
         onChange={vi.fn(async () => {})} loadCapabilities={async () => dshSnapshot}
-        runHarnessAction={runHarnessAction as never} onReconnect={onReconnect} />,
+        runHarnessAction={runHarnessAction as never} />,
     );
     await screen.findByText('DeepSeek Harness 0.2.0-rc.2 · acp profile');
     expect(screen.getByText('read-only')).toBeInTheDocument();
@@ -169,8 +171,12 @@ describe('DeepSeek Harness panel', () => {
     await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Enable Repeat guard' })).not.toBeChecked());
     expect(screen.getByText('Disabled · applies after reconnect')).toBeInTheDocument();
     fireEvent.click(await screen.findByRole('button', { name: 'Reconnect to apply' }));
-    await waitFor(() => expect(onReconnect).toHaveBeenCalled());
     await waitFor(() => expect(runHarnessAction).toHaveBeenCalledWith({ kind: 'refresh' }));
+    expect(runHarnessAction.mock.calls.map(([action]) => action.kind).slice(-2)).toEqual(['restart', 'refresh']);
+    // The restarted process reports the saved choice: nothing is pending now.
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Reconnect to apply' })).toBeNull());
+    expect(screen.getByRole('checkbox', { name: 'Enable Repeat guard' })).not.toBeChecked();
+    expect(screen.queryByText(/applies after reconnect/)).toBeNull();
 
     fireEvent.click(screen.getByText('Profile settings'));
     fireEvent(screen.getByText('Profile settings').closest('details')!, new Event('toggle'));
@@ -191,5 +197,32 @@ describe('DeepSeek Harness panel', () => {
     await screen.findByText('DeepSeek Harness 0.2.0-rc.2 · acp profile');
     expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled();
     for (const checkbox of screen.getAllByRole('checkbox')) expect(checkbox).toBeDisabled();
+  });
+});
+
+describe('DeepSeek Harness settings', () => {
+  it('keeps a refused setting visible as an error and restores the stored value', async () => {
+    const view = { ns: 'agent-loop', revision: 2, fields: [{ key: 'maxParallelToolCalls', type: 'number', value: null, overridden: false }] };
+    const runHarnessAction = vi.fn(async (action: { kind: string }) => {
+      if (action.kind === 'settings') return { settings: [view] };
+      throw new Error('settings namespace "agent-loop" changed since it was read');
+    });
+    const snapshot = { negotiated: { harness: { kind: 'dsh', version: '0.2.0-rc.2', profile: 'acp', permissionPresets: [], plugins: [], bundles: [], providers: [] } } } as unknown as AgentCapabilitySnapshotDto;
+    render(
+      <HarnessSettingsFields thread={thread} models={models} busy={false}
+        onChange={vi.fn(async () => {})} loadCapabilities={async () => snapshot}
+        runHarnessAction={runHarnessAction as never} />,
+    );
+    await screen.findByText('DeepSeek Harness 0.2.0-rc.2 · acp profile');
+    fireEvent.click(screen.getByText('Profile settings'));
+    fireEvent(screen.getByText('Profile settings').closest('details')!, new Event('toggle'));
+    const input = await screen.findByRole('spinbutton', { name: 'agent-loop.maxParallelToolCalls' });
+    fireEvent.change(input, { target: { value: '4' } });
+    fireEvent.blur(input);
+    await waitFor(() => expect(runHarnessAction).toHaveBeenCalledWith({
+      kind: 'updateSetting', ns: 'agent-loop', key: 'maxParallelToolCalls', value: 4, revision: 2,
+    }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('changed since it was read');
+    await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'agent-loop.maxParallelToolCalls' })).toHaveValue(null));
   });
 });

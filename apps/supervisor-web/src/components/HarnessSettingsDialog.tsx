@@ -27,8 +27,6 @@ export interface HarnessSettingsFieldsProps {
   loadCapabilities?: () => Promise<AgentCapabilitySnapshotDto>;
   /** Device-scoped typed panel action; defaults to the local supervisor. */
   runHarnessAction?: (action: DshPanelAction) => Promise<DshPanelResult>;
-  /** Reconnect the session so restart-required harness changes load. */
-  onReconnect?: () => Promise<void>;
 }
 
 export function HarnessSettingsDialog({
@@ -72,7 +70,6 @@ export function HarnessSettingsFields({
   onChange,
   loadCapabilities,
   runHarnessAction,
-  onReconnect,
 }: HarnessSettingsFieldsProps) {
   useI18n();
   const [info, setInfo] = useState<{
@@ -185,9 +182,7 @@ export function HarnessSettingsFields({
         <p>{translate('settings.sessionSettingsCanBeChangedAfterThe')}</p>
       )}
       {isDshHarness(info) ? (
-        <DshHarnessPanel info={info} readOnly={readOnly}
-          runAction={harnessAction}
-          {...(onReconnect ? { onReconnect } : {})} />
+        <DshHarnessPanel info={info} readOnly={readOnly} runAction={harnessAction} />
       ) : (
       <p className="text-[var(--theme-fg-muted)]">
         {info?.notice ?? translate('settings.loadingHarnessCapabilities')}

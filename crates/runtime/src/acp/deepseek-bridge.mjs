@@ -24,15 +24,15 @@ const MUTATIONS = new Set(['pluginManager/setPluginEnabled', 'pluginManager/setB
 // Another application bundle in the ACP profile would stop every session from starting.
 const APP_BUNDLE = /^@deepseek-ai\/dsh-(base|acp-app|web-app|headless|sdk-app|sdk-minimal)$/;
 const BACKUPS_KEPT = 10;
-// Profile settings the panel may change. Values must be JSON scalars: `!!js`
-// strings and `__jsExpr` objects would execute inside DSH.
+// Profile settings the panel may change, with their value types. Values must
+// be JSON scalars: `!!js` strings and `__jsExpr` objects would execute in DSH.
 const SETTINGS = {
-  permission: ['defaultPreset'],
-  'agent-loop': ['maxParallelToolCalls'],
-  subagent: ['maxDepth', 'maxActiveSubagents'],
-  'bash-sandbox': ['timeoutMs', 'maxOutputBytes'],
-  'llm-deepseek': ['reasoningEffort', 'maxTokens'],
-  'session-log-deepseek': ['enabled'],
+  permission: { defaultPreset: 'string' },
+  'agent-loop': { maxParallelToolCalls: 'number' },
+  subagent: { maxDepth: 'number', maxActiveSubagents: 'number' },
+  'bash-sandbox': { timeoutMs: 'number', maxOutputBytes: 'number' },
+  'llm-deepseek': { reasoningEffort: 'string', maxTokens: 'number' },
+  'session-log-deepseek': { enabled: 'boolean' },
 };
 
 export function apply(ctx, config) {
@@ -45,6 +45,38 @@ export function apply(ctx, config) {
     if (socket && !socket.destroyed) socket.write(JSON.stringify(message) + '\n');
   };
   const root = agent => ctx.get('agents')?.roots().includes(agent) ?? false;
+  // Ownership is direct-only; walk it so background subagents keep a session busy.
+  const live = () => {
+    const agents = ctx.get('agents');
+    return typeof agents?.list === 'function' && typeof agents.isOwnedBy === 'function'
+      ? { list: agents.list(), owns: (owner, id) => agents.isOwnedBy(id, owner) }
+      : { list: [], owns: () => false };
+  };
+  const rootOf = agent => {
+    const { list, owns } = live();
+    for (let current = agent, depth = 0; current && depth < 32; depth += 1) {
+      if (root(current)) return current;
+      current = list.find(candidate => owns(candidate, current.id));
+    }
+    return undefined;
+  };
+  const running = (top, changedAgent, changedStatus) => {
+    const { list, owns } = live();
+    const family = [top];
+    for (let index = 0; index < family.length; index += 1) {
+      for (const candidate of list) {
+        if (!family.includes(candidate) && owns(family[index], candidate.id)) family.push(candidate);
+      }
+    }
+    return family.some(member => (member === changedAgent ? changedStatus : member.status) === 'running');
+  };
+  const busy = new Map();
+  const report = (top, changedAgent, changedStatus) => {
+    const status = running(top, changedAgent, changedStatus) ? 'running' : 'idle';
+    if (busy.get(top.id) === status) return;
+    busy.set(top.id, status);
+    send({ event: 'status', sessionId: String(top.id), status });
+  };
 
   const flush = attemptId => {
     const stream = streams.get(attemptId);
@@ -77,7 +109,11 @@ export function apply(ctx, config) {
     }
   });
   ctx.on('agent/status', ({ agent, status }) => {
-    if (root(agent)) send({ event: 'status', sessionId: String(agent.id), status });
+    const top = rootOf(agent);
+    if (top) report(top, agent, status);
+  });
+  ctx.on('agent/disposed', ({ agent }) => {
+    for (const top of ctx.get('agents')?.roots() ?? []) if (top !== agent) report(top, agent, 'idle');
   });
   ctx.inject(['sessionProjections'], projectionCtx => {
     projectionCtx.sessionProjections.onChanged((session, key) => {
@@ -120,6 +156,8 @@ export function apply(ctx, config) {
   const dispose = ctx.appReady.onReady(() => {
     void snapshot(ctx).then(data => {
       socket = connect({ host: '127.0.0.1', port: config.port });
+      // Decode across reads: a split UTF-8 character must not become U+FFFD.
+      socket.setEncoding('utf8');
       socket.on('error', () => {});
       socket.on('close', () => {
         for (const question of questions.values()) question.reject(new Error('Remote Codex disconnected'));
@@ -195,7 +233,7 @@ export function apply(ctx, config) {
     const commands = await remote(ctx, 'commands', 'list', { agentId: sessionId }).catch(() => []);
     return {
       projections,
-      running: agent.status === 'running',
+      running: running(agent),
       commands: commands.filter(command => COMMANDS.has(command.name))
         .map(({ name, description, input }) => ({ name, description: description ?? '', hint: input?.hint ?? null })),
     };
@@ -286,8 +324,9 @@ function settings(ctx) {
   return views.filter(view => SETTINGS[view.ns]).map(view => ({
     ns: view.ns,
     revision: view.revision,
-    fields: SETTINGS[view.ns].map(key => ({
+    fields: Object.entries(SETTINGS[view.ns]).map(([key, type]) => ({
       key,
+      type,
       value: scalar(view.value?.[key]),
       overridden: Boolean(view.user && Object.hasOwn(view.user, key)),
     })),
@@ -295,9 +334,13 @@ function settings(ctx) {
 }
 
 async function updateSetting(ctx, { ns, key, value, revision }) {
-  if (!SETTINGS[ns]?.includes(key)) throw new Error(`Setting ${ns}.${key} is not editable through Remote Codex`);
-  if (value !== null && !['string', 'number', 'boolean'].includes(typeof value)) throw new Error('Settings accept JSON scalars only');
+  const type = Object.hasOwn(SETTINGS, ns) && Object.hasOwn(SETTINGS[ns], key) ? SETTINGS[ns][key] : null;
+  if (!type) throw new Error(`Setting ${ns}.${key} is not editable through Remote Codex`);
+  if (value !== null && typeof value !== type) throw new Error(`Setting ${ns}.${key} expects a ${type}`);
+  if (type === 'number' && value !== null && !Number.isFinite(value)) throw new Error(`Setting ${ns}.${key} expects a finite number`);
   if (typeof value === 'string' && value.trimStart().startsWith('!!')) throw new Error('YAML tags are not accepted');
+  // DSH skips its conflict check only for an absent revision; always send one.
+  if (!Number.isSafeInteger(revision)) throw new Error('A settings revision is required');
   const forms = ctx.get('settings');
   if (!forms) throw new Error('DSH settings are unavailable in this profile');
   backupProfile(ctx);

@@ -44,12 +44,18 @@ type SettingValue = string | number | boolean | null;
 export interface DshSettingsView {
   ns: string;
   revision: number;
-  fields: { key: string; value: SettingValue; overridden: boolean }[];
+  fields: {
+    key: string;
+    type: 'string' | 'number' | 'boolean';
+    value: SettingValue;
+    overridden: boolean;
+  }[];
 }
 export type DshPanelAction =
   | { kind: 'refresh' }
   | { kind: 'settings' }
   | { kind: 'stop' }
+  | { kind: 'restart' }
   | { kind: 'setPluginEnabled'; id: string; enabled: boolean }
   | { kind: 'setBundleEnabled'; name: string; enabled: boolean }
   | {
@@ -78,12 +84,10 @@ export function DshHarnessPanel({
   info: initial,
   readOnly,
   runAction,
-  onReconnect,
 }: {
   info: DshHarnessInfo;
   readOnly: boolean;
   runAction: (action: DshPanelAction) => Promise<DshPanelResult>;
-  onReconnect?: () => Promise<void>;
 }) {
   useI18n();
   const [info, setInfo] = useState(initial);
@@ -94,7 +98,9 @@ export function DshHarnessPanel({
   // The live inventory reports the running process; saved toggles load after reconnect.
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
-  const run = async (action: DshPanelAction) => {
+  // Uncontrolled setting inputs remount to show the stored value after a refusal.
+  const [formKey, setFormKey] = useState(0);
+  const run = async (action: DshPanelAction, keepError = false) => {
     // Toggles show the requested state at once and roll back on failure.
     const toggle = action.kind === 'setPluginEnabled' ? `plugin:${action.id}`
       : action.kind === 'setBundleEnabled' ? `bundle:${action.name}` : null;
@@ -110,7 +116,7 @@ export function DshHarnessPanel({
     };
     if (toggle && 'enabled' in action) settle(action.enabled);
     setBusy(true);
-    setError(null);
+    if (!keepError) setError(null);
     try {
       const response = await runAction(action);
       if (response.harness) setInfo(response.harness);
@@ -139,12 +145,35 @@ export function DshHarnessPanel({
       revision: view.revision,
     });
     const updated = response?.result as DshSettingsView | null | undefined;
-    if (updated?.ns)
+    if (updated?.ns) {
       setSettings((current) =>
         current?.map((entry) => (entry.ns === updated.ns ? updated : entry)) ??
         null,
       );
-    else void run({ kind: 'settings' });
+      return;
+    }
+    // Refused or conflicting: reload stored values and keep the reason visible.
+    await run({ kind: 'settings' }, true);
+    setFormKey((key) => key + 1);
+  };
+  const reconnect = async () => {
+    if (!(await run({ kind: 'restart' }))) return;
+    const refreshed = await run({ kind: 'refresh' });
+    if (!refreshed?.harness) return;
+    const live = refreshed.harness;
+    // Keep any toggle the new process still does not reflect.
+    const remaining = Object.fromEntries(
+      Object.entries(pending).filter(([key, enabled]) => {
+        const split = key.indexOf(':');
+        const id = key.slice(split + 1);
+        const entry = key.slice(0, split) === 'plugin'
+          ? live.plugins.find((plugin) => plugin.id === id)
+          : live.bundles.find((bundle) => bundle.name === id);
+        return entry?.enabled !== enabled;
+      }),
+    );
+    setPending(remaining);
+    setRestartRequired(Object.keys(remaining).length > 0);
   };
   const disabled = readOnly || busy;
   const projections = info.session?.projections ?? {};
@@ -219,7 +248,7 @@ export function DshHarnessPanel({
           {translate('settings.dshProfileSettingsNotice')}
         </p>
         {settings ? (
-          <div className="space-y-2">
+          <div className="space-y-2" key={formKey}>
             {settings.flatMap((view) =>
               view.fields.map((field) => {
                 const id = `${view.ns}.${field.key}`;
@@ -230,10 +259,10 @@ export function DshHarnessPanel({
                     {field.overridden && ` · ${translate('settings.dshCustomized')}`}
                   </span>
                 );
-                if (typeof field.value === 'boolean')
+                if (field.type === 'boolean')
                   return (
                     <label key={id} className="flex items-center gap-2">
-                      <input type="checkbox" aria-label={id} checked={field.value}
+                      <input type="checkbox" aria-label={id} checked={field.value === true}
                         disabled={disabled}
                         onChange={(event) => void updateSetting(view, field.key, event.target.checked)} />
                       {label}
@@ -259,13 +288,13 @@ export function DshHarnessPanel({
                   <label key={id} className="block">
                     {label}
                     <input className="host-input mt-1 w-full rounded-md border p-1" aria-label={id}
-                      type={typeof field.value === 'number' ? 'number' : 'text'}
+                      type={field.type === 'number' ? 'number' : 'text'}
                       defaultValue={field.value === null ? '' : String(field.value)}
                       disabled={disabled}
                       onBlur={(event) => {
                         const raw = event.target.value.trim();
                         const value = raw === '' ? null
-                          : typeof field.value === 'number' ? Number(raw) : raw;
+                          : field.type === 'number' ? Number(raw) : raw;
                         if (value !== field.value) void updateSetting(view, field.key, value);
                       }} />
                   </label>
@@ -280,22 +309,10 @@ export function DshHarnessPanel({
       {restartRequired && (
         <div role="status" className="flex items-center gap-2 rounded-md border p-2 text-xs">
           <span className="flex-1">{translate('settings.dshRestartRequired')}</span>
-          {onReconnect && (
-            <button type="button" className="host-button rounded-md border px-2 py-1"
-              disabled={disabled}
-              onClick={() => {
-                setBusy(true);
-                void onReconnect()
-                  .then(() => run({ kind: 'refresh' }))
-                  .then(() => {
-                    setRestartRequired(false);
-                    setPending({});
-                  })
-                  .finally(() => setBusy(false));
-              }}>
-              {translate('settings.dshReconnect')}
-            </button>
-          )}
+          <button type="button" className="host-button rounded-md border px-2 py-1"
+            disabled={disabled} onClick={() => void reconnect()}>
+            {translate('settings.dshReconnect')}
+          </button>
         </div>
       )}
       <section aria-label={translate('settings.plugins')} className="space-y-2">

@@ -66,14 +66,23 @@ bridge 是 DSH 的又一个 carrier：它通过 `ctx.typertGateway.invoke()` 调
 **语义映射：**
 
 - **模型：** ACP config options 是可选项的真相源。bridge 只补充每个模型自己的推理档位和 provider 名称。切换模型后列表重新计算。
-- **权限：** 产品的 sandbox 映射为 `read-only` / `workspace-write` / `danger-full-access`。每次应用前读 `permissions` projection，不一致才执行 `/permission`。必须读回，是因为用户的 `permission.defaultPreset` 会覆盖启动 env。
+- **权限：** 产品的 sandbox 映射为 `read-only` / `workspace-write` / `danger-full-access`。每次应用前读 `permissions` projection，不一致才执行 `/permission`，执行后再读回校验。必须读回，是因为用户的 `permission.defaultPreset` 会覆盖启动 env。
+  - profile 没有 permission 插件时，只有启动 env 与要求一致才放行，否则拒绝（fail closed），不会用更宽的沙箱运行。
+  - DSH 对未注册的命令返回空结果，一律按错误处理。
 - **plan：** `collaborationMode=plan` ↔ `/plan` / `/plan off`，pending 状态按“下一回合翻转”计算。审阅通过后，DSH 先退出 plan；运行时发出 `thread.collaboration.updated`，线程随之改回 default，避免下一回合又进入 plan。
 - **问题：** DSH 的 user-questions 与产品现有的 native requestUserInput 结构一致。plan 审阅的正文放进问题文本。用户关闭问题时以错误回复 DSH；没有 active turn 时拒绝回答（fail closed）。
 - **流式：** delta 先写入临时段落。提交块内容一致时不再发送；不一致时整段替换；失败的 attempt 标记为 failed，重试写入新段落。工具调用开始前清空待对账状态，保证不会重复。
-- **回合：** 回合以 DSH 空闲为结束，而不是以 ACP prompt 返回为结束；goal 激活期间的空闲判定窗口为 3 秒。broadcast 丢事件时重新读取状态；bridge 断开视为空闲。interrupt 先 `session/cancel`，有激活 goal 时再执行 `/goal pause`。
+- **回合：** 回合以 DSH 空闲为结束，而不是以 ACP prompt 返回为结束。
+  - bridge 上报的忙碌状态覆盖根会话及其后台子代理：根空闲、子代理仍在跑时也算忙。
+  - goal 激活期间的空闲判定窗口为 3 秒。
+  - broadcast 丢事件时重新读取状态；bridge 断开视为空闲。
+  - interrupt 先 `session/cancel`；有激活 goal 时再尽力执行 `/goal pause`。DSH 可能已自行暂停，那时失败也不影响停止结果。
+  - 模式命令在全局会话锁之外执行，超时 20 秒。
 - **goal / compact：** 产品的 goal 流程把 `/goal …` 作为一个回合执行；`set_goal` 映射为 edit/pause/clear；compact 走 `/compact`，不再发 prompt。
 
-**面板动作：** `POST /api/threads/{id}/harness` 只接受类型化动作：`refresh`、`settings`、`updateSetting`、`setPluginEnabled`、`setBundleEnabled`、`stop`，不存在原样转发任意 RPC 的入口。relay ACL 默认拒绝共享用户访问该路径。
+**面板动作：** `POST /api/threads/{id}/harness` 只接受类型化动作：`refresh`、`settings`、`updateSetting`（必须带 revision）、`setPluginEnabled`、`setBundleEnabled`、`stop`、`restart`，不存在原样转发任意 RPC 的入口。relay ACL 默认拒绝共享用户访问该路径（有回归测试）。
+
+`restart` 在线程空闲时关闭该线程的 DSH 进程；下一次请求按已保存的 profile 恢复会话。旧的 `/disconnect` 接口不会重启进程。
 
 **安全约束：**
 
@@ -86,7 +95,8 @@ bridge 是 DSH 的又一个 carrier：它通过 `ctx.typertGateway.invoke()` 调
 
 - 会话状态：权限预设、plan、goal 轮次、todos；回合外自治运行时显示 Stop。
 - 配置文件设置：精选的 volatile 字段，带 revision 并发保护。
-- 插件与 bundle 开关：乐观更新，失败回滚。保存后显示“重连后生效”，并提供“重连以生效”（disconnect + resume）。
+- 插件与 bundle 开关：乐观更新，失败回滚。保存后显示“重连后生效”，并提供“重连以生效”（`restart` 后 `refresh`）。只有新进程确实反映出来的更改才会被清除。
+- 设置字段带类型；被拒绝的写入保留错误提示，并恢复为存储值。
 - 模型提供方列表。
 
 ## 能力覆盖
@@ -151,7 +161,8 @@ bridge 是 DSH 的又一个 carrier：它通过 `ctx.typertGateway.invoke()` 调
 均为隔离 `DSH_HOME`，未连接正式 relay 或 Supervisor：
 
 ```sh
-cargo test -p remote-codex-runtime --lib                 # 118 通过（含 bridge、映射、流式对账）
+cargo test -p remote-codex-runtime --lib                 # 121 通过（含 bridge、映射、流式对账与竞态、权限 fail closed）
+cargo test -p remote-codex-relay --lib route_acl          # harness 动作仅限 owner
 node --test scripts/dsh-bridge.test.mjs                  # 快照白名单、调用白名单、问答、流式、备份与 bundle 锁
 pnpm --filter @remote-codex/supervisor-web exec vitest run src/components/HarnessSettingsDialog.test.tsx
 pnpm --filter @remote-codex/supervisor-web typecheck
@@ -162,6 +173,16 @@ E2E_REAL_DSH=1 E2E_DSH_SCRIPTED=1 E2E_DSH_HOME=/absolute/isolated-dsh-home \
   pnpm exec playwright test e2e/dsh-bridge.spec.ts --project=desktop-chromium
 ```
 
-scripted spec 覆盖：只读阻止写入、流式与无重复、plan 审阅通过后退出 plan、goal 轮次留在回合内且可停止、面板插件开关（写前备份、应用 bundle 被拒绝）。
+scripted spec 在 desktop 与 mobile Chromium 上覆盖：只读阻止写入、流式与无重复、plan 审阅通过后退出 plan、goal 轮次留在回合内且可停止、面板插件开关（写前备份、重启后新进程确实生效、应用 bundle 被拒绝）。
+
+独立代码审查发现的问题均已修复，并各自有回归测试：
+- 重连不重启；
+- 失败 attempt 被存成正常完成的消息；
+- 缺少 permission 插件时权限 fail open；
+- bridge 与 ACP 竞态导致文本重复；
+- 后台子代理落在回合外；
+- 设置错误被吞掉；
+- UTF-8 跨读取被拆坏；
+- bridge 关闭后调用仍等到超时。
 
 真实模型的 `e2e/dsh.spec.ts` 需要 DeepSeek 或其他 provider 凭据，本次未运行；mobile 项目与 Windows 也未运行。本分支未改 runtime 版本号；正式部署需要配套的共享 UI 提交与 relay 部署。

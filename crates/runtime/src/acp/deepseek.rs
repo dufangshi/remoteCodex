@@ -4,7 +4,8 @@
 //! the bridge carries metadata, allowlisted DSH Remote calls, projection views,
 //! live assistant text and human questions. It never writes to the ACP stdio.
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -25,6 +26,8 @@ const MAX_LINE: u64 = 2 * 1024 * 1024;
 const CALL_TIMEOUT: Duration = Duration::from_secs(20);
 /// `/compact` summarizes with a model call; mode commands return at once.
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(600);
+/// Commands that only switch session state; callers may hold session locks.
+const MODE_COMMANDS: [&str; 2] = ["/permission", "/plan"];
 
 pub(super) struct Launch {
     listener: TcpListener,
@@ -96,10 +99,11 @@ impl Launch {
             }
             let (events, _) = broadcast::channel(1024);
             let bridge = Bridge {
-                writer: Mutex::new(writer),
+                writer: Arc::new(Mutex::new(writer)),
                 pending: Default::default(),
                 next_id: AtomicU64::new(1),
                 events,
+                closed: Default::default(),
                 _directory: self.directory,
             };
             // Keep the buffered reader: events may already follow the hello.
@@ -177,10 +181,11 @@ impl BridgeEvent {
 type Pending = std::sync::Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>;
 
 pub(super) struct Bridge {
-    writer: Mutex<OwnedWriteHalf>,
-    pending: std::sync::Arc<Pending>,
+    writer: Arc<Mutex<OwnedWriteHalf>>,
+    pending: Arc<Pending>,
     next_id: AtomicU64,
     events: broadcast::Sender<BridgeEvent>,
+    closed: Arc<AtomicBool>,
     _directory: tempfile::TempDir,
 }
 
@@ -188,6 +193,8 @@ impl Bridge {
     fn spawn_reader(&self, mut reader: BufReader<tokio::net::tcp::OwnedReadHalf>) {
         let pending = self.pending.clone();
         let events = self.events.clone();
+        let closed = self.closed.clone();
+        let writer = self.writer.clone();
         tokio::spawn(async move {
             loop {
                 let mut line = String::new();
@@ -214,10 +221,14 @@ impl Bridge {
                     let _ = events.send(event);
                 }
             }
+            // New calls fail at once; closing our side stops DSH from writing
+            // questions and events that nobody reads.
+            closed.store(true, Ordering::SeqCst);
             for (_, sender) in pending.lock().unwrap().drain() {
                 let _ = sender.send(Err("DSH bridge disconnected".into()));
             }
             let _ = events.send(BridgeEvent::Closed);
+            let _ = writer.lock().await.shutdown().await;
         });
     }
 
@@ -241,6 +252,9 @@ impl Bridge {
         params: Value,
         timeout: Duration,
     ) -> Result<Value> {
+        if self.closed.load(Ordering::SeqCst) {
+            bail!("DSH bridge disconnected");
+        }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = oneshot::channel();
         self.pending.lock().unwrap().insert(id, sender);
@@ -259,20 +273,19 @@ impl Bridge {
     }
 
     pub async fn command(&self, session_id: &str, line: &str) -> Result<Value> {
+        let timeout = if MODE_COMMANDS.iter().any(|mode| line.starts_with(mode)) {
+            CALL_TIMEOUT
+        } else {
+            COMMAND_TIMEOUT
+        };
         let response = self
             .call_with_timeout(
                 "command",
                 json!({"sessionId":session_id,"line":line}),
-                COMMAND_TIMEOUT,
+                timeout,
             )
             .await?;
-        if response["result"]["kind"] == "error" {
-            bail!(
-                "DSH {line}: {}",
-                response["result"]["text"].as_str().unwrap_or("failed")
-            );
-        }
-        Ok(response)
+        command_result(line, response)
     }
 
     pub async fn answer(&self, question: u64, result: Result<Value, String>) -> Result<()> {
@@ -285,6 +298,18 @@ impl Bridge {
 
     pub fn subscribe(&self) -> broadcast::Receiver<BridgeEvent> {
         self.events.subscribe()
+    }
+}
+
+/// DSH answers an unregistered command with no result; that is not success.
+fn command_result(line: &str, response: Value) -> Result<Value> {
+    match response["result"]["kind"].as_str() {
+        Some("success") => Ok(response),
+        Some("error") => bail!(
+            "DSH {line}: {}",
+            response["result"]["text"].as_str().unwrap_or("failed")
+        ),
+        _ => bail!("This DSH profile has no command for {line}"),
     }
 }
 
@@ -327,7 +352,7 @@ pub(super) enum PanelAction {
         ns: String,
         key: String,
         value: Value,
-        revision: Option<u64>,
+        revision: u64,
     },
     SetPluginEnabled {
         id: String,
@@ -339,6 +364,8 @@ pub(super) enum PanelAction {
     },
     /// Stop autonomous work (goal rounds, background wakeups) outside a turn.
     Stop,
+    /// Restart the idle session process so saved profile changes load.
+    Restart,
 }
 
 impl PanelAction {
@@ -367,7 +394,9 @@ impl PanelAction {
                     ns: text("ns")?,
                     key: text("key")?,
                     value,
-                    revision: action["revision"].as_u64(),
+                    revision: action["revision"]
+                        .as_u64()
+                        .ok_or_else(|| anyhow!("revision is required"))?,
                 }
             }
             Some("setPluginEnabled") => Self::SetPluginEnabled {
@@ -379,6 +408,7 @@ impl PanelAction {
                 enabled: enabled()?,
             },
             Some("stop") => Self::Stop,
+            Some("restart") => Self::Restart,
             other => bail!("Unknown DSH panel action {other:?}"),
         })
     }
@@ -420,6 +450,31 @@ pub(super) fn permission_preset(policy: &ProductSessionPolicy) -> &'static str {
         "read-only"
     } else {
         "workspace-write"
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub(super) enum PermissionStep {
+    Applied,
+    Switch,
+    /// Never run a session with a wider sandbox than the thread asked for.
+    Refuse,
+}
+
+/// How to reach the wanted preset. Without the permission plugin only the
+/// launch environment confines the process, so it must already match.
+pub(super) fn permission_step(
+    current: Option<&str>,
+    wanted: &str,
+    can_switch: bool,
+    launch: Option<&str>,
+) -> PermissionStep {
+    if current == Some(wanted) || current.is_none() && !can_switch && launch == Some(wanted) {
+        PermissionStep::Applied
+    } else if can_switch {
+        PermissionStep::Switch
+    } else {
+        PermissionStep::Refuse
     }
 }
 
@@ -567,6 +622,38 @@ mod tests {
     }
 
     #[test]
+    fn permission_changes_fail_closed_without_the_preset_plugin() {
+        use PermissionStep::*;
+        assert_eq!(
+            permission_step(Some("read-only"), "read-only", true, None),
+            Applied
+        );
+        assert_eq!(
+            permission_step(Some("workspace-write"), "read-only", true, None),
+            Switch
+        );
+        // No presets plugin: the launch environment is the only confinement.
+        assert_eq!(
+            permission_step(None, "read-only", false, Some("read-only")),
+            Applied
+        );
+        assert_eq!(
+            permission_step(None, "read-only", false, Some("workspace-write")),
+            Refuse
+        );
+        // A presets service without its command cannot switch live either.
+        assert_eq!(
+            permission_step(
+                Some("workspace-write"),
+                "read-only",
+                false,
+                Some("read-only")
+            ),
+            Refuse
+        );
+    }
+
+    #[test]
     fn plan_review_keeps_the_plan_and_round_trips_feedback() {
         let asked = json!([{
             "id":"plan-review","header":"Plan review",
@@ -656,6 +743,23 @@ mod tests {
     }
 
     #[test]
+    fn unknown_or_failed_commands_are_errors() {
+        let ok = json!({"commandId":"c","result":{"kind":"success","text":"preset read-only"}});
+        assert!(command_result("/permission read-only", ok).is_ok());
+        // A profile without the permission plugin answers with no result.
+        let missing = json!(null);
+        assert!(command_result("/permission read-only", missing)
+            .unwrap_err()
+            .to_string()
+            .contains("no command"));
+        let failed = json!({"result":{"kind":"error","text":"unknown preset"}});
+        assert!(command_result("/permission x", failed)
+            .unwrap_err()
+            .to_string()
+            .contains("unknown preset"));
+    }
+
+    #[test]
     fn panel_actions_are_typed_and_reject_structured_setting_values() {
         assert_eq!(
             PanelAction::parse(
@@ -677,6 +781,15 @@ mod tests {
             .is_err()
         );
         assert!(PanelAction::parse(&json!({"kind":"invoke","namespace":"credentials"})).is_err());
+        // DSH skips its conflict check for an absent revision; require one.
+        assert!(PanelAction::parse(
+            &json!({"kind":"updateSetting","ns":"agent-loop","key":"k","value":1})
+        )
+        .is_err());
+        assert_eq!(
+            PanelAction::parse(&json!({"kind":"restart"})).unwrap(),
+            PanelAction::Restart
+        );
     }
 
     #[test]

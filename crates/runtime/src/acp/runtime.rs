@@ -80,6 +80,8 @@ struct LiveSession {
     /// Latest DSH projection views (`plan`, `goal`, `todos`, `permissions`).
     dsh_projections: serde_json::Map<String, Value>,
     dsh_running: bool,
+    /// `DSH_PERMISSION_MODE` the process booted with.
+    dsh_env_preset: Option<String>,
     session_id: String,
     cwd: PathBuf,
     yolo: bool,
@@ -276,12 +278,11 @@ impl AcpRuntime {
             None
         };
         let mut server_command = agent_server_command(def, yolo);
-        let dsh_launch = if def.id == "deepseek" {
+        let dsh_env_preset =
+            (def.id == "deepseek").then(|| super::deepseek::permission_preset(&policy).to_string());
+        let dsh_launch = if let Some(preset) = &dsh_env_preset {
             // DSH sandboxes its own tools; ACP client fs/terminal policy never applies.
-            extra_env.push((
-                super::deepseek::PERMISSION_ENV,
-                super::deepseek::permission_preset(&policy).into(),
-            ));
+            extra_env.push((super::deepseek::PERMISSION_ENV, preset.clone()));
             Some(super::deepseek::Launch::prepare(&mut server_command).await?)
         } else {
             None
@@ -480,6 +481,7 @@ impl AcpRuntime {
             harness_info,
             dsh_projections: Default::default(),
             dsh_running: false,
+            dsh_env_preset,
             session_id,
             cwd: PathBuf::from(cwd),
             yolo,
@@ -852,7 +854,15 @@ impl AcpRuntime {
             bridge.set_policy(&live.session_id, &policy).await?;
         }
         if let Some(bridge) = live.dsh.clone() {
-            return Self::apply_dsh_mode(&bridge, live, &policy).await;
+            let projections = Self::dsh_mode(
+                &bridge,
+                &live.session_id,
+                &policy,
+                live.dsh_env_preset.as_deref(),
+            )
+            .await?;
+            live.dsh_projections.extend(projections);
+            return Ok(());
         }
         if let Some(mode_id) = resolve_mode(&live.available_modes, &policy) {
             if live.current_mode_id.as_deref() != Some(mode_id.as_str()) {
@@ -874,42 +884,66 @@ impl AcpRuntime {
 
     /// DSH has no ACP modes. Its own commands switch the session's permission
     /// preset (a user `permission.defaultPreset` overrides the launch env) and
-    /// plan mode; the session projections are read back, not assumed.
-    async fn apply_dsh_mode(
+    /// plan mode. Results are read back; without a way to apply the requested
+    /// sandbox the call fails rather than running with a wider one.
+    async fn dsh_mode(
         bridge: &super::deepseek::Bridge,
-        live: &mut LiveSession,
+        session_id: &str,
         policy: &ProductSessionPolicy,
-    ) -> Result<()> {
-        let state = bridge
-            .call("session", json!({"sessionId": live.session_id}))
-            .await?;
-        let projections = &state["projections"];
-        let preset = super::deepseek::permission_preset(policy);
-        if projections["permissions"]["currentValue"].as_str() != Some(preset) {
-            bridge
-                .command(&live.session_id, &format!("/permission {preset}"))
-                .await?;
-        }
-        let commands = state["commands"].as_array().cloned().unwrap_or_default();
-        let plan_available = commands.iter().any(|command| command["name"] == "plan");
+        env_preset: Option<&str>,
+    ) -> Result<serde_json::Map<String, Value>> {
+        let read = || bridge.call("session", json!({"sessionId": session_id}));
+        let has = |state: &Value, name: &str| {
+            state["commands"]
+                .as_array()
+                .is_some_and(|commands| commands.iter().any(|command| command["name"] == name))
+        };
         // A pending selection flips the logged mode at the next turn boundary.
-        let plan_active = projections["plan"]["active"].as_bool().unwrap_or(false)
-            != projections["plan"]["pending"].as_bool().unwrap_or(false);
+        let plan_of = |state: &Value| {
+            state["projections"]["plan"]["active"]
+                .as_bool()
+                .unwrap_or(false)
+                != state["projections"]["plan"]["pending"]
+                    .as_bool()
+                    .unwrap_or(false)
+        };
+        let mut state = read().await?;
+        let preset = super::deepseek::permission_preset(policy);
+        let current = state["projections"]["permissions"]["currentValue"].as_str();
+        match super::deepseek::permission_step(current, preset, has(&state, "permission"), env_preset)
+        {
+            super::deepseek::PermissionStep::Applied => {}
+            super::deepseek::PermissionStep::Switch => {
+                bridge
+                    .command(session_id, &format!("/permission {preset}"))
+                    .await?;
+                state = read().await?;
+                if state["projections"]["permissions"]["currentValue"].as_str() != Some(preset) {
+                    bail!("DSH did not switch to the {preset} permission preset");
+                }
+            }
+            super::deepseek::PermissionStep::Refuse => bail!(
+                "This DSH profile cannot switch permissions live; restart the DSH session to apply {preset}"
+            ),
+        }
         let wants_plan = super::deepseek::wants_plan(policy);
-        if plan_available && wants_plan != plan_active {
-            bridge
-                .command(
-                    &live.session_id,
-                    if wants_plan { "/plan" } else { "/plan off" },
-                )
-                .await?;
-        } else if wants_plan && !plan_available {
-            bail!("This DSH profile has no plan mode");
+        if wants_plan != plan_of(&state) {
+            if has(&state, "plan") {
+                bridge
+                    .command(session_id, if wants_plan { "/plan" } else { "/plan off" })
+                    .await?;
+                state = read().await?;
+                if wants_plan != plan_of(&state) {
+                    bail!("DSH did not switch plan mode");
+                }
+            } else if wants_plan {
+                bail!("This DSH profile has no plan mode");
+            }
         }
-        if let Some(values) = projections.as_object() {
-            live.dsh_projections.extend(values.clone());
-        }
-        Ok(())
+        Ok(state["projections"]
+            .as_object()
+            .cloned()
+            .unwrap_or_default())
     }
 
     async fn apply_live_settings(
@@ -990,8 +1024,31 @@ impl AcpRuntime {
         if let Some(enabled) = performance {
             Self::apply_fast_mode(&live.process.clone(), live, enabled).await?;
         }
-        if sandbox.is_some() || collab.is_some() || approval.is_some() {
-            Self::apply_product_mode(&live.process.clone(), live).await?;
+        if !(sandbox.is_some() || collab.is_some() || approval.is_some()) {
+            return Ok(());
+        }
+        let Some(bridge) = live.dsh.clone() else {
+            return Self::apply_product_mode(&live.process.clone(), live).await;
+        };
+        // DSH commands may wait on its event loop; don't stall other sessions.
+        let (raw_session, policy, env_preset, process) = (
+            live.session_id.clone(),
+            Self::policy_from_live(live),
+            live.dsh_env_preset.clone(),
+            live.process.clone(),
+        );
+        drop(sessions);
+        let projections =
+            Self::dsh_mode(&bridge, &raw_session, &policy, env_preset.as_deref()).await?;
+        if let Some(live) = self
+            .inner
+            .sessions
+            .lock()
+            .await
+            .get_mut(session_key)
+            .filter(|live| Arc::ptr_eq(&live.process, &process))
+        {
+            live.dsh_projections.extend(projections);
         }
         Ok(())
     }
@@ -1997,61 +2054,7 @@ impl AgentRuntime for AcpRuntime {
                         }
                     }
                 }
-                recv = updates.recv() => {
-                    match recv {
-                        Ok(update) => {
-                            if update["_remoteProcessId"].as_str() != Some(process.id.as_str()) { continue; }
-                            if let Some(sid) = update.get("sessionId").and_then(Value::as_str) {
-                                if sid != session_id {
-                                    continue;
-                                }
-                            }
-                            coalesced_ready_since = None;
-                            if update["_remoteMethod"] == "_claude/sdkMessage" { continue; }
-                            if let Some(usage) = adapter.billing_usage(&update).and_then(|usage| adapter_usage.apply(usage)) {
-                                emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden);
-                            }
-                            if let Some(context) = adapter.context_usage(&update, &harness_state) {
-                                emit_usage(&bus, &input.thread_id, &input.turn_id, context, input.hidden);
-                            }
-                            let mut mapped = mapper.apply(&update);
-                            if let Some(subagents) = mapped.active_subagents.take() {
-                                let subagents = merge_active_subagents(subagents, claude_usage_reader.as_ref());
-                                if self.update_subagents(&input, &subagents).await {
-                                    mapped.active_subagents = Some(subagents);
-                                }
-                            }
-                            if let Some(goal) = mapped.goal.clone() {
-                                if let Some(live) = self
-                                    .inner
-                                    .sessions
-                                    .lock()
-                                    .await
-                                    .get_mut(&input.provider_session_id)
-                                {
-                                    live.goal = goal;
-                                }
-                            }
-                            emit_mapped(
-                                &bus,
-                                &input.thread_id,
-                                &input.turn_id,
-                                mapped,
-                                input.hidden,
-                            );
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                            tracing::warn!(skipped, "ACP session/update receiver lagged");
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                            break if prompt_done {
-                                TurnOutcome::Completed
-                            } else {
-                                TurnOutcome::Failed(crate::actor::ExecutionUncertain("ACP update channel closed".into()).into())
-                            };
-                        }
-                    }
-                }
+                // Bridge frames precede the ACP update for the same step.
                 event = next_dsh_event(&mut dsh_events) => {
                     use super::deepseek::BridgeEvent;
                     match event {
@@ -2109,9 +2112,65 @@ impl AgentRuntime for AcpRuntime {
                         Some(_) => {}
                     }
                 }
-                // DSH keeps working after its ACP prompt settles (goal rounds,
-                // background subagents). The turn lasts until DSH is idle; an
-                // active goal gets time for its driver to admit the next round.
+                recv = updates.recv() => {
+                    match recv {
+                        Ok(update) => {
+                            if update["_remoteProcessId"].as_str() != Some(process.id.as_str()) { continue; }
+                            if let Some(sid) = update.get("sessionId").and_then(Value::as_str) {
+                                if sid != session_id {
+                                    continue;
+                                }
+                            }
+                            coalesced_ready_since = None;
+                            if update["_remoteMethod"] == "_claude/sdkMessage" { continue; }
+                            if let Some(usage) = adapter.billing_usage(&update).and_then(|usage| adapter_usage.apply(usage)) {
+                                emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden);
+                            }
+                            if let Some(context) = adapter.context_usage(&update, &harness_state) {
+                                emit_usage(&bus, &input.thread_id, &input.turn_id, context, input.hidden);
+                            }
+                            let mut mapped = mapper.apply(&update);
+                            if let Some(subagents) = mapped.active_subagents.take() {
+                                let subagents = merge_active_subagents(subagents, claude_usage_reader.as_ref());
+                                if self.update_subagents(&input, &subagents).await {
+                                    mapped.active_subagents = Some(subagents);
+                                }
+                            }
+                            if let Some(goal) = mapped.goal.clone() {
+                                if let Some(live) = self
+                                    .inner
+                                    .sessions
+                                    .lock()
+                                    .await
+                                    .get_mut(&input.provider_session_id)
+                                {
+                                    live.goal = goal;
+                                }
+                            }
+                            emit_mapped(
+                                &bus,
+                                &input.thread_id,
+                                &input.turn_id,
+                                mapped,
+                                input.hidden,
+                            );
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                            tracing::warn!(skipped, "ACP session/update receiver lagged");
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            break if prompt_done {
+                                TurnOutcome::Completed
+                            } else {
+                                TurnOutcome::Failed(crate::actor::ExecutionUncertain("ACP update channel closed".into()).into())
+                            };
+                        }
+                    }
+                }
+                // DSH keeps working after its ACP prompt settles: goal rounds, and
+                // background subagents (the bridge reports a session busy while any
+                // descendant runs). The turn lasts until DSH is idle; an active
+                // goal gets time for its driver to admit the next round.
                 _ = tokio::time::sleep(Duration::from_millis(if dsh_goal_active { 3000 } else { 250 })),
                     if prompt_done && (!dsh_running || cancel.is_cancelled()) => {
                     break if cancel.is_cancelled() { TurnOutcome::Interrupted } else { TurnOutcome::Completed };
@@ -2262,7 +2321,7 @@ impl AgentRuntime for AcpRuntime {
         };
         // Cancel stops the running round; pausing keeps the goal from re-arming.
         if let Some((bridge, raw_session)) = goal_bridge {
-            bridge.command(&raw_session, "/goal pause").await?;
+            pause_dsh_goal(&bridge, &raw_session).await;
         }
         Ok(())
     }
@@ -2346,6 +2405,9 @@ impl AgentRuntime for AcpRuntime {
                 .try_lock()
                 .map_err(|_| anyhow!("conflict: The session is busy."))?;
             bridge.command(&raw_session, "/compact").await?;
+            if let Some(live) = self.inner.sessions.lock().await.get_mut(session_id) {
+                live.context_thread_id = None;
+            }
             return Ok(());
         }
         let agent_id = session_id.split("::").next().unwrap_or("codex");
@@ -2525,6 +2587,7 @@ impl AgentRuntime for AcpRuntime {
                 harness_info: None,
                 dsh_projections: Default::default(),
                 dsh_running: false,
+                dsh_env_preset: None,
                 session_id: new_id,
                 cwd,
                 yolo,
@@ -2607,14 +2670,29 @@ impl AgentRuntime for AcpRuntime {
     }
 
     async fn goal_prompt(&self, session_id: &str, argument: &str) -> Result<Option<String>> {
-        let sessions = self.inner.sessions.lock().await;
-        let live = sessions
-            .get(session_id)
-            .ok_or_else(|| anyhow!("ACP session is not running"))?;
-        Ok(
-            ((live.adapter_id == "codex" && live.negotiated.goals) || live.dsh.is_some())
-                .then(|| format!("/goal {argument}")),
-        )
+        let (codex_goals, dsh) = {
+            let sessions = self.inner.sessions.lock().await;
+            let live = sessions
+                .get(session_id)
+                .ok_or_else(|| anyhow!("ACP session is not running"))?;
+            (
+                live.adapter_id == "codex" && live.negotiated.goals,
+                live.dsh
+                    .clone()
+                    .map(|bridge| (bridge, live.session_id.clone())),
+            )
+        };
+        let Some((bridge, raw_session)) = dsh else {
+            return Ok(codex_goals.then(|| format!("/goal {argument}")));
+        };
+        // The wire prompt runs DSH's `/goal`; a profile may leave it out.
+        let state = bridge
+            .call("session", json!({"sessionId": raw_session}))
+            .await?;
+        let available = state["commands"]
+            .as_array()
+            .is_some_and(|commands| commands.iter().any(|command| command["name"] == "goal"));
+        Ok(available.then(|| format!("/goal {argument}")))
     }
 
     async fn get_goal(&self, session_id: &str) -> Result<Option<GoalState>> {
@@ -2652,7 +2730,7 @@ impl AgentRuntime for AcpRuntime {
                     format!("/goal edit {objective}")
                 }
                 (Some(objective), _) if !objective.is_empty() => {
-                    bail!("Start a DSH goal from the goal composer")
+                    bail!("This DSH profile cannot start goals")
                 }
                 (_, Some("paused")) => "/goal pause".into(),
                 (_, Some("clear" | "terminated")) | (None, None) => "/goal clear".into(),
@@ -2799,9 +2877,32 @@ impl AgentRuntime for AcpRuntime {
                     .notify("session/cancel", json!({"sessionId": raw_session}))
                     .await?;
                 if goal_active {
-                    bridge.command(&raw_session, "/goal pause").await?;
+                    pause_dsh_goal(&bridge, &raw_session).await;
                 }
                 Value::Null
+            }
+            PanelAction::Restart => {
+                let removed = {
+                    let mut sessions = self.inner.sessions.lock().await;
+                    let live = sessions
+                        .get(session_id)
+                        .filter(|live| Arc::ptr_eq(&live.process, &process))
+                        .ok_or_else(|| anyhow!("ACP session changed during the harness action"))?;
+                    if live.active.is_some() {
+                        bail!("conflict: Wait for the turn to finish before restarting DSH");
+                    }
+                    let _operation = live
+                        .operation
+                        .clone()
+                        .try_lock_owned()
+                        .map_err(|_| anyhow!("conflict: The session is busy."))?;
+                    sessions.remove(session_id)
+                };
+                // The next request resumes the session with the saved profile.
+                if let Some(live) = removed {
+                    live.process.shutdown().await?;
+                }
+                return Ok(json!({"result": {"restarted": true}}));
             }
         };
         // Profile edits change the plugin and bundle inventory; keep discovery models.
@@ -3004,6 +3105,13 @@ fn spawn_mux(
             }
         }
     });
+}
+
+/// DSH may already have paused the goal after a cancel; stopping still worked.
+async fn pause_dsh_goal(bridge: &super::deepseek::Bridge, session_id: &str) {
+    if let Err(error) = bridge.command(session_id, "/goal pause").await {
+        tracing::debug!(%error, "DSH goal was not paused after cancel");
+    }
 }
 
 /// DSH bridge signals outside the turn loop: projection state for the panel
