@@ -1,6 +1,7 @@
 // Keyless DSH provider for E2E: `CALL <tool> <json>` in the latest user text
-// makes one tool call; otherwise it answers. Text and reasoning stream in
-// small chunks so bridge streaming is observable.
+// makes one tool call, `TOOLS?` lists the tools DSH offered (the run mode's
+// tool set); otherwise it answers. Text and reasoning stream in small chunks
+// so bridge streaming is observable.
 export const name = 'remote-codex-e2e-scripted-llm';
 export const inject = ['llm'];
 
@@ -26,7 +27,7 @@ class ScriptedAdapter {
   async prepareCall(provider, model, signal) {
     return { model: await this.resolveModel(provider, model, signal), stream: options => this.stream(options) };
   }
-  async *stream({ messages = [] }) {
+  async *stream({ messages = [], tools = [] }) {
     const text = lastUserText(messages);
     const afterTool = messages.at(-1)?.role !== 'user';
     let index = 0;
@@ -52,7 +53,10 @@ class ScriptedAdapter {
       yield { type: 'finish', reason: { kind: 'tool-calls' } };
       return;
     }
-    yield* block('text', afterTool ? 'Tool finished; final answer SCRIPTED_DONE.' : `Plain answer SCRIPTED_OK for: ${text.slice(0, 60)}`);
+    const answer = afterTool ? 'Tool finished; final answer SCRIPTED_DONE.'
+      : text.includes('TOOLS?') ? `TOOLS=${tools.map(tool => tool.name).sort().join(',')}`
+      : `Plain answer SCRIPTED_OK for: ${text.slice(0, 60)}`;
+    yield* block('text', answer);
     yield { type: 'usage', usage: { inputTokens: 90, outputTokens: 10, totalTokens: 100 } };
     yield { type: 'finish', reason: { kind: 'stop' } };
   }

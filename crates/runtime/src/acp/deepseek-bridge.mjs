@@ -4,6 +4,7 @@
 // session projection views, live assistant text and human questions. It never
 // writes stdout and never exports plugin configuration, environment or secrets.
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { createServer, request as httpRequest } from 'node:http';
 import { connect } from 'node:net';
 import { dirname, join } from 'node:path';
 
@@ -13,8 +14,11 @@ export const inject = ['llm', 'appReady'];
 const PROTOCOL = 1;
 const MAX_LINE = 1 << 20;
 const STREAM_FLUSH_MS = 40;
-const PROJECTIONS = ['plan', 'goal', 'todos', 'permissions'];
-const COMMANDS = new Set(['plan', 'permission', 'goal', 'compact']);
+const PROJECTIONS = ['plan', 'goal', 'todos', 'permissions', 'agentPreset'];
+const COMMAND = /^\/([a-z][a-z0-9_-]*)(?=$|\s)/;
+// The native console proxy answers loopback authorities only; Relay port
+// previews already present 127.0.0.1:<port> (DNS-rebound names get 403).
+const CONSOLE_HOST = /^(127\.0\.0\.1|localhost|\[::1\]):\d+$/i;
 const REMOTES = new Set([
   'commands/list', 'goals/get', 'goals/pause', 'goals/resume', 'goals/clear',
   'permissionPresets/catalog', 'pluginManager/listPlugins', 'pluginManager/listBundles',
@@ -70,6 +74,21 @@ export function apply(ctx, config) {
     }
     return family.some(member => (member === changedAgent ? changedStatus : member.status) === 'running');
   };
+  // Run modes: the native Web composition moves model tools into agent presets,
+  // and ACP creates agents without one. Bind before the session is published.
+  ctx.on('agent/created', async ({ agent }) => {
+    const registry = ctx.get('agentPresets');
+    const projections = ctx.get('sessionProjections');
+    if (!registry || !projections || !root(agent)) return;
+    const recorded = projections.snapshot(agent.session, ['agentPreset']).values.agentPreset ?? null;
+    if (recorded) return void await registry.recompose(agent.ctx, recorded);
+    if (turnStarted(projections, agent)) {
+      // A session from before run modes keeps its log; give it the default tools.
+      return void await registry.recompose(agent.ctx, registry.defaultId);
+    }
+    await registry.select(agent, config.preset || registry.defaultId);
+  });
+  let consoleServer = null;
   const busy = new Map();
   const report = (top, changedAgent, changedStatus) => {
     const status = running(top, changedAgent, changedStatus) ? 'running' : 'idle';
@@ -184,7 +203,7 @@ export function apply(ctx, config) {
       socket.on('connect', () => socket.end(JSON.stringify({ token: config.token, error: String(error?.message ?? error) }) + '\n'));
     });
   });
-  ctx.on('dispose', () => { dispose(); socket?.destroy(); });
+  ctx.on('dispose', () => { dispose(); socket?.destroy(); consoleServer?.close(); });
 
   function receive(message) {
     if (message.answer !== undefined) {
@@ -216,28 +235,112 @@ export function apply(ctx, config) {
         return remote(ctx, params.namespace, params.method, params.args ?? {});
       }
       case 'command': {
+        // Any command DSH registered for this session, including plugin commands.
         const line = String(params.line ?? '').trim();
-        if (!COMMANDS.has(/^\/([\w-]+)/.exec(line)?.[1])) throw new Error(`Command ${line} is not available through Remote Codex`);
+        const name = COMMAND.exec(line)?.[1];
+        const registered = await remote(ctx, 'commands', 'list', { agentId: params.sessionId });
+        if (!name || !registered.some(command => command.name === name)) {
+          throw new Error(`DSH has no command ${line.split(/\s/)[0] || line}`);
+        }
         return remote(ctx, 'commands', 'execute', { agentId: params.sessionId, line, submittedAttachments: [] });
       }
+      case 'selectPreset': {
+        const registry = ctx.get('agentPresets');
+        if (!registry) throw new Error('This DSH composition has no run modes');
+        return { agentPreset: await registry.select(liveRoot(params.sessionId), String(params.preset)) };
+      }
+      case 'console': return openConsole();
       case 'settings': return settings(ctx);
       case 'updateSetting': return updateSetting(ctx, params);
       default: throw new Error(`Unknown bridge method ${method}`);
     }
   }
 
-  async function session(sessionId) {
+  function liveRoot(sessionId) {
     const agent = ctx.get('agents')?.get(sessionId);
     if (!agent || !root(agent)) throw new Error(`DSH session ${sessionId} is not live`);
-    const projections = ctx.get('sessionProjections')?.snapshot(agent.session, PROJECTIONS).values ?? {};
+    return agent;
+  }
+
+  async function session(sessionId) {
+    const agent = liveRoot(sessionId);
+    const projector = ctx.get('sessionProjections');
+    const projections = projector?.snapshot(agent.session, PROJECTIONS).values ?? {};
     const commands = await remote(ctx, 'commands', 'list', { agentId: sessionId }).catch(() => []);
     return {
       projections,
       running: running(agent),
-      commands: commands.filter(command => COMMANDS.has(command.name))
-        .map(({ name, description, input }) => ({ name, description: description ?? '', hint: input?.hint ?? null })),
+      presetLocked: projector ? turnStarted(projector, agent) : true,
+      commands: commands.map(({ name, description, input }) => ({
+        name, description: description ?? '', hint: input?.hint ?? null,
+      })),
     };
   }
+
+  // The same-process native Web UI, reached through a loopback proxy so Relay
+  // preview hosts pass DSH's Host/Origin fence; DSH's own token still applies.
+  async function openConsole() {
+    const web = ctx.get('webServer');
+    const connection = ctx.get('connection');
+    if (!web?.port || typeof connection?.authenticatedUrl !== 'function') {
+      throw new Error('This DSH composition has no native console');
+    }
+    consoleServer ??= await startConsoleProxy(web.port);
+    const port = consoleServer.address().port;
+    const url = new URL(connection.authenticatedUrl(`http://127.0.0.1:${port}/`));
+    return { port, path: `${url.pathname}${url.search}` };
+  }
+}
+
+function turnStarted(projections, agent) {
+  // Without the turn-boundary view a session cannot be shown to be unstarted.
+  if (typeof projections.stateOf !== 'function') return true;
+  const boundary = projections.stateOf(agent.session, 'turnBoundary');
+  return boundary !== undefined && (boundary.openTurnStartSeq !== null || boundary.lastTurn > 0);
+}
+
+function startConsoleProxy(targetPort) {
+  const authority = `127.0.0.1:${targetPort}`;
+  const forward = headers => {
+    if (!CONSOLE_HOST.test(String(headers.host ?? ''))) return null;
+    const next = { ...headers, host: authority };
+    // DSH requires Origin == Host. Rewrite same-origin requests only; a page
+    // from another origin keeps its Origin and is refused by DSH.
+    if (headers.origin) {
+      try {
+        if (new URL(headers.origin).host === headers.host) next.origin = `http://${authority}`;
+      } catch { /* a malformed Origin stays as sent and fails DSH's check */ }
+    }
+    return next;
+  };
+  const server = createServer((req, res) => {
+    const headers = forward(req.headers);
+    if (!headers) return res.writeHead(403).end();
+    const upstream = httpRequest(
+      { host: '127.0.0.1', port: targetPort, method: req.method, path: req.url, headers },
+      reply => { res.writeHead(reply.statusCode ?? 502, reply.headers); reply.pipe(res); },
+    );
+    upstream.on('error', () => { if (!res.headersSent) res.writeHead(502); res.end(); });
+    req.pipe(upstream);
+  });
+  server.on('upgrade', (req, client, head) => {
+    const headers = forward(req.headers);
+    if (!headers) return client.destroy();
+    const upstream = connect({ host: '127.0.0.1', port: targetPort }, () => {
+      const lines = Object.entries(headers).flatMap(([key, value]) =>
+        (Array.isArray(value) ? value : [value]).map(item => `${key}: ${item}`));
+      upstream.write(`${req.method} ${req.url} HTTP/${req.httpVersion}\r\n${lines.join('\r\n')}\r\n\r\n`);
+      if (head?.length) upstream.write(head);
+      upstream.pipe(client);
+      client.pipe(upstream);
+    });
+    upstream.on('error', () => client.destroy());
+    client.on('error', () => upstream.destroy());
+  });
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => resolve(server));
+  });
 }
 
 async function remote(ctx, namespace, method, args = {}) {
@@ -248,12 +351,14 @@ async function remote(ctx, namespace, method, args = {}) {
 
 async function snapshot(ctx) {
   const optional = promise => promise.catch(() => null);
-  const [models, presets, plugins, bundles, providers] = await Promise.all([
+  const registry = ctx.get('agentPresets');
+  const [models, presets, plugins, bundles, providers, runModes] = await Promise.all([
     discoverModels(ctx),
     optional(remote(ctx, 'permissionPresets', 'catalog')),
     optional(remote(ctx, 'pluginManager', 'listPlugins')),
     optional(remote(ctx, 'pluginManager', 'listBundles')),
     optional(remote(ctx, 'llm', 'listConfigurableProviders')),
+    registry ? optional(registry.list()) : null,
   ]);
   return {
     protocol: PROTOCOL,
@@ -275,6 +380,10 @@ async function snapshot(ctx) {
     providers: (providers ?? []).map(provider => ({
       id: provider.provider, name: provider.displayName, declared: provider.declared !== false,
     })),
+    runModes: (runModes ?? []).map(mode => ({
+      id: mode.id, name: mode.name ?? null, description: mode.description ?? null,
+      isDefault: mode.id === registry.defaultId, broken: mode.broken ?? null,
+    })),
     features: {
       stream: true,
       questions: true,
@@ -284,6 +393,8 @@ async function snapshot(ctx) {
       permissions: Boolean(presets),
       pluginManager: Boolean(plugins),
       settings: Boolean(ctx.get('settings')),
+      runModes: Boolean(registry),
+      console: Boolean(ctx.get('webServer') && ctx.get('connection')),
     },
   };
 }

@@ -4,6 +4,7 @@
 //! the bridge carries metadata, allowlisted DSH Remote calls, projection views,
 //! live assistant text and human questions. It never writes to the ACP stdio.
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,13 +36,93 @@ pub(super) struct Launch {
     directory: tempfile::TempDir,
 }
 
+/// DSH's own Web bundle patches (host plane, run modes, native console),
+/// taken from the installed release so they always match its version.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct Composition {
+    pub patches: Vec<PathBuf>,
+}
+
+/// Find the Web bundle that ships with the `dsh` executable. Any doubt
+/// (unknown layout, version skew) keeps the plain ACP composition.
+pub(super) fn native_composition(executable: &Path) -> Option<Composition> {
+    let web_app = std::env::var_os("REMOTE_CODEX_DSH_WEB_APP")
+        .map(PathBuf::from)
+        .or_else(|| {
+            let package = dsh_package(executable)?;
+            [
+                package.join("node_modules/@deepseek-ai/dsh-web-app"),
+                package.parent()?.join("dsh-web-app"),
+            ]
+            .into_iter()
+            .find(|candidate| candidate.join("package.json").is_file())
+            .filter(|candidate| same_release(&package, candidate))
+        })?;
+    let manifest: Value =
+        serde_json::from_slice(&std::fs::read(web_app.join("package.json")).ok()?).ok()?;
+    let patches: Vec<PathBuf> = manifest["dsh"]["bundle"]["patch"]
+        .as_array()?
+        .iter()
+        .map(|patch| Some(web_app.join(patch.as_str()?)))
+        .collect::<Option<_>>()?;
+    (!patches.is_empty() && patches.iter().all(|patch| patch.is_file()))
+        .then_some(Composition { patches })
+}
+
+fn dsh_package(executable: &Path) -> Option<PathBuf> {
+    let resolved = std::fs::canonicalize(executable).ok()?;
+    // npm links bin/dsh to <package>/lib/bin.js; Windows shims sit beside node_modules.
+    [
+        resolved.parent()?.parent().map(Path::to_path_buf),
+        resolved
+            .parent()
+            .map(|dir| dir.join("node_modules/@deepseek-ai/dsh")),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|candidate| package_name(candidate).as_deref() == Some("@deepseek-ai/dsh"))
+}
+
+fn package_name(dir: &Path) -> Option<String> {
+    let manifest: Value =
+        serde_json::from_slice(&std::fs::read(dir.join("package.json")).ok()?).ok()?;
+    manifest["name"].as_str().map(str::to_string)
+}
+
+fn same_release(dsh: &Path, web_app: &Path) -> bool {
+    let version = |dir: &Path| -> Option<String> {
+        let manifest: Value =
+            serde_json::from_slice(&std::fs::read(dir.join("package.json")).ok()?).ok()?;
+        manifest["version"].as_str().map(str::to_string)
+    };
+    version(dsh).is_some() && version(dsh) == version(web_app)
+}
+
 impl Launch {
-    pub async fn prepare(command: &mut String) -> Result<Self> {
+    pub async fn prepare(command: &mut String, composition: Option<&Composition>) -> Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let token = uuid::Uuid::new_v4().to_string();
         let directory = tempfile::tempdir()?;
         let plugin = directory.path().join("remote-codex-bridge.mjs");
         std::fs::write(&plugin, include_str!("deepseek-bridge.mjs"))?;
+        let mut patches: Vec<PathBuf> = Vec::new();
+        if let Some(composition) = composition {
+            patches.extend(composition.patches.iter().cloned());
+            // The Web host stays private to this process: an OS-chosen loopback
+            // port, no URL on stdout (ACP framing) and no browser launch.
+            let overrides = directory.path().join("native.json");
+            std::fs::write(
+                &overrides,
+                serde_json::to_vec(&json!([
+                    {"id":"webserver","config":{"host":"127.0.0.1","port":0,"compression":"gzip",
+                        "compressionLevel":1,"compressionThresholdBytes":1024}},
+                    {"id":"web-runtime","config":{"openBrowser":false,"printUrl":false,
+                        "surfaceContext":false,"trustedHosts":[]}},
+                    {"id":"connection","config":{"trustedHosts":[]}}
+                ]))?,
+            )?;
+            patches.push(overrides);
+        }
         let patch = directory.path().join("patch.json");
         std::fs::write(
             &patch,
@@ -50,12 +131,15 @@ impl Launch {
                 "config":{"port":listener.local_addr()?.port(),"token":token}
             }]}]))?,
         )?;
-        command.push_str(" --patch ");
-        if cfg!(windows) {
-            // cmd.exe does not interpret POSIX single-quoted arguments.
-            command.push_str(&format!("\"{}\"", patch.to_string_lossy()));
-        } else {
-            command.push_str(&shell_words::quote(&patch.to_string_lossy()));
+        patches.push(patch);
+        for patch in patches {
+            command.push_str(" --patch ");
+            if cfg!(windows) {
+                // cmd.exe does not interpret POSIX single-quoted arguments.
+                command.push_str(&format!("\"{}\"", patch.to_string_lossy()));
+            } else {
+                command.push_str(&shell_words::quote(&patch.to_string_lossy()));
+            }
         }
         Ok(Self {
             listener,
@@ -309,7 +393,9 @@ fn command_result(line: &str, response: Value) -> Result<Value> {
             "DSH {line}: {}",
             response["result"]["text"].as_str().unwrap_or("failed")
         ),
-        _ => bail!("This DSH profile has no command for {line}"),
+        _ => bail!(
+            "This DSH session has no command for {line} (its run mode or profile leaves it out)"
+        ),
     }
 }
 
@@ -366,6 +452,16 @@ pub(super) enum PanelAction {
     Stop,
     /// Restart the idle session process so saved profile changes load.
     Restart,
+    /// Switch the run mode (agent preset) before the first turn.
+    SelectRunMode {
+        id: String,
+    },
+    /// Address of DSH's native Web UI in this session's process.
+    Console,
+    /// Run a DSH command (built-in or plugin-registered) without a model turn.
+    Command {
+        line: String,
+    },
 }
 
 impl PanelAction {
@@ -409,18 +505,71 @@ impl PanelAction {
             },
             Some("stop") => Self::Stop,
             Some("restart") => Self::Restart,
+            Some("selectRunMode") => Self::SelectRunMode { id: text("id")? },
+            Some("console") => Self::Console,
+            Some("command") => {
+                let line = text("line")?;
+                let name = line.trim().split_whitespace().next().unwrap_or_default();
+                if !name.starts_with('/') {
+                    bail!("A DSH command starts with /");
+                }
+                // Remote Codex owns these session controls; the panel must not desync them.
+                if PRODUCT_COMMANDS.contains(&&name[1..]) {
+                    bail!("Use the thread's own control for {name}");
+                }
+                Self::Command {
+                    line: line.trim().to_string(),
+                }
+            }
             other => bail!("Unknown DSH panel action {other:?}"),
         })
     }
 }
 
 /// Controls the bridge provides through DSH's own commands and goal service.
-pub(super) fn patch_capabilities(caps: &mut AgentProviderCapabilitiesDto, hello: &Value) {
+pub(super) fn patch_capabilities(
+    caps: &mut AgentProviderCapabilitiesDto,
+    hello: &Value,
+    meta: &Value,
+) {
     let features = &hello["features"];
     let commands = features["commands"].as_bool().unwrap_or(false);
-    caps.controls.plan_mode = commands;
-    caps.turns.compact = commands;
-    caps.controls.goals = commands && features["goals"].as_bool().unwrap_or(false);
+    // Once the session is known, its run mode decides: Minimal has no plan
+    // mode, goals or compaction. Before that the process features apply.
+    let has = |name: &str| {
+        meta["commands"].as_array().map_or(true, |list| {
+            list.iter().any(|command| command["name"] == name)
+        })
+    };
+    caps.controls.plan_mode = commands && has("plan");
+    caps.turns.compact = commands && has("compact");
+    caps.controls.goals = commands && features["goals"].as_bool().unwrap_or(false) && has("goal");
+}
+
+/// DSH commands mirrored by thread controls (plan mode, sandbox, goals,
+/// compaction). Running them from the panel would desync the thread.
+pub(super) const PRODUCT_COMMANDS: [&str; 4] = ["plan", "permission", "goal", "compact"];
+
+/// Run modes and features for thread creation forms, without session data.
+pub(super) fn catalog_view(hello: &Value) -> Value {
+    json!({
+        "kind": "dsh",
+        "version": hello["version"],
+        "profile": hello["profile"],
+        "composition": hello["composition"],
+        "compositionError": hello["compositionError"],
+        "runModes": hello["runModes"],
+        "features": hello["features"],
+    })
+}
+
+/// Panel metadata from a bridge `session` reply: the session's commands
+/// (built-in and plugin-registered) and whether its run mode is fixed.
+pub(super) fn session_meta(state: &Value) -> Value {
+    json!({
+        "presetLocked": state["presetLocked"].as_bool().unwrap_or(true),
+        "commands": state["commands"].as_array().cloned().unwrap_or_default(),
+    })
 }
 
 /// Panel metadata: the startup snapshot without the model catalog (served by
@@ -428,6 +577,7 @@ pub(super) fn patch_capabilities(caps: &mut AgentProviderCapabilitiesDto, hello:
 pub(super) fn harness_view(
     hello: &Value,
     projections: &serde_json::Map<String, Value>,
+    meta: &Value,
     running: bool,
 ) -> Value {
     let mut view = hello.clone();
@@ -436,7 +586,12 @@ pub(super) fn harness_view(
         object.insert("kind".into(), json!("dsh"));
         object.insert(
             "session".into(),
-            json!({"projections": projections, "running": running}),
+            json!({
+                "projections": projections,
+                "running": running,
+                "presetLocked": meta["presetLocked"].as_bool().unwrap_or(true),
+                "commands": meta["commands"].as_array().cloned().unwrap_or_default(),
+            }),
         );
     }
     view
@@ -743,6 +898,67 @@ mod tests {
     }
 
     #[test]
+    fn native_composition_comes_from_the_matching_installed_release() {
+        let root = tempfile::tempdir().unwrap();
+        let scope = root.path().join("lib/node_modules/@deepseek-ai");
+        let dsh = scope.join("dsh");
+        let web_app = dsh.join("node_modules/@deepseek-ai/dsh-web-app");
+        std::fs::create_dir_all(dsh.join("lib")).unwrap();
+        std::fs::create_dir_all(web_app.join("presets")).unwrap();
+        std::fs::write(dsh.join("lib/bin.js"), "").unwrap();
+        std::fs::write(
+            dsh.join("package.json"),
+            r#"{"name":"@deepseek-ai/dsh","version":"0.2.0"}"#,
+        )
+        .unwrap();
+        std::fs::write(web_app.join("cordis.patch.yml"), "[]").unwrap();
+        std::fs::write(web_app.join("presets/minimal.patch.yml"), "[]").unwrap();
+        let manifest = |version: &str| {
+            format!(
+                r#"{{"name":"@deepseek-ai/dsh-web-app","version":"{version}","dsh":{{"bundle":{{"patch":["./cordis.patch.yml","./presets/minimal.patch.yml"]}}}}}}"#
+            )
+        };
+        std::fs::write(web_app.join("package.json"), manifest("0.2.0")).unwrap();
+        let composition = native_composition(&dsh.join("lib/bin.js")).unwrap();
+        assert_eq!(composition.patches.len(), 2);
+        assert!(composition.patches[1].ends_with("presets/minimal.patch.yml"));
+        // A different release would mix incompatible host rows.
+        std::fs::write(web_app.join("package.json"), manifest("0.2.1")).unwrap();
+        assert_eq!(native_composition(&dsh.join("lib/bin.js")), None);
+    }
+
+    #[test]
+    fn session_run_mode_decides_plan_goal_and_compact_controls() {
+        let hello = json!({"features":{"commands":true,"goals":true}});
+        let session = |names: &[&str]| {
+            session_meta(&json!({
+                "presetLocked": false,
+                "commands": names.iter().map(|name| json!({"name": name})).collect::<Vec<_>>(),
+            }))
+        };
+        let caps = |meta: &Value| {
+            let mut caps = AgentProviderCapabilitiesDto::conversational();
+            patch_capabilities(&mut caps, &hello, meta);
+            (
+                caps.controls.plan_mode,
+                caps.controls.goals,
+                caps.turns.compact,
+            )
+        };
+        // Before the session is read, the process features apply.
+        assert_eq!(caps(&Value::Null), (true, true, true));
+        assert_eq!(
+            caps(&session(&["plan", "goal", "compact", "permission"])),
+            (true, true, true)
+        );
+        // Minimal mode registers none of them.
+        assert_eq!(
+            caps(&session(&["export", "feedback", "permission"])),
+            (false, false, false)
+        );
+    }
+
+    #[test]
     fn unknown_or_failed_commands_are_errors() {
         let ok = json!({"commandId":"c","result":{"kind":"success","text":"preset read-only"}});
         assert!(command_result("/permission read-only", ok).is_ok());
@@ -790,6 +1006,25 @@ mod tests {
             PanelAction::parse(&json!({"kind":"restart"})).unwrap(),
             PanelAction::Restart
         );
+        assert_eq!(
+            PanelAction::parse(&json!({"kind":"command","line":" /export now "})).unwrap(),
+            PanelAction::Command {
+                line: "/export now".into()
+            }
+        );
+        // Product-owned controls stay with Remote Codex.
+        assert!(PanelAction::parse(
+            &json!({"kind":"command","line":"/permission danger-full-access"})
+        )
+        .is_err());
+        assert!(PanelAction::parse(&json!({"kind":"command","line":"compact"})).is_err());
+        assert!(PanelAction::parse(&json!({"kind":"command","line":"/compact"})).is_err());
+        assert_eq!(
+            PanelAction::parse(&json!({"kind":"selectRunMode","id":"ptc"})).unwrap(),
+            PanelAction::SelectRunMode { id: "ptc".into() }
+        );
+        // A reply without the lock bit never offers a run-mode switch.
+        assert_eq!(session_meta(&json!({}))["presetLocked"], true);
     }
 
     #[test]

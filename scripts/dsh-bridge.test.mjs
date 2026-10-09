@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:net';
+import { createServer as createHttpServer, request as httpRequest } from 'node:http';
 import { once } from 'node:events';
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -35,7 +36,9 @@ function fakeDsh(overrides = {}) {
           ];
         }
         if (namespace === 'permissionPresets') return { options: [{ value: 'read-only' }, { value: 'workspace-write' }], defaultPreset: 'workspace-write' };
-        if (namespace === 'commands' && method === 'list') return [{ name: 'plan', description: 'Plan' }, { name: 'feedback' }];
+        if (namespace === 'commands' && method === 'list') {
+          return [{ name: 'plan', description: 'Plan' }, { name: 'review', description: 'Review', input: { hint: '<path>' } }];
+        }
         if (namespace === 'commands' && method === 'execute') return { commandId: 'c1', result: { kind: 'success', text: args.line } };
         return [];
       },
@@ -123,8 +126,13 @@ test('remote calls and commands are allowlisted; settings accept scalars only', 
     const send = message => socket.write(JSON.stringify(message) + '\n');
     send({ id: 1, method: 'invoke', params: { namespace: 'credentials', method: 'set', args: {} } });
     assert.match((await next()).error.message, /not available/);
-    send({ id: 2, method: 'command', params: { sessionId: 'session-1', line: '/feedback leak' } });
-    assert.match((await next()).error.message, /not available/);
+    // Any command DSH registered for the session runs, plugin commands included.
+    send({ id: 2, method: 'command', params: { sessionId: 'session-1', line: '/unknown leak' } });
+    assert.match((await next()).error.message, /has no command \/unknown/);
+    send({ id: 9, method: 'command', params: { sessionId: 'session-1', line: 'review src' } });
+    assert.match((await next()).error.message, /has no command/);
+    send({ id: 10, method: 'command', params: { sessionId: 'session-1', line: '/review src' } });
+    assert.equal((await next()).result.result.text, '/review src');
     send({ id: 3, method: 'command', params: { sessionId: 'session-1', line: '/plan off' } });
     assert.equal((await next()).result.result.text, '/plan off');
     send({ id: 4, method: 'updateSetting', params: { ns: 'llm-pi-ai', key: 'providers', value: 'x' } });
@@ -137,7 +145,10 @@ test('remote calls and commands are allowlisted; settings accept scalars only', 
     assert.match((await next()).error.message, /revision is required/);
     send({ id: 6, method: 'session', params: { sessionId: 'session-1' } });
     const session = (await next()).result;
-    assert.deepEqual(session.commands.map(command => command.name), ['plan']);
+    assert.deepEqual(session.commands, [
+      { name: 'plan', description: 'Plan', hint: null },
+      { name: 'review', description: 'Review', hint: '<path>' },
+    ]);
     assert.equal(session.projections.permissions.currentValue, 'workspace-write');
   } finally { await stop(server, dsh); }
 });
@@ -239,5 +250,144 @@ test('replies keep multibyte text split across reads', async () => {
     await new Promise(resolve => setTimeout(resolve, 20));
     socket.write(reply.subarray(cut));
     assert.equal((await asked).answers[0].custom, '先写测试');
+  } finally { await stop(server, dsh); }
+});
+
+// Agent presets as the native Web composition registers them.
+function presets(selected) {
+  return {
+    defaultId: 'standard',
+    list: async () => [{ id: 'standard' }, { id: 'minimal', name: 'Minimal' }, { id: 'draft', broken: 'missing plugin' }],
+    select: async (agent, id) => { selected.push(['select', agent.id, id]); return id; },
+    recompose: async (_ctx, id) => { selected.push(['recompose', id]); },
+  };
+}
+
+test('run modes bind before the first turn and are fixed after it', async () => {
+  const { server, port, connection } = await supervisor();
+  const selected = [];
+  let recorded = null;
+  let boundary;
+  const dsh = fakeDsh({
+    agentPresets: presets(selected),
+    sessionProjections: {
+      onChanged: () => () => {},
+      snapshot: () => ({ values: { agentPreset: recorded } }),
+      stateOf: () => boundary,
+    },
+  });
+  try {
+    apply(dsh.ctx, { port, token: 't', preset: 'minimal' });
+    dsh.ready();
+    const socket = await connection;
+    const next = lines(socket);
+    const { hello } = await next();
+    assert.deepEqual(hello.runModes.map(({ id, isDefault, broken }) => [id, isDefault, broken]),
+      [['standard', true, null], ['minimal', false, null], ['draft', false, 'missing plugin']]);
+    assert.equal(hello.features.runModes, true);
+    const created = dsh.listeners.get('agent/created');
+    // A new session takes the launch preset; a recorded one keeps its own.
+    await created({ agent: dsh.agent });
+    recorded = 'standard';
+    await created({ agent: dsh.agent });
+    // A session from before run modes keeps its log and gets the default tools.
+    recorded = null;
+    boundary = { openTurnStartSeq: null, lastTurn: 2 };
+    await created({ agent: dsh.agent });
+    // Subagents keep whatever their parent gave them.
+    await created({ agent: { id: 'child' } });
+    assert.deepEqual(selected, [['select', 'session-1', 'minimal'], ['recompose', 'standard'], ['recompose', 'standard']]);
+
+    const send = message => socket.write(JSON.stringify(message) + '\n');
+    boundary = undefined;
+    send({ id: 1, method: 'session', params: { sessionId: 'session-1' } });
+    assert.equal((await next()).result.presetLocked, false);
+    send({ id: 2, method: 'selectPreset', params: { sessionId: 'session-1', preset: 'minimal' } });
+    assert.deepEqual((await next()).result, { agentPreset: 'minimal' });
+    boundary = { openTurnStartSeq: 7, lastTurn: 0 };
+    send({ id: 3, method: 'session', params: { sessionId: 'session-1' } });
+    assert.equal((await next()).result.presetLocked, true);
+    send({ id: 4, method: 'selectPreset', params: { sessionId: 'nobody', preset: 'minimal' } });
+    assert.match((await next()).error.message, /not live/);
+  } finally { await stop(server, dsh); }
+});
+
+function get(port, headers, path = '/') {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ host: '127.0.0.1', port, path, headers }, res => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', chunk => { body += chunk; });
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+test('the native console proxy forwards loopback pages only, with DSH as the authority', async () => {
+  const { server, port, connection } = await supervisor();
+  const seen = [];
+  const web = createHttpServer((req, res) => {
+    seen.push({ host: req.headers.host, origin: req.headers.origin ?? null, url: req.url });
+    res.writeHead(303, { location: './', 'set-cookie': 'dsh=1; Path=/; HttpOnly; SameSite=Strict' }).end();
+  });
+  web.listen(0, '127.0.0.1');
+  await once(web, 'listening');
+  const webPort = web.address().port;
+  const dsh = fakeDsh({
+    webServer: { port: webPort },
+    connection: { authenticatedUrl: base => `${base}?token=launch-token` },
+  });
+  try {
+    apply(dsh.ctx, { port, token: 't' });
+    dsh.ready();
+    const socket = await connection;
+    const next = lines(socket);
+    assert.equal((await next()).hello.features.console, true);
+    socket.write(JSON.stringify({ id: 1, method: 'console', params: {} }) + '\n');
+    const { port: proxy, path } = (await next()).result;
+    assert.equal(path, '/?token=launch-token');
+    const self = `127.0.0.1:${proxy}`;
+    // Same-origin page (loopback or a Relay preview, which presents loopback).
+    const ok = await get(proxy, { host: self, origin: `http://${self}` }, path);
+    assert.equal(ok.status, 303);
+    assert.equal(ok.headers.location, './');
+    assert.match(String(ok.headers['set-cookie']), /dsh=1/);
+    assert.deepEqual(seen.at(-1), { host: `127.0.0.1:${webPort}`, origin: `http://127.0.0.1:${webPort}`, url: path });
+    // A cross-origin page keeps its Origin, so DSH's own fence refuses it.
+    await get(proxy, { host: self, origin: 'http://evil.example' });
+    assert.equal(seen.at(-1).origin, 'http://evil.example');
+    // DNS-rebound or public names never reach DSH.
+    const count = seen.length;
+    for (const host of ['evil.example', `p-${'a'.repeat(32)}.lnz-study.com`, `127.0.0.1.evil.example:${proxy}`]) {
+      assert.equal((await get(proxy, { host })).status, 403);
+    }
+    assert.equal(seen.length, count);
+    // Reopening reuses the proxy.
+    socket.write(JSON.stringify({ id: 2, method: 'console', params: {} }) + '\n');
+    assert.equal((await next()).result.port, proxy);
+  } finally {
+    await stop(server, dsh);
+    await new Promise(resolve => web.close(resolve));
+  }
+});
+
+test('compositions without a Web host report no console or run modes', async () => {
+  const { server, port, connection } = await supervisor();
+  const dsh = fakeDsh();
+  try {
+    apply(dsh.ctx, { port, token: 't' });
+    dsh.ready();
+    const socket = await connection;
+    const next = lines(socket);
+    const { hello } = await next();
+    assert.equal(hello.features.console, false);
+    assert.equal(hello.features.runModes, false);
+    assert.deepEqual(hello.runModes, []);
+    socket.write(JSON.stringify({ id: 1, method: 'console', params: {} }) + '\n');
+    assert.match((await next()).error.message, /no native console/);
+    socket.write(JSON.stringify({ id: 2, method: 'selectPreset', params: { sessionId: 'session-1', preset: 'minimal' } }) + '\n');
+    assert.match((await next()).error.message, /no run modes/);
   } finally { await stop(server, dsh); }
 });

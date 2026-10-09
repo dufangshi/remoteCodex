@@ -77,8 +77,10 @@ struct LiveSession {
     codex_bridge: Option<Arc<super::codex_bridge::CodexBridge>>,
     dsh: Option<Arc<super::deepseek::Bridge>>,
     harness_info: Option<Value>,
-    /// Latest DSH projection views (`plan`, `goal`, `todos`, `permissions`).
+    /// Latest DSH projection views (`plan`, `goal`, `todos`, `permissions`, `agentPreset`).
     dsh_projections: serde_json::Map<String, Value>,
+    /// Commands and the run-mode lock from the last bridge session read.
+    dsh_session: Value,
     dsh_running: bool,
     /// `DSH_PERMISSION_MODE` the process booted with.
     dsh_env_preset: Option<String>,
@@ -129,6 +131,8 @@ struct Inner {
     toolbox_by_agent: Mutex<HashMap<String, Vec<ToolboxItemDto>>>,
     updates: broadcast::Sender<Value>,
     terminals: AgentTerminals,
+    /// Latest DSH run modes and features, for thread creation forms.
+    dsh_catalog: Mutex<Option<Value>>,
 }
 
 pub struct AcpRuntime {
@@ -198,6 +202,7 @@ impl AcpRuntime {
                 toolbox_by_agent: Mutex::new(HashMap::new()),
                 updates,
                 terminals: AgentTerminals::default(),
+                dsh_catalog: Mutex::new(None),
             }),
         }
     }
@@ -277,43 +282,29 @@ impl AcpRuntime {
         } else {
             None
         };
-        let mut server_command = agent_server_command(def, yolo);
+        let server_command = agent_server_command(def, yolo);
         let dsh_env_preset =
             (def.id == "deepseek").then(|| super::deepseek::permission_preset(&policy).to_string());
-        let dsh_launch = if let Some(preset) = &dsh_env_preset {
+        if let Some(preset) = &dsh_env_preset {
             // DSH sandboxes its own tools; ACP client fs/terminal policy never applies.
             extra_env.push((super::deepseek::PERMISSION_ENV, preset.clone()));
-            Some(super::deepseek::Launch::prepare(&mut server_command).await?)
+        }
+        let (process, updates_rx, requests_rx, dsh, harness_info) = if dsh_env_preset.is_some() {
+            let (process, updates, requests, bridge, hello) = self
+                .spawn_dsh(def, &server_command, cwd, &extra_env)
+                .await?;
+            *self.inner.dsh_catalog.lock().await = Some(super::deepseek::catalog_view(&hello));
+            (process, updates, requests, Some(bridge), Some(hello))
         } else {
-            None
+            let (process, updates, requests) = tokio::time::timeout(
+                self.startup_timeout,
+                AcpProcess::spawn(&server_command, cwd, &extra_env),
+            )
+            .await
+            .map_err(|_| anyhow!("ACP spawn timeout"))??;
+            (Arc::new(process), updates, requests, None, None)
         };
-        let (process, updates_rx, requests_rx) = tokio::time::timeout(
-            self.startup_timeout,
-            AcpProcess::spawn(&server_command, cwd, &extra_env),
-        )
-        .await
-        .map_err(|_| anyhow!("ACP spawn timeout"))??;
-        let process = Arc::new(process);
         let mut startup_process = StartupProcess(Some(process.clone()));
-        // ACP goes live before sibling plugins settle; the bridge hello arrives
-        // after appReady, so initialize/new see the complete provider catalog.
-        let (dsh, harness_info) = if let Some(launch) = dsh_launch {
-            match tokio::time::timeout(self.startup_timeout, launch.connect()).await {
-                Ok(Ok((bridge, hello))) => (Some(Arc::new(bridge)), Some(hello)),
-                result => {
-                    let _ = process.shutdown().await;
-                    let reason = match result {
-                        Ok(Err(error)) => format!("{error:#}"),
-                        _ => "timed out waiting for DSH startup".into(),
-                    };
-                    bail!(
-                        "DSH bridge failed to start (requires DSH 0.1.5-rc.1 or newer): {reason}"
-                    );
-                }
-            }
-        } else {
-            (None, None)
-        };
         if let Some(bridge) = &dsh {
             spawn_dsh_mux(self.inner.clone(), process.id.clone(), bridge.clone());
         }
@@ -359,7 +350,7 @@ impl AcpRuntime {
         let mut caps = AgentProviderCapabilitiesDto::conversational();
         adapter.patch_capabilities(&mut caps, &negotiated);
         if let Some(info) = &harness_info {
-            super::deepseek::patch_capabilities(&mut caps, info);
+            super::deepseek::patch_capabilities(&mut caps, info, &Value::Null);
         }
         let toolbox = adapter.toolbox_items(&caps, &negotiated);
         negotiated.compact = caps.turns.compact;
@@ -480,6 +471,7 @@ impl AcpRuntime {
             dsh,
             harness_info,
             dsh_projections: Default::default(),
+            dsh_session: Value::Null,
             dsh_running: false,
             dsh_env_preset,
             session_id,
@@ -507,6 +499,67 @@ impl AcpRuntime {
         Self::apply_product_mode(&live.process.clone(), &mut live).await?;
         startup_process.0 = None;
         Ok((scoped, live))
+    }
+
+    /// DSH boots with its own Web bundle (run modes, native console) when the
+    /// installed release ships it, and falls back to the plain ACP profile.
+    /// ACP goes live before sibling plugins settle; the bridge hello arrives
+    /// after appReady, so initialize/new see the complete provider catalog.
+    async fn spawn_dsh(
+        &self,
+        def: &AcpAgentDef,
+        command: &str,
+        cwd: &str,
+        extra_env: &[(&str, String)],
+    ) -> Result<(
+        Arc<AcpProcess>,
+        mpsc::UnboundedReceiver<Value>,
+        mpsc::UnboundedReceiver<(i64, String, Value)>,
+        Arc<super::deepseek::Bridge>,
+        Value,
+    )> {
+        let native = (std::env::var("REMOTE_CODEX_DSH_NATIVE").as_deref() != Ok("0"))
+            .then(|| super::catalog::resolve_executable(&def.base_command))
+            .flatten()
+            .and_then(|executable| super::deepseek::native_composition(&executable));
+        let mut fallback = None;
+        // Without a native composition the first (plain) attempt returns or fails.
+        for composition in [native, None] {
+            let mut server_command = command.to_string();
+            let launch =
+                super::deepseek::Launch::prepare(&mut server_command, composition.as_ref()).await?;
+            let (process, updates, requests) = tokio::time::timeout(
+                self.startup_timeout,
+                AcpProcess::spawn(&server_command, cwd, extra_env),
+            )
+            .await
+            .map_err(|_| anyhow!("ACP spawn timeout"))??;
+            let process = Arc::new(process);
+            match tokio::time::timeout(self.startup_timeout, launch.connect()).await {
+                Ok(Ok((bridge, mut hello))) => {
+                    hello["composition"] = json!(if composition.is_some() {
+                        "native"
+                    } else {
+                        "acp"
+                    });
+                    hello["compositionError"] = json!(fallback);
+                    return Ok((process, updates, requests, Arc::new(bridge), hello));
+                }
+                result => {
+                    let _ = process.shutdown().await;
+                    let reason = match result {
+                        Ok(Err(error)) => format!("{error:#}"),
+                        _ => "timed out waiting for DSH startup".into(),
+                    };
+                    if composition.is_none() {
+                        bail!("DSH bridge failed to start (requires DSH 0.1.5-rc.1 or newer): {reason}");
+                    }
+                    tracing::warn!(%reason, "DSH native composition failed; using the plain ACP profile");
+                    fallback = Some(reason);
+                }
+            }
+        }
+        bail!("DSH did not start")
     }
 
     async fn list_agent_sessions(&self, def: &AcpAgentDef) -> Result<Vec<ImportSessionMeta>> {
@@ -854,14 +907,14 @@ impl AcpRuntime {
             bridge.set_policy(&live.session_id, &policy).await?;
         }
         if let Some(bridge) = live.dsh.clone() {
-            let projections = Self::dsh_mode(
+            let state = Self::dsh_mode(
                 &bridge,
                 &live.session_id,
                 &policy,
                 live.dsh_env_preset.as_deref(),
             )
             .await?;
-            live.dsh_projections.extend(projections);
+            Self::store_dsh_session(live, &state);
             return Ok(());
         }
         if let Some(mode_id) = resolve_mode(&live.available_modes, &policy) {
@@ -891,7 +944,7 @@ impl AcpRuntime {
         session_id: &str,
         policy: &ProductSessionPolicy,
         env_preset: Option<&str>,
-    ) -> Result<serde_json::Map<String, Value>> {
+    ) -> Result<Value> {
         let read = || bridge.call("session", json!({"sessionId": session_id}));
         let has = |state: &Value, name: &str| {
             state["commands"]
@@ -937,13 +990,18 @@ impl AcpRuntime {
                     bail!("DSH did not switch plan mode");
                 }
             } else if wants_plan {
-                bail!("This DSH profile has no plan mode");
+                bail!("This DSH session has no plan mode (its run mode or profile leaves it out)");
             }
         }
-        Ok(state["projections"]
-            .as_object()
-            .cloned()
-            .unwrap_or_default())
+        Ok(state)
+    }
+
+    /// Keep a bridge `session` reply: projection views plus panel metadata.
+    fn store_dsh_session(live: &mut LiveSession, state: &Value) {
+        if let Some(projections) = state["projections"].as_object() {
+            live.dsh_projections.extend(projections.clone());
+        }
+        live.dsh_session = super::deepseek::session_meta(state);
     }
 
     async fn apply_live_settings(
@@ -1038,8 +1096,7 @@ impl AcpRuntime {
             live.process.clone(),
         );
         drop(sessions);
-        let projections =
-            Self::dsh_mode(&bridge, &raw_session, &policy, env_preset.as_deref()).await?;
+        let state = Self::dsh_mode(&bridge, &raw_session, &policy, env_preset.as_deref()).await?;
         if let Some(live) = self
             .inner
             .sessions
@@ -1048,7 +1105,7 @@ impl AcpRuntime {
             .get_mut(session_key)
             .filter(|live| Arc::ptr_eq(&live.process, &process))
         {
-            live.dsh_projections.extend(projections);
+            Self::store_dsh_session(live, &state);
         }
         Ok(())
     }
@@ -1546,7 +1603,7 @@ impl AgentRuntime for AcpRuntime {
             let mut caps = AgentProviderCapabilitiesDto::conversational();
             adapter.patch_capabilities(&mut caps, &negotiated);
             if let Some(info) = &live.harness_info {
-                super::deepseek::patch_capabilities(&mut caps, info);
+                super::deepseek::patch_capabilities(&mut caps, info, &live.dsh_session);
             }
             apply_config_option_caps(&mut caps, &live.config_options);
             snapshot.toolbox_items = adapter.toolbox_items(&caps, &negotiated);
@@ -1555,6 +1612,7 @@ impl AgentRuntime for AcpRuntime {
                 let harness = super::deepseek::harness_view(
                     info,
                     &live.dsh_projections,
+                    &live.dsh_session,
                     live.dsh_running && live.active.is_none(),
                 );
                 snapshot.negotiated =
@@ -1885,6 +1943,10 @@ impl AgentRuntime for AcpRuntime {
                 bus: bus.clone(),
             });
             live.active_subagents.clear();
+            if let Some(meta) = live.dsh_session.as_object_mut() {
+                // DSH fixes the run mode at its first turn; the next read confirms.
+                meta.insert("presetLocked".into(), Value::Bool(true));
+            }
             live.claude_lifecycle.begin_turn()
         };
         let mut adapter_usage = super::usage::AdapterUsageAccumulator::default();
@@ -2586,6 +2648,7 @@ impl AgentRuntime for AcpRuntime {
                 dsh: None,
                 harness_info: None,
                 dsh_projections: Default::default(),
+                dsh_session: Value::Null,
                 dsh_running: false,
                 dsh_env_preset: None,
                 session_id: new_id,
@@ -2813,6 +2876,27 @@ impl AgentRuntime for AcpRuntime {
         Ok(live.goal.clone())
     }
 
+    async fn harness_catalog(&self, agent_id: Option<&str>, cwd: Option<&str>) -> Result<Value> {
+        let def = self.agent_def(agent_id)?;
+        if def.id != "deepseek" {
+            return Ok(Value::Null);
+        }
+        if let Some(catalog) = self.inner.dsh_catalog.lock().await.clone() {
+            return Ok(catalog);
+        }
+        // A model probe boots DSH once and caches its run modes.
+        if let Some(cwd) = cwd.filter(|cwd| !cwd.trim().is_empty()) {
+            self.probe_models(&def, cwd).await?;
+        }
+        Ok(self
+            .inner
+            .dsh_catalog
+            .lock()
+            .await
+            .clone()
+            .unwrap_or(Value::Null))
+    }
+
     async fn harness_action(&self, session_id: &str, action: Value) -> Result<Value> {
         use super::deepseek::PanelAction;
         let action = PanelAction::parse(&action)?;
@@ -2881,6 +2965,23 @@ impl AgentRuntime for AcpRuntime {
                 }
                 Value::Null
             }
+            PanelAction::SelectRunMode { id } => {
+                bridge
+                    .call(
+                        "selectPreset",
+                        json!({"sessionId": raw_session, "preset": id}),
+                    )
+                    .await?
+            }
+            PanelAction::Console => {
+                return Ok(json!({"console": bridge.call("console", json!({})).await?}));
+            }
+            PanelAction::Command { line } => {
+                if turn_active {
+                    bail!("conflict: Wait for the turn to finish before running a DSH command");
+                }
+                bridge.command(&raw_session, &line).await?
+            }
             PanelAction::Restart => {
                 let removed = {
                     let mut sessions = self.inner.sessions.lock().await;
@@ -2915,16 +3016,18 @@ impl AgentRuntime for AcpRuntime {
             .get_mut(session_id)
             .filter(|live| Arc::ptr_eq(&live.process, &process))
             .ok_or_else(|| anyhow!("ACP session changed during the harness action"))?;
-        if let Some(projections) = state["projections"].as_object() {
-            live.dsh_projections.extend(projections.clone());
-        }
+        Self::store_dsh_session(live, &state);
         if let Some(info) = live.harness_info.as_mut() {
-            snapshot["models"] = info["models"].take();
+            // Launch facts the bridge snapshot does not carry.
+            for key in ["models", "composition", "compositionError"] {
+                snapshot[key] = info[key].take();
+            }
             *info = snapshot;
         }
         let harness = super::deepseek::harness_view(
             live.harness_info.as_ref().unwrap_or(&Value::Null),
             &live.dsh_projections,
+            &live.dsh_session,
             live.dsh_running && live.active.is_none(),
         );
         Ok(json!({"result": result, "harness": harness}))

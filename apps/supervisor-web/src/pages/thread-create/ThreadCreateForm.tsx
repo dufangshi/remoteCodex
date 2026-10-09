@@ -13,6 +13,7 @@ import {
   WorkspaceDto,
 } from '@remote-codex/shared';
 import { useAppShellNav } from '../../components/AppShellNavContext';
+import { dshRunModeHint, dshRunModeName, type DshRunMode } from '../../components/DshHarnessPanel';
 import {
   ApiError,
   createThread,
@@ -20,8 +21,10 @@ import {
   fetchAgentBackends,
   fetchAgentBackendModels,
   fetchAgentBackendModelsFor,
+  fetchAgentHarnessCatalog,
   fetchWorkspaces,
   installOrUpdateAgentBackend,
+  postThreadHarnessAction,
 } from '../../lib/api';
 import { currentRelayScopedPath } from '../../lib/relayRoutes';
 
@@ -109,6 +112,12 @@ export function ThreadCreateForm({
   const [agentId, setAgentId] = useState('');
   const [model, setModel] = useState('');
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffortDto | null>(null);
+  // DSH run modes (agent presets); applied to the new thread before its first turn.
+  const [runModes, setRunModes] = useState<DshRunMode[]>([]);
+  const [runMode, setRunMode] = useState('');
+  // Created, but its run mode still has to be applied: retry instead of creating again.
+  const [created, setCreated] = useState<ThreadDto | null>(null);
+  useEffect(() => setCreated(null), [provider, agentId, workspaceId]);
   const [title, setTitle] = useState(() => initialTitle ?? '');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -228,12 +237,25 @@ export function ThreadCreateForm({
     setModels([]);
     setModel('');
     setReasoningEffort(null);
+    setRunModes([]);
+    setRunMode('');
     setError(null);
     fetchAgentBackendModelsFor('acp', { agentId, cwd: selectedWorkspace.absPath })
       .then((records) => {
-        if (!cancelled) {
-          applyModels(records);
-        }
+        if (cancelled) return;
+        applyModels(records);
+        if (agentId !== 'deepseek') return;
+        // The model probe booted DSH, so its run modes are cached by now.
+        // They are optional: without them the thread uses DSH's default mode.
+        return fetchAgentHarnessCatalog<{ runModes?: DshRunMode[] }>('acp', {
+          agentId,
+          cwd: selectedWorkspace.absPath,
+        }).then((catalog) => {
+          if (cancelled) return;
+          const modes = (catalog?.runModes ?? []).filter((mode) => !mode.broken);
+          setRunModes(modes);
+          setRunMode(modes.find((mode) => mode.isDefault)?.id ?? '');
+        }, () => undefined);
       })
       .catch((caught) => {
         if (!cancelled) {
@@ -309,21 +331,29 @@ export function ThreadCreateForm({
     }
     setBusy(true);
     setError(null);
+    let thread = created;
     try {
       const trimmed = title.trim();
-      onCreated(
-        await createThread({
-          workspaceId,
-          provider,
-          ...(provider === 'acp' ? { agentId } : {}),
-          model,
-          ...(reasoningEffort ? { reasoningEffort } : {}),
-          approvalMode: 'yolo',
-          ...(trimmed ? { title: trimmed } : {}),
-        }),
-      );
+      thread ??= await createThread({
+        workspaceId,
+        provider,
+        ...(provider === 'acp' ? { agentId } : {}),
+        model,
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+        approvalMode: 'yolo',
+        ...(trimmed ? { title: trimmed } : {}),
+      });
+      const mode = runModes.find((entry) => entry.id === runMode);
+      if (provider === 'acp' && agentId === 'deepseek' && mode && !mode.isDefault) {
+        setCreated(thread);
+        await postThreadHarnessAction(thread.id, { kind: 'selectRunMode', id: mode.id });
+      }
+      setCreated(null);
+      onCreated(thread);
     } catch (caught) {
-      setError(errorText(caught, translate("workbench.unableToCreateThread")));
+      setError(thread
+        ? translate("workbench.dshRunModeNotApplied", { value1: errorText(caught, '') })
+        : errorText(caught, translate("workbench.unableToCreateThread")));
     } finally {
       setBusy(false);
     }
@@ -581,6 +611,25 @@ export function ThreadCreateForm({
             </select>
           </Field>
         ) : null}
+
+        {provider === 'acp' && agentId === 'deepseek' && runModes.length > 0 ? (
+          <Field id={`${formId}-thread-run-mode`} label={translate("settings.dshRunMode")}>
+            <select
+              id={`${formId}-thread-run-mode`}
+              disabled={busy || Boolean(created)}
+              value={runMode}
+              onChange={(event) => setRunMode(event.target.value)}
+              className={controlClass}
+            >
+              {runModes.map((mode) => (
+                <option key={mode.id} value={mode.id}>{dshRunModeName(mode)}</option>
+              ))}
+            </select>
+            <p className="host-muted mt-1 text-xs">
+              {dshRunModeHint(runModes.find((mode) => mode.id === runMode))}
+            </p>
+          </Field>
+        ) : null}
       </div>
 
       <Field id={`${formId}-thread-title`} label={translate("workbench.title")}>
@@ -614,8 +663,19 @@ export function ThreadCreateForm({
               : 'ui-action-primary min-h-11 rounded-md px-5 font-semibold transition disabled:cursor-not-allowed'
           }
         >
-          {busy ? translate("workbench.creating") : translate("workbench.createThread_ea3fa3")}
+          {busy ? translate("workbench.creating")
+            : created ? translate("workbench.retryRunMode")
+            : translate("workbench.createThread_ea3fa3")}
         </button>
+        {created && !busy ? (
+          <button
+            type="button"
+            onClick={() => onCreated(created)}
+            className="host-secondary-button min-h-11 rounded-md border px-3 text-sm font-medium transition"
+          >
+            {translate("workbench.openCreatedThread")}
+          </button>
+        ) : null}
         {onCancel ? (
           <button
             type="button"

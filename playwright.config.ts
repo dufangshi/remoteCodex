@@ -39,7 +39,8 @@ export default defineConfig({
         REMOTE_CODEX_MODE: 'local',
         REMOTE_CODEX_E2E_FAKE_RUNTIME: realDsh || realCodex ? '' : '1',
         ...(realCodex ? { CODEX_HOME: process.env.E2E_CODEX_HOME!, REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'codex' } : {}),
-        ...(realDsh ? { DSH_HOME: process.env.E2E_DSH_HOME!, REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'acp' } : {}),
+        // DSH's own telemetry stays off in tests (it reports commands such as /feedback).
+        ...(realDsh ? { DSH_HOME: process.env.E2E_DSH_HOME!, DSH_TELEMETRY_DISABLED: '1', REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'acp' } : {}),
         HOST: '127.0.0.1',
         PORT: String(apiPort),
         REMOTE_CODEX_DATABASE_PATH: e2eDatabaseUrl,

@@ -3559,6 +3559,15 @@ impl Supervisor {
             .await
     }
 
+    pub async fn harness_catalog(
+        &self,
+        provider: Provider,
+        agent_id: Option<&str>,
+        cwd: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        self.runtime(provider)?.harness_catalog(agent_id, cwd).await
+    }
+
     /// Typed harness-panel action for the thread's live session.
     pub async fn thread_harness_action(
         &self,

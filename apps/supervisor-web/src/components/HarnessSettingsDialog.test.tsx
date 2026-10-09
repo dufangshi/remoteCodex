@@ -9,6 +9,7 @@ import {
   HarnessSettingsDialog,
   HarnessSettingsFields,
 } from './HarnessSettingsDialog';
+import { DshPluginPanel } from './DshHarnessPanel';
 
 const models: ModelOptionDto[] = [
   {
@@ -224,5 +225,145 @@ describe('DeepSeek Harness settings', () => {
     }));
     expect(await screen.findByRole('alert')).toHaveTextContent('changed since it was read');
     await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'agent-loop.maxParallelToolCalls' })).toHaveValue(null));
+  });
+});
+
+describe('DeepSeek Harness plugin controls', () => {
+  const runModes = [
+    { id: 'standard', name: null, description: null, isDefault: true, broken: null },
+    { id: 'ptc', name: null, description: null, isDefault: false, broken: null },
+    { id: 'minimal', name: null, description: null, isDefault: false, broken: null },
+    { id: 'mine', name: 'My mode', description: 'Custom tools', isDefault: false, broken: null },
+  ];
+  const base = {
+    kind: 'dsh', version: '0.2.0-rc.2', profile: 'acp', composition: 'native',
+    permissionPresets: [], plugins: [], bundles: [], providers: [], runModes,
+    features: { runModes: true, console: true, commands: true },
+  };
+  const live = (session: Record<string, unknown>) => ({
+    ...base,
+    session: { running: false, presetLocked: false, commands: [], projections: { agentPreset: 'standard' }, ...session },
+  });
+  const panel = (harness: unknown, runHarnessAction: unknown, extra: Record<string, unknown> = {}) => render(
+    <HarnessSettingsFields thread={thread} models={models} busy={false}
+      onChange={vi.fn(async () => {})}
+      loadCapabilities={async () => ({ negotiated: { harness } }) as unknown as AgentCapabilitySnapshotDto}
+      runHarnessAction={runHarnessAction as never} {...extra} />,
+  );
+
+  it('switches the run mode before the first turn and explains the lock after it', async () => {
+    const runHarnessAction = vi.fn(async (action: { kind: string; id?: string }) => ({
+      result: { agentPreset: action.id },
+      harness: live({ projections: { agentPreset: action.id } }),
+    }));
+    const view = panel(live({}), runHarnessAction);
+    const select = await screen.findByRole('combobox', { name: 'Run mode' });
+    expect(select).toHaveValue('standard');
+    expect(Array.from(select.querySelectorAll("option"), (option) => option.textContent))
+      .toEqual(['Standard (default)', 'PTC', 'Minimal', 'My mode']);
+    fireEvent.change(select, { target: { value: 'minimal' } });
+    await waitFor(() => expect(runHarnessAction).toHaveBeenCalledWith({ kind: 'selectRunMode', id: 'minimal' }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Run mode' })).toHaveValue('minimal'));
+    expect(screen.getByText(/Only a persistent terminal/)).toBeInTheDocument();
+    view.unmount();
+
+    panel(live({ presetLocked: true, projections: { agentPreset: 'ptc' } }), vi.fn());
+    expect(await screen.findByRole('combobox', { name: 'Run mode' })).toBeDisabled();
+    expect(screen.getByText(/Fixed once the first turn starts/)).toBeInTheDocument();
+  });
+
+  it('runs DSH and plugin commands but leaves thread-owned ones to the thread', async () => {
+    const commands = [
+      { name: 'plan', description: 'Plan mode', hint: null },
+      { name: 'compact', description: 'Compact history', hint: null },
+      { name: 'export', description: 'Download the log', hint: null },
+      { name: 'review', description: 'Review a path', hint: '<path>' },
+    ];
+    const runHarnessAction = vi.fn(async () => ({
+      result: { commandId: 'c1', result: { kind: 'success', text: 'Reviewed 3 files' } },
+      harness: live({ commands }),
+    }));
+    panel(live({ commands }), runHarnessAction);
+    const section = await screen.findByRole('region', { name: 'Commands' });
+    expect(section).toHaveTextContent('/planThread control');
+    expect(section).toHaveTextContent('/compactThread control');
+    expect(section).toHaveTextContent('/exportIn the native console');
+    expect(screen.queryByRole('button', { name: 'Run /plan' })).toBeNull();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Arguments for /review' }), { target: { value: ' src ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Run /review' }));
+    await waitFor(() => expect(runHarnessAction).toHaveBeenCalledWith({ kind: 'command', line: '/review src' }));
+    expect(await screen.findByText('Reviewed 3 files')).toBeInTheDocument();
+  });
+
+  it('asks before /feedback uploads the session to DeepSeek', async () => {
+    const commands = [{ name: 'feedback', description: 'Record feedback about this session', hint: '<text>' }];
+    const runHarnessAction = vi.fn(async () => ({ result: { result: { kind: 'success', text: 'Feedback recorded' } }, harness: live({ commands }) }));
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    try {
+      panel(live({ commands }), runHarnessAction);
+      expect(await screen.findByText(/history to DeepSeek, unless DSH telemetry is turned off/)).toBeInTheDocument();
+      fireEvent.change(screen.getByRole('textbox', { name: 'Arguments for /feedback' }), { target: { value: 'great' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Run /feedback' }));
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(runHarnessAction).not.toHaveBeenCalled();
+      confirm.mockReturnValue(true);
+      fireEvent.click(screen.getByRole('button', { name: 'Run /feedback' }));
+      await waitFor(() => expect(runHarnessAction).toHaveBeenCalledWith({ kind: 'command', line: '/feedback great' }));
+    } finally {
+      confirm.mockRestore();
+    }
+  });
+
+  it('opens the native console in a reserved tab and closes it when the address fails', async () => {
+    const tab = { opener: {} as unknown, location: { replace: vi.fn() }, close: vi.fn() };
+    const open = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+    const runHarnessAction = vi.fn(async () => ({ console: { port: 4242, path: '/?token=launch' } }));
+    const dshConsoleUrl = vi.fn(async (target: { port: number; path: string }) =>
+      `https://p-1.example${target.path}&__rc_launch=ticket`);
+    try {
+      const view = panel(live({}), runHarnessAction, { dshConsoleUrl });
+      fireEvent.click(await screen.findByRole('button', { name: 'Open console' }));
+      expect(open).toHaveBeenCalledWith('about:blank', '_blank');
+      expect(tab.opener).toBeNull();
+      await waitFor(() => expect(tab.location.replace).toHaveBeenCalledWith('https://p-1.example/?token=launch&__rc_launch=ticket'));
+      expect(runHarnessAction).toHaveBeenCalledWith({ kind: 'console' });
+      expect(dshConsoleUrl).toHaveBeenCalledWith({ port: 4242, path: '/?token=launch' });
+      view.unmount();
+
+      panel(live({}), runHarnessAction, { dshConsoleUrl: async () => { throw new Error('Open Remote Codex on the device'); } });
+      fireEvent.click(await screen.findByRole('button', { name: 'Open console' }));
+      await waitFor(() => expect(tab.close).toHaveBeenCalled());
+      expect(await screen.findByRole('alert')).toHaveTextContent('Open Remote Codex on the device');
+    } finally {
+      open.mockRestore();
+    }
+  });
+
+  it('explains a plain ACP fallback and hides the console there', async () => {
+    panel({ ...live({}), composition: 'acp', compositionError: 'web bundle failed', runModes: [], features: {} }, vi.fn(), { dshConsoleUrl: vi.fn() });
+    expect(await screen.findByText(/no run modes or native console here/)).toHaveTextContent('web bundle failed');
+    expect(screen.queryByRole('button', { name: 'Open console' })).toBeNull();
+  });
+});
+
+describe('DeepSeek Harness workbench panel', () => {
+  it('starts the session through a harness action when the snapshot has no live DSH data', async () => {
+    const harness = {
+      kind: 'dsh', version: '0.2.0', profile: 'acp', permissionPresets: [], plugins: [], bundles: [], providers: [],
+      session: { running: false, presetLocked: false, commands: [], projections: {} },
+    };
+    const runHarnessAction = vi.fn(async () => ({ result: null, harness }));
+    render(<DshPluginPanel loadCapabilities={async () => ({ negotiated: null })} readOnly={false}
+      runHarnessAction={runHarnessAction as never} />);
+    expect(await screen.findByText('DeepSeek Harness 0.2.0 · acp profile')).toBeInTheDocument();
+    expect(runHarnessAction).toHaveBeenCalledWith({ kind: 'refresh' });
+  });
+
+  it('never starts a session for viewers', async () => {
+    const runHarnessAction = vi.fn();
+    render(<DshPluginPanel loadCapabilities={async () => ({ negotiated: null })} readOnly
+      runHarnessAction={runHarnessAction as never} />);
+    expect(await screen.findByText("This thread's DSH session is not running yet.")).toBeInTheDocument();
+    expect(runHarnessAction).not.toHaveBeenCalled();
   });
 });

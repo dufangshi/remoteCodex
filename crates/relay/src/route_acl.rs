@@ -114,7 +114,7 @@ pub(crate) fn shared_runtime_metadata_allowed(method: &str, pathname: &str) -> b
     segments.len() == 4
         && segments[0] == "api"
         && segments[1] == "agent-runtimes"
-        && matches!(segments[3], "status" | "models" | "agents")
+        && matches!(segments[3], "status" | "models" | "agents" | "harness")
 }
 
 pub(crate) fn shared_thread_path_allowed(
@@ -576,6 +576,18 @@ mod tests {
             relay_api_target_path("threads", &uri),
             "/api/threads?workspaceId=workspace-1"
         );
+    }
+
+    #[test]
+    fn harness_catalog_is_shared_metadata_like_models() {
+        assert!(shared_runtime_metadata_allowed(
+            "GET",
+            "/api/agent-runtimes/acp/harness"
+        ));
+        assert!(!shared_runtime_metadata_allowed(
+            "POST",
+            "/api/agent-runtimes/acp/harness"
+        ));
     }
 
     #[test]

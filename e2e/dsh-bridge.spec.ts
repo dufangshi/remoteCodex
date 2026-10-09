@@ -25,10 +25,15 @@ test.beforeAll(async ({ request }) => {
   if (!existsSync(path.join(profile, 'package.json'))) {
     execFileSync('dsh', ['--profile', 'acp', '--dump-config'], { env: { ...process.env, DSH_HOME: dshHome }, stdio: 'ignore' });
   }
+  // Keyless fixtures: the scripted provider and a harmless plugin command.
   const patch = path.join(profile, 'cordis.patch.yml');
-  const current = readFileSync(patch, 'utf8');
-  if (!current.includes('remote-codex-e2e-scripted-llm')) {
-    const row = `- insert:\n    - id: remote-codex-e2e-scripted-llm\n      name: ${JSON.stringify(path.resolve('e2e/fixtures/dsh-scripted-llm.mjs'))}\n`;
+  for (const [id, file] of [
+    ['remote-codex-e2e-scripted-llm', 'e2e/fixtures/dsh-scripted-llm.mjs'],
+    ['remote-codex-e2e-command', 'e2e/fixtures/dsh-e2e-command.mjs'],
+  ]) {
+    const current = readFileSync(patch, 'utf8');
+    if (current.includes(id)) continue;
+    const row = `- insert:\n    - id: ${id}\n      name: ${JSON.stringify(path.resolve(file))}\n`;
     const rows = current.split('\n').filter(line => line.trim() && !line.trim().startsWith('#'));
     writeFileSync(patch, rows.join('').trim() === '[]' ? row : `${current.trimEnd()}\n${row}`);
   }
@@ -42,8 +47,8 @@ test.beforeAll(async ({ request }) => {
 });
 
 const detail = async (request: APIRequestContext) => (await request.get(`${base}/api/threads/${threadId}`)).json();
-const harness = async (request: APIRequestContext) =>
-  (await (await request.get(`${base}/api/threads/${threadId}/capabilities`)).json()).negotiated.harness;
+const harness = async (request: APIRequestContext, id = threadId) =>
+  (await (await request.get(`${base}/api/threads/${id}/capabilities`)).json()).negotiated.harness;
 async function runTurn(request: APIRequestContext, prompt: string, data: Record<string, unknown> = {}) {
   const before = (await detail(request)).turns.length;
   const accepted = await request.post(`${base}/api/threads/${threadId}/prompt`, { data: { prompt, ...data } });
@@ -147,3 +152,80 @@ test('panel toggles a plugin after backing up the profile', async ({ page, reque
   });
   expect(blocked.ok()).toBeFalsy();
 });
+
+async function startThread(request: APIRequestContext, title: string) {
+  const workspaces = await (await request.get(`${base}/api/workspaces`)).json();
+  const workspace = workspaces.find((entry: { absPath: string }) => entry.absPath === workspaceDir);
+  return (await (await request.post(`${base}/api/threads/start`, {
+    data: { workspaceId: workspace.id, provider: 'acp', agentId: 'deepseek', model, title, approvalMode: 'guarded' },
+  })).json()).id as string;
+}
+async function answer(request: APIRequestContext, id: string, prompt: string) {
+  const before = (await (await request.get(`${base}/api/threads/${id}`)).json()).turns.length;
+  expect((await request.post(`${base}/api/threads/${id}/prompt`, { data: { prompt } })).ok()).toBeTruthy();
+  await expect.poll(async () => {
+    const current = await (await request.get(`${base}/api/threads/${id}`)).json();
+    return current.turns.length > before && current.thread.status !== 'running' ? current.turns.at(-1).status : 'pending';
+  }, { timeout: 60_000 }).toBe('completed');
+  const turn = (await (await request.get(`${base}/api/threads/${id}`)).json()).turns.at(-1);
+  return turn.items.filter((item: { kind: string }) => item.kind === 'agentMessage').map((item: { text: string }) => item.text).join('');
+}
+
+test('New Chat starts a DSH thread in the chosen run mode', async ({ page, request }, testInfo) => {
+  await page.goto(`/threads/${threadId}`);
+  await page.getByRole('button', { name: 'New Chat', exact: true }).first().click();
+  const dialog = page.getByTestId('create-thread-dialog');
+  await dialog.locator('select[id$="thread-backend"]').selectOption('acp');
+  await dialog.locator('label').filter({ hasText: 'DeepSeek Harness' }).click();
+  await dialog.getByLabel('Model', { exact: true }).selectOption(model);
+  const runMode = dialog.getByLabel('Run mode', { exact: true });
+  await expect(runMode.locator('option')).toHaveText(['Standard (default)', 'PTC', 'Minimal', 'Creator']);
+  await runMode.selectOption('minimal');
+  await expect(dialog.getByText(/Only a persistent terminal/)).toBeVisible();
+  await dialog.getByLabel('Title', { exact: true }).fill('DSH minimal mode');
+  await page.screenshot({ path: testInfo.outputPath('new-chat-run-mode.png') });
+  await dialog.getByRole('button', { name: 'Create Thread', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  const id = page.url().split('/threads/')[1]!;
+  // DSH offers the Minimal tool set to the model from the first turn.
+  expect(await answer(request, id, 'TOOLS?')).toBe('TOOLS=bash');
+  const locked = await request.post(`${base}/api/threads/${id}/harness`, { data: { kind: 'selectRunMode', id: 'standard' } });
+  expect(locked.ok()).toBeFalsy();
+  // Minimal registers no plan mode, goals or compaction: the thread hides them.
+  const caps = await (await request.get(`${base}/api/threads/${id}/capabilities`)).json();
+  expect(caps.effectiveCapabilities.controls.planMode).toBe(false);
+  expect(caps.effectiveCapabilities.turns.compact).toBe(false);
+});
+
+test('the DeepSeek Harness plugin panel switches modes, runs plugin commands and opens the native console', async ({ page, request, context }, testInfo) => {
+  const id = await startThread(request, 'DSH plugin panel');
+  await page.goto(`/threads/${id}`);
+  await page.getByRole('button', { name: 'DeepSeek Harness', exact: true }).click();
+  const panel = page.getByTestId('dsh-plugin-panel');
+  const runMode = panel.getByRole('combobox', { name: 'Run mode' });
+  await expect(runMode).toBeEnabled();
+  await runMode.selectOption('ptc');
+  await expect.poll(async () => (await harness(request, id)).session.projections.agentPreset).toBe('ptc');
+  const commands = panel.getByRole('region', { name: 'Commands' });
+  await expect(commands).toContainText('/planThread control');
+  await expect(commands).toContainText('/exportIn the native console');
+  await commands.getByRole('textbox', { name: 'Arguments for /e2e-echo' }).fill('from the panel');
+  await commands.getByRole('button', { name: 'Run /e2e-echo' }).click();
+  await expect(commands.getByRole('status')).toHaveText('E2E_ECHO from the panel');
+  await page.screenshot({ path: testInfo.outputPath('dsh-plugin-panel.png') });
+  // The native console opens in a new tab through the loopback proxy.
+  const [consolePage] = await Promise.all([
+    context.waitForEvent('page'),
+    panel.getByRole('button', { name: 'Open console' }).click(),
+  ]);
+  // The token redirect lands on the clean index with DSH's own login cookie.
+  await consolePage.waitForURL(/^http:\/\/(localhost|127\.0\.0\.1):\d+\/$/);
+  await consolePage.waitForTimeout(3000);
+  await consolePage.screenshot({ path: testInfo.outputPath('dsh-native-console.png') });
+  await expect(consolePage.locator('body')).not.toContainText('authentication required');
+  await consolePage.close();
+  // The first turn fixes the mode.
+  expect(await answer(request, id, 'hello')).toContain('SCRIPTED_OK');
+  await expect.poll(async () => (await harness(request, id)).session.presetLocked).toBe(true);
+});
+

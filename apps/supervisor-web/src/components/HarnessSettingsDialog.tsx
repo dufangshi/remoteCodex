@@ -27,6 +27,8 @@ export interface HarnessSettingsFieldsProps {
   loadCapabilities?: () => Promise<AgentCapabilitySnapshotDto>;
   /** Device-scoped typed panel action; defaults to the local supervisor. */
   runHarnessAction?: (action: DshPanelAction) => Promise<DshPanelResult>;
+  /** Browser address of the native DSH console for this thread's device. */
+  dshConsoleUrl?: ((target: { port: number; path: string }) => Promise<string>) | undefined;
 }
 
 export function HarnessSettingsDialog({
@@ -70,6 +72,7 @@ export function HarnessSettingsFields({
   onChange,
   loadCapabilities,
   runHarnessAction,
+  dshConsoleUrl,
 }: HarnessSettingsFieldsProps) {
   useI18n();
   const [info, setInfo] = useState<{
@@ -182,7 +185,8 @@ export function HarnessSettingsFields({
         <p>{translate('settings.sessionSettingsCanBeChangedAfterThe')}</p>
       )}
       {isDshHarness(info) ? (
-        <DshHarnessPanel info={info} readOnly={readOnly} runAction={harnessAction} />
+        <DshHarnessPanel info={info} readOnly={readOnly} runAction={harnessAction}
+          consoleUrl={dshConsoleUrl} />
       ) : (
       <p className="text-[var(--theme-fg-muted)]">
         {info?.notice ?? translate('settings.loadingHarnessCapabilities')}

@@ -1,5 +1,5 @@
 import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 // Adapter data is metadata only: names and descriptions render as text.
 export interface DshPlugin {
@@ -19,17 +19,39 @@ export interface DshBundle {
   removable: boolean;
   readOnly: string | null;
 }
+/** A DSH agent preset ("run mode"): the tool set and persona of a session. */
+export interface DshRunMode {
+  id: string;
+  name: string | null;
+  description: string | null;
+  isDefault: boolean;
+  broken: unknown;
+}
+export interface DshCommand {
+  name: string;
+  description: string;
+  hint: string | null;
+}
 export interface DshHarnessInfo {
   kind: 'dsh';
   version: string | null;
   profile: string;
+  /** `native` when DSH booted with its own Web bundle (run modes, console). */
+  composition?: 'native' | 'acp' | null;
+  compositionError?: string | null;
+  runModes?: DshRunMode[];
+  features?: Partial<Record<'runModes' | 'console' | 'commands', boolean>>;
   permissionPresets: string[];
   plugins: DshPlugin[];
   bundles: DshBundle[];
   providers: { id: string; name: string; declared: boolean }[];
   session?: {
     running: boolean;
+    /** DSH fixes the run mode once the session's first turn starts. */
+    presetLocked?: boolean;
+    commands?: DshCommand[];
     projections: {
+      agentPreset?: string | null;
       plan?: { active: boolean; pending: boolean } | null;
       permissions?: { currentValue: string } | null;
       goal?: {
@@ -56,6 +78,9 @@ export type DshPanelAction =
   | { kind: 'settings' }
   | { kind: 'stop' }
   | { kind: 'restart' }
+  | { kind: 'selectRunMode'; id: string }
+  | { kind: 'console' }
+  | { kind: 'command'; line: string }
   | { kind: 'setPluginEnabled'; id: string; enabled: boolean }
   | { kind: 'setBundleEnabled'; name: string; enabled: boolean }
   | {
@@ -66,13 +91,109 @@ export type DshPanelAction =
       revision: number;
     };
 export interface DshPanelResult {
-  result?: { application?: string } | null;
+  result?: {
+    application?: string;
+    /** DSH command outcome. */
+    result?: { kind?: string; text?: string };
+  } | null;
   harness?: DshHarnessInfo;
   settings?: DshSettingsView[];
+  /** Loopback proxy port and token path of the session's native DSH Web UI. */
+  console?: { port: number; path: string };
 }
 
 export function isDshHarness(info: unknown): info is DshHarnessInfo {
   return (info as { kind?: unknown } | null)?.kind === 'dsh';
+}
+
+// DSH's built-in run modes; custom modes (made in Creator mode) show their own name.
+const RUN_MODES = {
+  standard: ['settings.dshRunModeStandard', 'settings.dshRunModeStandardHint'],
+  ptc: ['settings.dshRunModePtc', 'settings.dshRunModePtcHint'],
+  minimal: ['settings.dshRunModeMinimal', 'settings.dshRunModeMinimalHint'],
+  cordis: ['settings.dshRunModeCordis', 'settings.dshRunModeCordisHint'],
+} as const;
+const builtinRunMode = (id: string) =>
+  Object.hasOwn(RUN_MODES, id) ? RUN_MODES[id as keyof typeof RUN_MODES] : null;
+
+export function dshRunModeName(mode: DshRunMode) {
+  const known = builtinRunMode(mode.id);
+  const name = known ? translate(known[0]) : mode.name ?? mode.id;
+  return mode.isDefault ? translate('settings.dshRunModeDefault', { value1: name }) : name;
+}
+
+export function dshRunModeHint(mode: DshRunMode | undefined) {
+  if (!mode) return '';
+  const known = builtinRunMode(mode.id);
+  return known ? translate(known[1]) : mode.description ?? '';
+}
+
+// Mirrors the runtime: thread controls own plan mode, sandbox, goals and compaction.
+const THREAD_COMMANDS = new Set(['plan', 'permission', 'goal', 'compact']);
+// Web-only commands whose result is a browser action (the log download).
+const CONSOLE_COMMANDS = new Set(['export']);
+// With DSH's default telemetry mode, feedback uploads the session history.
+const UPLOAD_COMMANDS = new Set(['feedback']);
+
+function DshCommandRow({
+  command,
+  disabled,
+  onRun,
+}: {
+  command: DshCommand;
+  disabled: boolean;
+  onRun: (line: string) => void;
+}) {
+  const [args, setArgs] = useState('');
+  const owner = THREAD_COMMANDS.has(command.name) ? 'settings.dshThreadControl'
+    : CONSOLE_COMMANDS.has(command.name) ? 'settings.dshInConsole' : null;
+  return (
+    <li className="space-y-1 text-xs">
+      <form
+        className="flex items-center gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (UPLOAD_COMMANDS.has(command.name)
+            && !window.confirm(translate('settings.dshFeedbackConfirm'))) return;
+          onRun(`/${command.name}${args.trim() ? ` ${args.trim()}` : ''}`);
+        }}
+      >
+        <span className="font-mono">/{command.name}</span>
+        {owner ? (
+          <span className="ml-auto text-[var(--theme-fg-muted)]">{translate(owner)}</span>
+        ) : (
+          <>
+            {command.hint ? (
+              <input
+                className="host-input min-w-0 flex-1 rounded-md border p-1"
+                aria-label={translate('settings.dshCommandArguments', { value1: command.name })}
+                placeholder={command.hint}
+                value={args}
+                disabled={disabled}
+                onChange={(event) => setArgs(event.target.value)}
+              />
+            ) : (
+              <span className="flex-1" />
+            )}
+            <button
+              type="submit"
+              className="host-button rounded-md border px-2 py-0.5"
+              aria-label={translate('settings.dshRunCommand', { value1: command.name })}
+              disabled={disabled}
+            >
+              {translate('settings.dshRun')}
+            </button>
+          </>
+        )}
+      </form>
+      {command.description && (
+        <p className="text-[var(--theme-fg-muted)]">{command.description}</p>
+      )}
+      {UPLOAD_COMMANDS.has(command.name) && (
+        <p className="text-[var(--status-warning-fg)]">{translate('settings.dshFeedbackNotice')}</p>
+      )}
+    </li>
+  );
 }
 
 const SELECTS: Record<string, (info: DshHarnessInfo) => string[]> = {
@@ -84,10 +205,13 @@ export function DshHarnessPanel({
   info: initial,
   readOnly,
   runAction,
+  consoleUrl,
 }: {
   info: DshHarnessInfo;
   readOnly: boolean;
   runAction: (action: DshPanelAction) => Promise<DshPanelResult>;
+  /** Browser address for the console's loopback port; absent where it cannot open. */
+  consoleUrl?: ((target: { port: number; path: string }) => Promise<string>) | undefined;
 }) {
   useI18n();
   const [info, setInfo] = useState(initial);
@@ -98,6 +222,7 @@ export function DshHarnessPanel({
   // The live inventory reports the running process; saved toggles load after reconnect.
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
+  const [commandOutput, setCommandOutput] = useState<string | null>(null);
   // Uncontrolled setting inputs remount to show the stored value after a refusal.
   const [formKey, setFormKey] = useState(0);
   const run = async (action: DshPanelAction, keepError = false) => {
@@ -175,11 +300,45 @@ export function DshHarnessPanel({
     setPending(remaining);
     setRestartRequired(Object.keys(remaining).length > 0);
   };
+  const runCommand = async (line: string) => {
+    setCommandOutput(null);
+    const response = await run({ kind: 'command', line });
+    if (!response) return;
+    const name = line.slice(1).split(/\s/)[0];
+    setCommandOutput(response.result?.result?.text?.trim()
+      || translate('settings.dshCommandDone', { value1: name }));
+  };
+  const openConsole = (resolve: NonNullable<typeof consoleUrl>) => {
+    // Reserve the tab inside the click so the browser does not block it as a
+    // popup, and never hand the new page this window as its opener.
+    const tab = window.open('about:blank', '_blank');
+    if (!tab) {
+      setError(translate('devices.allowPopupsForThisSiteThenTry'));
+      return;
+    }
+    tab.opener = null;
+    void (async () => {
+      const target = (await run({ kind: 'console' }))?.console;
+      const url = target
+        ? await resolve(target).catch((failure: unknown) => {
+            setError(failure instanceof Error ? failure.message : String(failure));
+            return null;
+          })
+        : null;
+      if (url) tab.location.replace(url);
+      else tab.close();
+    })();
+  };
   const disabled = readOnly || busy;
   const projections = info.session?.projections ?? {};
   const plan = projections.plan;
   const goal = projections.goal;
   const query = filter.toLowerCase();
+  const runModes = (info.runModes ?? []).filter((mode) => !mode.broken);
+  const runMode = projections.agentPreset
+    ?? runModes.find((mode) => mode.isDefault)?.id ?? '';
+  const runModeLocked = info.session?.presetLocked !== false;
+  const commands = info.session?.commands ?? [];
   return (
     <section aria-label={translate('settings.harnessPlugins')} className="space-y-4">
       <div>
@@ -235,6 +394,62 @@ export function DshHarnessPanel({
           </ul>
         )}
       </section>
+      <section aria-label={translate('settings.dshRunMode')} className="space-y-1">
+        <h4 className="font-semibold">{translate('settings.dshRunMode')}</h4>
+        {runModes.length > 0 ? (
+          <>
+            <select className="host-input w-full rounded-md border p-1"
+              aria-label={translate('settings.dshRunMode')} value={runMode}
+              disabled={disabled || runModeLocked}
+              onChange={(event) => void run({ kind: 'selectRunMode', id: event.target.value })}>
+              {runModes.map((mode) => (
+                <option key={mode.id} value={mode.id}>{dshRunModeName(mode)}</option>
+              ))}
+            </select>
+            <p className="text-xs text-[var(--theme-fg-muted)]">
+              {runModeLocked
+                ? translate('settings.dshRunModeLocked')
+                : dshRunModeHint(runModes.find((mode) => mode.id === runMode))}
+            </p>
+          </>
+        ) : (
+          <p className="text-xs text-[var(--theme-fg-muted)]">
+            {translate('settings.dshRunModeUnavailable')}
+            {info.compositionError ? ` ${info.compositionError}` : ''}
+          </p>
+        )}
+      </section>
+      {commands.length > 0 && (
+        <section aria-label={translate('settings.dshCommands')} className="space-y-2">
+          <h4 className="font-semibold">{translate('settings.dshCommands')}</h4>
+          <p className="text-xs text-[var(--theme-fg-muted)]">
+            {translate('settings.dshCommandsNotice')}
+          </p>
+          <ul className="max-h-64 space-y-2 overflow-y-auto overscroll-contain">
+            {commands.map((command) => (
+              <DshCommandRow key={command.name} command={command} disabled={disabled}
+                onRun={(line) => void runCommand(line)} />
+            ))}
+          </ul>
+          {commandOutput && (
+            <pre role="status" className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border p-2 text-xs">
+              {commandOutput}
+            </pre>
+          )}
+        </section>
+      )}
+      {info.features?.console && consoleUrl && (
+        <section aria-label={translate('settings.dshConsole')} className="space-y-1">
+          <h4 className="font-semibold">{translate('settings.dshConsole')}</h4>
+          <p className="text-xs text-[var(--theme-fg-muted)]">
+            {translate('settings.dshConsoleNotice')}
+          </p>
+          <button type="button" className="host-button rounded-md border px-2 py-1"
+            disabled={disabled} onClick={() => openConsole(consoleUrl)}>
+            {translate('settings.dshOpenConsole')}
+          </button>
+        </section>
+      )}
       <details
         onToggle={(event) => {
           if ((event.target as HTMLDetailsElement).open && !settings)
@@ -394,5 +609,53 @@ export function DshHarnessPanel({
         </ul>
       </section>
     </section>
+  );
+}
+
+/**
+ * The DeepSeek Harness plugin's workbench panel: the thread's live DSH
+ * controls without the generic harness fields. Owners load the live session
+ * (starting it if needed); viewers get the capability snapshot.
+ */
+export function DshPluginPanel({
+  loadCapabilities,
+  readOnly,
+  runHarnessAction,
+  dshConsoleUrl,
+}: {
+  loadCapabilities: () => Promise<{ negotiated?: unknown }>;
+  readOnly: boolean;
+  runHarnessAction: (action: DshPanelAction) => Promise<DshPanelResult>;
+  dshConsoleUrl?: ((target: { port: number; path: string }) => Promise<string>) | undefined;
+}) {
+  useI18n();
+  const [info, setInfo] = useState<DshHarnessInfo | null | undefined>(undefined);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const snapshot = await loadCapabilities();
+      const harness = (snapshot.negotiated as { harness?: unknown } | null)?.harness;
+      if (isDshHarness(harness) || readOnly) return harness;
+      // Not live yet: a harness action resumes the session first.
+      return (await runHarnessAction({ kind: 'refresh' })).harness;
+    })().then(
+      (harness) => { if (!cancelled) setInfo(isDshHarness(harness) ? harness : null); },
+      (failure: unknown) => {
+        if (!cancelled) setError(failure instanceof Error ? failure.message : String(failure));
+      },
+    );
+    return () => { cancelled = true; };
+  }, [loadCapabilities, readOnly, runHarnessAction]);
+  if (error) return <p role="alert" className="p-3 text-sm">{error}</p>;
+  if (info === undefined)
+    return <p className="p-3 text-sm">{translate('settings.loadingHarnessCapabilities')}</p>;
+  if (!info)
+    return <p className="p-3 text-sm">{translate('workbench.deepseekHarnessNotRunning')}</p>;
+  return (
+    <div className="h-full overflow-y-auto p-3 text-sm" data-testid="dsh-plugin-panel">
+      <DshHarnessPanel info={info} readOnly={readOnly} runAction={runHarnessAction}
+        consoleUrl={dshConsoleUrl} />
+    </div>
   );
 }
