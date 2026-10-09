@@ -305,7 +305,7 @@ relay 会把 Host/Origin 改写成 `127.0.0.1:<端口>`，正好通过代理围�
 
 - 网关偶发的 `upstream_http2_stream_error` 现在会自动重试：DSH 原本把它归为不可重试的 `PI_AI_ERROR`，现在 provider 的 `retryPolicy` 包含这个错误码，最多重试 6 次，指数退避（1 秒起，最长 20 秒）。故障注入代理实测：前两次失败后第三次成功，回合正常完成。
 - Codex 专有的 `ultra` 档位在 DSH 中没有对应级别。
-- 机器上同时存在 `/usr/local/bin/codex`（0.154）与 `~/.local/bin/codex`（0.160），而 Supervisor 的 `augment_path()` 把 `/usr/local/bin` 排在前面。
+- 机器上同时存在 `/usr/local/bin/codex`（0.154）与 `~/.local/bin/codex`（0.160）。正式环境按 `$HOME/.local/bin` 优先解析到新版；HOME 被隔离的测试环境会落到旧版，所以元数据合并所有安装并以新版为准。
 - 压缩完成后，界面上的上下文用量要到下一次模型调用才刷新。
 - 我们注入的上下文提示会引导模型优先使用 `remote-codex` CLI 协作，与 DSH 自带的子代理工具形成竞争。
 
