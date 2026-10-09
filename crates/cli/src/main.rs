@@ -1,4 +1,5 @@
 mod automations;
+mod legacy_env;
 mod threads;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -368,8 +369,15 @@ More: pockymoe guide tasks"#
     Version,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    legacy_env::adopt();
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run())
+}
+
+async fn run() -> Result<()> {
     if std::env::args().nth(1).as_deref() == Some("app-server")
         && std::env::var_os("POCKYMOE_APP_SERVER_BRIDGE").is_some()
     {
