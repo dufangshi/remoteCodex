@@ -12,7 +12,9 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const APP_NAME: &str = "pockymoe";
+/// Reported by `/api/version`. Native apps released before the rename may
+/// identify a Supervisor by this value, so it keeps the pre-rename name.
+pub const APP_NAME: &str = "remote-codex";
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
