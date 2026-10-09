@@ -240,17 +240,20 @@ async fn managed_path_resolves_pockymoe_to_this_executable() {
         .configure_cli("http://127.0.0.1:8787".into())
         .bin_dir
         .expect("a pockymoe link for managed agents");
-    let link = dir.join(if cfg!(windows) {
-        "pockymoe.exe"
-    } else {
-        "pockymoe"
-    });
-    #[cfg(unix)]
-    assert_eq!(
-        std::fs::read_link(&link).unwrap(),
-        std::env::current_exe().unwrap()
-    );
-    assert!(link.is_file());
+    // Skills and hook scripts written before the rename still run `remote-codex`.
+    for command in ["pockymoe", "remote-codex"] {
+        let link = dir.join(if cfg!(windows) {
+            format!("{command}.exe")
+        } else {
+            command.to_string()
+        });
+        #[cfg(unix)]
+        assert_eq!(
+            std::fs::read_link(&link).unwrap(),
+            std::env::current_exe().unwrap()
+        );
+        assert!(link.is_file());
+    }
     let env = s
         .with_cli_context("thread-a", async {
             pockymoe_runtime::interaction::launch_env()
@@ -258,6 +261,14 @@ async fn managed_path_resolves_pockymoe_to_this_executable() {
         .await;
     let path = &env.iter().find(|(key, _)| key == "PATH").unwrap().1;
     assert_eq!(std::env::split_paths(path).next(), Some(dir));
+    let value = |key: &str| env.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone());
+    for name in ["THREAD_ID", "URL", "TOKEN"] {
+        assert!(value(&format!("POCKYMOE_{name}")).is_some());
+        assert_eq!(
+            value(&format!("REMOTE_CODEX_{name}")),
+            value(&format!("POCKYMOE_{name}"))
+        );
+    }
 }
 
 #[tokio::test]

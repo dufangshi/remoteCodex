@@ -31,35 +31,38 @@ use uuid::Uuid;
 pub struct CliContext {
     pub url: String,
     pub token: String,
-    /// Holds a `pockymoe` that runs this executable; first on managed PATHs.
+    /// Holds `pockymoe` and `remote-codex` links to this executable; first on managed PATHs.
     pub bin_dir: Option<std::path::PathBuf>,
 }
 
-/// Agents run `pockymoe`, but release executables carry a platform suffix
-/// (`remote-codex-linux-x64-gnu`). Prepending only the executable's directory let
-/// PATH fall through to an older global install that lacks newer commands.
+/// Agents run `pockymoe`, or `remote-codex` from skills, prompts and hook
+/// scripts written before the rename, but release executables carry a platform
+/// suffix (`remote-codex-linux-x64-gnu`) and native installs keep the
+/// pre-rename file name. Prepending only the executable's directory let PATH
+/// fall through to an older global install that lacks newer commands.
 fn cli_bin_dir(database: &std::path::Path) -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let name = if cfg!(windows) {
-        "pockymoe.exe"
-    } else {
-        "pockymoe"
-    };
-    if exe.file_name()? == name {
-        return exe.parent().map(std::path::Path::to_path_buf);
-    }
     let dir = database.with_extension("cli-bin");
     let linked = (|| -> std::io::Result<()> {
         std::fs::create_dir_all(&dir)?;
-        let staged = dir.join(format!(".{name}.{}", Uuid::new_v4().simple()));
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&exe, &staged)?;
-        #[cfg(windows)]
-        std::fs::hard_link(&exe, &staged).or_else(|_| std::fs::copy(&exe, &staged).map(|_| ()))?;
-        // Replaces the link an earlier version left, without a window where it is missing.
-        std::fs::rename(&staged, dir.join(name)).inspect_err(|_| {
-            let _ = std::fs::remove_file(&staged);
-        })
+        for command in ["pockymoe", "remote-codex"] {
+            let name = if cfg!(windows) {
+                format!("{command}.exe")
+            } else {
+                command.to_string()
+            };
+            let staged = dir.join(format!(".{name}.{}", Uuid::new_v4().simple()));
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&exe, &staged)?;
+            #[cfg(windows)]
+            std::fs::hard_link(&exe, &staged)
+                .or_else(|_| std::fs::copy(&exe, &staged).map(|_| ()))?;
+            // Replaces the link an earlier version left, without a window where it is missing.
+            std::fs::rename(&staged, dir.join(&name)).inspect_err(|_| {
+                let _ = std::fs::remove_file(&staged);
+            })?;
+        }
+        Ok(())
     })();
     match linked {
         Ok(()) => Some(dir),
@@ -125,10 +128,15 @@ impl Supervisor {
         let context = self.interaction.context.read().unwrap().clone();
         let env = context
             .map(|c| {
+                let token = self.cli_thread_token(thread_id);
                 let mut env = vec![
-                    ("POCKYMOE_URL".into(), c.url),
-                    ("POCKYMOE_TOKEN".into(), self.cli_thread_token(thread_id)),
+                    ("POCKYMOE_URL".into(), c.url.clone()),
+                    ("POCKYMOE_TOKEN".into(), token.clone()),
                     ("POCKYMOE_THREAD_ID".into(), thread_id.into()),
+                    // Skills, prompts and scripts written before the rename.
+                    ("REMOTE_CODEX_URL".into(), c.url),
+                    ("REMOTE_CODEX_TOKEN".into(), token),
+                    ("REMOTE_CODEX_THREAD_ID".into(), thread_id.into()),
                 ];
                 if let Ok(exe) = std::env::current_exe() {
                     if let Some(dir) = exe.parent() {

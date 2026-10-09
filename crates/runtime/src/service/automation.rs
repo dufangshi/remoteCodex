@@ -977,6 +977,8 @@ impl Supervisor {
             .env_clear()
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
             .env("POCKYMOE_COMMAND_ID", id)
+            // Hook scripts written before the rename read the old name.
+            .env("REMOTE_CODEX_COMMAND_ID", id)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
