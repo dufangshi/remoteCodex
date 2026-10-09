@@ -164,6 +164,74 @@ async fn spawn_supervisor_state(
 }
 
 #[tokio::test]
+async fn native_subagent_http_reads_scoped_transcripts_and_rejects_other_parent() {
+    let (dir, port, root, state) = spawn_supervisor_state(vec![Provider::Codex], |_| {}).await;
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{port}");
+    let workspace = json(
+        &client,
+        client
+            .post(format!("{base}/api/workspaces"))
+            .json(&json!({"absPath":root,"label":"Native agents"})),
+    )
+    .await;
+    let mut parents = vec![];
+    for _ in 0..2 {
+        let thread = json(&client, client.post(format!("{base}/api/threads/start")).json(&json!({"workspaceId":workspace["id"],"provider":"codex","model":"ios-e2e-stream","approvalMode":"yolo"}))).await;
+        parents.push(thread["id"].as_str().unwrap().to_owned());
+    }
+    let session = state
+        .get_thread(&parents[0])
+        .unwrap()
+        .provider_session_id
+        .unwrap();
+    let sessions = dir.path().join("codex-home/sessions");
+    std::fs::create_dir_all(&sessions).unwrap();
+    let child = "22222222-2222-4222-8222-222222222222";
+    let parent_records = [
+        json!({"type":"response_item","timestamp":"2026-10-09T00:00:00Z","payload":{"type":"function_call","name":"spawn_agent","call_id":"spawn-1","arguments":"{\"message\":\"Review runtime\"}"}}),
+        json!({"type":"response_item","timestamp":"2026-10-09T00:00:00Z","payload":{"type":"function_call_output","call_id":"spawn-1","output":format!("{{\"agent_id\":\"{child}\"}}")}}),
+    ];
+    let child_records = [
+        json!({"type":"session_meta","payload":{"id":child}}),
+        json!({"type":"response_item","timestamp":"2026-10-09T00:00:01Z","payload":{"type":"message","role":"assistant","content":[{"text":"Review finished"}]}}),
+        json!({"type":"event_msg","timestamp":"2026-10-09T00:00:02Z","payload":{"type":"task_complete"}}),
+    ];
+    for (id, records) in [
+        (&session, parent_records.as_slice()),
+        (&child.to_owned(), child_records.as_slice()),
+    ] {
+        let text = records.iter().map(|v| format!("{v}\n")).collect::<String>();
+        std::fs::write(sessions.join(format!("rollout-{id}.jsonl")), text).unwrap();
+    }
+    let list = json(
+        &client,
+        client.get(format!("{base}/api/threads/{}/subagents", parents[0])),
+    )
+    .await;
+    assert_eq!(list["agents"][0]["id"], child);
+    assert_eq!(list["agents"][0]["status"], "completed");
+    let detail = json(
+        &client,
+        client.get(format!(
+            "{base}/api/threads/{}/subagents/{child}",
+            parents[0]
+        )),
+    )
+    .await;
+    assert_eq!(detail["items"][0]["text"], "Review finished");
+    assert_eq!(detail["agent"]["prompt"], "Review runtime");
+    for parent in [&parents[1], "missing-parent"] {
+        let response = client
+            .get(format!("{base}/api/threads/{parent}/subagents/{child}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 404);
+    }
+}
+
+#[tokio::test]
 async fn device_metrics_api_returns_warmed_cached_native_samples() {
     let (_dir, port, _) = spawn_supervisor(vec![Provider::Codex]).await;
     let response = reqwest::get(format!("http://127.0.0.1:{port}/api/device/metrics"))

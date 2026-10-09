@@ -172,6 +172,9 @@ pub(crate) fn shared_thread_path_allowed(
             return true;
         }
         let parts: Vec<&str> = suffix.split('/').filter(|part| !part.is_empty()).collect();
+        if parts.first() == Some(&"subagents") && matches!(parts.len(), 1 | 2) {
+            return true;
+        }
         if parts.len() == 3 && matches!(parts[0], "items" | "turns") && parts[2] == "detail" {
             return true;
         }
@@ -602,6 +605,36 @@ mod tests {
 #[cfg(test)]
 mod automation_acl_tests {
     use super::*;
+    #[test]
+    fn native_subagent_routes_stay_within_the_shared_parent_thread() {
+        for suffix in ["/subagents", "/subagents/child-1"] {
+            assert!(shared_thread_path_allowed(
+                "GET",
+                &format!("/api/threads/parent{suffix}"),
+                "parent",
+                false
+            ));
+            assert!(!shared_thread_path_allowed(
+                "GET",
+                &format!("/api/threads/another{suffix}"),
+                "parent",
+                false
+            ));
+            assert!(!shared_thread_path_allowed(
+                "POST",
+                &format!("/api/threads/parent{suffix}"),
+                "parent",
+                false
+            ));
+        }
+        assert!(!shared_thread_path_allowed(
+            "GET",
+            "/api/threads/parent/subagents/child-1/settings",
+            "parent",
+            false
+        ));
+    }
+
     #[test]
     fn automation_routes_preserve_read_control_boundaries_and_reject_unknown_actions() {
         for suffix in [

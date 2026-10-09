@@ -310,10 +310,12 @@ pub struct Supervisor {
     pub maintenance_gate: Arc<tokio::sync::RwLock<()>>,
     pub management_jobs: std::sync::Mutex<HashMap<String, Value>>,
     steer_locks: Mutex<HashMap<String, std::sync::Weak<Mutex<()>>>>,
-    local_session_homes: LocalSessionHomes,
+    pub(crate) local_session_homes: LocalSessionHomes,
     usage_history: crate::usage_history::UsageHistoryCache,
     generation: generation::GenerationCache,
     claude_history: claude_history::HistoryCache,
+    pub(crate) native_subagents:
+        Arc<std::sync::Mutex<crate::native_subagents::NativeSubagentsCache>>,
     pub subscription_usage: crate::subscription::SubscriptionUsage,
     pub device_monitor: crate::device_metrics::DeviceMonitor,
 }
@@ -370,6 +372,7 @@ impl Supervisor {
             usage_history: Default::default(),
             generation: Default::default(),
             claude_history: Default::default(),
+            native_subagents: Default::default(),
             subscription_usage: Default::default(),
             device_monitor: Default::default(),
         };

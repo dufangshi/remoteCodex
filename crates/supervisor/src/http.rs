@@ -265,6 +265,11 @@ pub fn router(state: AppState) -> Router {
         .route("/api/threads/{id}/models", get(thread_models))
         .route("/api/threads/{id}/group", get(thread_group))
         .route("/api/threads/{id}/watches", get(thread_watches))
+        .route("/api/threads/{id}/subagents", get(thread_subagents))
+        .route(
+            "/api/threads/{id}/subagents/{agentId}",
+            get(thread_subagent_detail),
+        )
         .route("/api/threads/{id}/fork-turns", get(thread_fork_turns))
         .route("/api/threads/{id}/capabilities", get(thread_capabilities))
         .route("/api/threads/{id}/fork", post(thread_fork))
@@ -1281,6 +1286,27 @@ async fn thread_item_detail(
     Ok(Json(
         state
             .get_history_item_detail(&id, &item_id)
+            .map_err(map_err)?,
+    ))
+}
+
+async fn thread_subagents(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        state.native_subagents(&id, None).await.map_err(map_err)?,
+    ))
+}
+
+async fn thread_subagent_detail(
+    Path((id, agent_id)): Path<(String, String)>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    Ok(Json(
+        state
+            .native_subagents(&id, Some(&agent_id))
+            .await
             .map_err(map_err)?,
     ))
 }

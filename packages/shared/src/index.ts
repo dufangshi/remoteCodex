@@ -1472,6 +1472,25 @@ export interface ThreadSubagentDto {
   isBackground?: boolean;
 }
 
+export interface NativeSubagentDto extends ThreadSubagentDto {
+  provider: 'codex' | 'claude' | string;
+  nativeSessionId: string | null;
+  model: string | null;
+  prompt: string | null;
+  updatedAt: string | null;
+  latestActivity: string | null;
+  tokenUsage: ThreadTurnTokenUsageDto | null;
+  priceEstimate: ThreadTurnPriceEstimateDto | null;
+  activityCount: number;
+  detailsAvailable: boolean;
+}
+
+export interface NativeSubagentDetailDto {
+  agent: NativeSubagentDto;
+  items: ThreadHistoryItemDto[];
+  hasEarlierItems: boolean;
+}
+
 export interface ThreadLiveItemsDto {
   turnId: string;
   items: ThreadHistoryItemDto[];
