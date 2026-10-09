@@ -189,7 +189,8 @@ test('New Chat starts a DSH thread in the chosen run mode', async ({ page, reque
   await dialog.locator('label').filter({ hasText: 'DeepSeek Harness' }).click();
   await dialog.getByLabel('Model', { exact: true }).selectOption(model);
   const runMode = dialog.getByLabel('Run mode', { exact: true });
-  await expect(runMode.locator('option')).toHaveText(['Standard (default)', 'PTC', 'Minimal', 'Creator']);
+  // PTC needs a Node.js build with TypeScript support; without it the mode is shown disabled.
+  await expect(runMode.locator('option')).toHaveText(['Standard (default)', /^PTC( \(unavailable: .+\))?$/, 'Minimal', 'Creator']);
   await runMode.selectOption('minimal');
   await expect(dialog.getByText(/Only a persistent terminal/)).toBeVisible();
   await dialog.getByLabel('Title', { exact: true }).fill('DSH minimal mode');
@@ -214,8 +215,9 @@ test('the DeepSeek Harness plugin panel switches modes, runs plugin commands and
   const panel = page.getByTestId('dsh-plugin-panel');
   const runMode = panel.getByRole('combobox', { name: 'Run mode' });
   await expect(runMode).toBeEnabled();
-  await runMode.selectOption('ptc');
-  await expect.poll(async () => (await harness(request, id)).session.projections.agentPreset).toBe('ptc');
+  // Creator mode works on any Node.js; PTC needs one with TypeScript support.
+  await runMode.selectOption('cordis');
+  await expect.poll(async () => (await harness(request, id)).session.projections.agentPreset).toBe('cordis');
   const commands = panel.getByRole('region', { name: 'Commands' });
   await expect(commands).toContainText('/planThread control');
   await expect(commands).toContainText('/exportIn the native console');

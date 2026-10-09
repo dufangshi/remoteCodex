@@ -89,6 +89,18 @@ export function apply(ctx, config) {
     }
     await registry.select(agent, config.preset || registry.defaultId);
   });
+  // Billing usage: DSH's ACP reports only context occupancy. Each model
+  // call's tokens count toward the root session's turn, subagents included.
+  let usageReports = 0;
+  ctx.on('session/event', (session, event) => {
+    const usage = event?.type === 'assistant/message' ? event.data?.usage : undefined;
+    if (!usage) return;
+    const owner = live().list.find(agent => agent.session === session);
+    const top = owner && rootOf(owner);
+    if (!top) return;
+    usageReports += 1;
+    send({ event: 'usage', sessionId: top.id, reportId: `${session.id}:${event.seq ?? `n${usageReports}`}`, usage });
+  });
   let consoleServer = null;
   const busy = new Map();
   const report = (top, changedAgent, changedStatus) => {
@@ -152,25 +164,44 @@ export function apply(ctx, config) {
       changed.set(session, (changed.get(session) ?? new Set()).add(key));
     });
   });
+  // Questions and tool approvals for a session or its subagents go to the
+  // Remote Codex turn. DSH's Web host would otherwise hold them for a Web
+  // client that is not there, and the session would wait forever.
+  const ask = (signal, message) => new Promise((resolve, reject) => {
+    const id = ++questionId;
+    const abort = () => {
+      questions.delete(id);
+      send({ event: 'question-cancelled', questionId: id });
+      reject(signal.reason ?? new Error('question aborted'));
+    };
+    if (signal?.aborted) return abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    questions.set(id, {
+      resolve: value => { signal?.removeEventListener('abort', abort); resolve(value); },
+      reject: error => { signal?.removeEventListener('abort', abort); reject(error); },
+    });
+    send({ ...message, questionId: id });
+  });
+  const answerable = agent => socket && !socket.destroyed && agent ? rootOf(agent) : undefined;
   // Without an answerer, DSH rejects plan reviews and questions as NO_PROVIDER.
   ctx.on('user-questions/request', (request, next) => {
-    const agent = request.agent;
-    if (!socket || socket.destroyed || !agent || !root(agent)) return next();
-    const id = ++questionId;
-    return new Promise((resolve, reject) => {
-      const abort = () => {
-        questions.delete(id);
-        send({ event: 'question-cancelled', questionId: id });
-        reject(request.signal.reason ?? new Error('question aborted'));
-      };
-      if (request.signal?.aborted) return abort();
-      request.signal?.addEventListener('abort', abort, { once: true });
-      questions.set(id, {
-        resolve: value => { request.signal?.removeEventListener('abort', abort); resolve(value); },
-        reject: error => { request.signal?.removeEventListener('abort', abort); reject(error); },
-      });
-      send({ event: 'question', questionId: id, sessionId: String(agent.id), questions: request.questions });
-    });
+    const top = answerable(request.agent);
+    if (!top) return next();
+    return ask(request.signal, { event: 'question', sessionId: String(top.id), questions: request.questions });
+  });
+  ctx.on('approval/request', (request, next) => {
+    const top = answerable(request.agent);
+    if (!top) return next();
+    return ask(request.signal, {
+      event: 'approval',
+      sessionId: String(top.id),
+      request: {
+        toolName: request.toolName,
+        callId: request.callId ?? null,
+        reason: request.displayReason?.en ?? request.reason ?? null,
+        subagent: request.agent !== top,
+      },
+    }).then(outcome => (outcome === 'allowed-once' ? 'allowed-once' : 'rejected'), () => 'cancelled');
   });
 
   const dispose = ctx.appReady.onReady(() => {
@@ -429,7 +460,10 @@ async function snapshot(ctx) {
     })),
     runModes: (runModes ?? []).map(mode => ({
       id: mode.id, name: mode.name ?? null, description: mode.description ?? null,
-      isDefault: mode.id === registry.defaultId, broken: mode.broken ?? null,
+      isDefault: mode.id === registry.defaultId,
+      // PTC's run_code executes TypeScript in this Node; distro builds can lack it.
+      broken: mode.broken
+        ?? (mode.id === 'ptc' && !process.features?.typescript ? 'needs Node.js with TypeScript support' : null),
     })),
     features: {
       stream: true,

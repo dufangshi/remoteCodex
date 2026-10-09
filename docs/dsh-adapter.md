@@ -265,6 +265,44 @@ relay 会把 Host/Origin 改写成 `127.0.0.1:<端口>`，正好通过代理围�
   - 插件安装/卸载：pnpm 长任务，含进度、registry 选择（DSH 内置 npmmirror 回退）、版本兼容检查和重启编排。
   - 向上游争取：ACP 的 mode/permission config options、流式 chunk、`_meta` 中的工具展示。
 
+## 真实上游测试（集成分支 `integrate/dsh-upstreams`）
+
+**环境。**
+
+- 「上游」tab 把本机 Codex 使用的 OpenAI 兼容网关（Responses API）配置给 DSH。
+- Supervisor 的 HOME、CODEX_HOME、CLAUDE_CONFIG_DIR、DSH_HOME 全部隔离，`DSH_TELEMETRY_DISABLED=1`。
+
+**通过的任务。**
+
+| 任务 | 结果 |
+|---|---|
+| 多文件 Python 包、CLI、单元测试 | 自跑 13 项通过，独立复跑通过 |
+| 后续扩展与计划模式 | 计划审阅 → 批准 → 按计划实施 |
+| 子代理代码审查 | 审查发现 2 个真实问题并已修复 |
+| goal | 小目标自主完成；大目标中途停止后，两侧都处于暂停 |
+| 用户提问 | 问题出现在 Remote Codex，回答后继续 |
+| 只读沙箱下的提权 | 以权限请求呈现，拒绝后未写入 |
+| `/compact` | 下一轮上下文从 21k 降到 10k，记忆保留 |
+| 切换上游模型 | 旧线程继续使用旧模型，新线程使用新模型 |
+| 备份逐个恢复 | 精确回到初始状态 |
+
+**测出并修复的问题。**
+
+1. **审批卡死。** 原生组合里 DSH 的 Web 网关会接住 `approval/request` 和 `user-questions/request`，并等待 DSH 网页客户端回答；没有客户端时永远不放行，触发提权的回合因此挂起。现在 bridge 对根会话及其子代理统一作答：审批转成线程的权限请求（yolo 自动允许，否则「允许一次 / 拒绝」，无法展示时拒绝），提问归到根会话所在的回合。
+2. **模型列表。** 有启用中的上游时，模型列表改用上游目录的裸 id，而 DSH 只接受 `["provider","model"]`，建线程直接失败。现在 DSH 始终以自己的 ACP 选项为准。
+3. **切换上游模型后旧线程无法恢复，排队消息每 5 秒重试一次。** 现在 DSH 适配器写入新模型时保留此前写入过的模型。
+4. **兼容上游的输出上限被写死为 4096 tokens。** 改为 32768。
+5. **没有每回合用量。** DSH 的 ACP 只报上下文占用。现在 bridge 监听 `session/event` 中 `assistant/message` 的用量（含子代理），按互斥计数映射后计入回合。
+6. **工具分类。** DSH 工具都是 `kind:"other"`：`todo_write` 被当成文件变更，`write` 不显示路径，`bash` 不显示为命令。现在按输入判断。
+7. **PTC 在没有 TypeScript 支持的 Node 上必然失败。** 发行版打包的 Node 可能不带 TypeScript 支持，例如本机的 22.22.1。现在 bridge 把 PTC 标记为不可用并写明原因，界面上显示为置灰。
+
+**仍存在的现象。**
+
+- 网关偶发 `upstream_http2_stream_error`，回合标记为失败，可在同一线程继续。
+- 自定义 DSH 上游的模型没有推理强度选项（未声明 reasoning）。
+- 压缩完成后，界面上的上下文用量要到下一次模型调用才刷新。
+- 我们注入的上下文提示会引导模型优先使用 `remote-codex` CLI 协作，与 DSH 自带的子代理工具形成竞争。
+
 ## 验证
 
 均为隔离 `DSH_HOME`，未连接正式 relay 或 Supervisor：

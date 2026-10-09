@@ -477,3 +477,62 @@ test('the console proxy closes DSH streams with the browser and on dispose', asy
   }
 });
 
+test('model-call usage is reported for the root session, subagents included', async () => {
+  const { server, port, connection } = await supervisor();
+  const dsh = fakeDsh();
+  const child = { id: 'child-1', session: { id: 'child-session' } };
+  dsh.ctx.agents.list = () => [dsh.agent, child];
+  dsh.ctx.agents.isOwnedBy = (id, owner) => id === 'child-1' && owner === dsh.agent;
+  try {
+    apply(dsh.ctx, { port, token: 't' });
+    dsh.ready();
+    const next = lines(await connection);
+    await next();
+    const onEvent = dsh.listeners.get('session/event');
+    const usage = { inputTokens: 10, outputTokens: 5, cacheReadTokens: 90 };
+    onEvent(child.session, { type: 'assistant/message', seq: 4, data: { usage } });
+    assert.deepEqual(await next(), { event: 'usage', sessionId: 'session-1', reportId: 'child-session:4', usage });
+    // Other events and messages without usage report nothing.
+    onEvent(dsh.agent.session, { type: 'tool/result', seq: 5, data: {} });
+    onEvent(dsh.agent.session, { type: 'assistant/message', seq: 6, data: {} });
+    onEvent(dsh.agent.session, { type: 'assistant/message', seq: 7, data: { usage } });
+    assert.equal((await next()).reportId, 'session-1:7');
+  } finally { await stop(server, dsh); }
+});
+
+test('tool approvals reach Remote Codex for the root session and fail closed', async () => {
+  const { server, port, connection } = await supervisor();
+  const dsh = fakeDsh();
+  const child = { id: 'child-1', session: { id: 'child-session' } };
+  dsh.ctx.agents.list = () => [dsh.agent, child];
+  dsh.ctx.agents.isOwnedBy = (id, owner) => id === 'child-1' && owner === dsh.agent;
+  try {
+    apply(dsh.ctx, { port, token: 't' });
+    dsh.ready();
+    const socket = await connection;
+    const next = lines(socket);
+    await next();
+    const approve = dsh.listeners.get('approval/request');
+    const fallthrough = () => Promise.resolve('unavailable');
+    // A subagent's approval belongs to its root session's turn.
+    const allowed = approve({ agent: child, toolName: 'bash', callId: 'c1', reason: 'write the report' }, fallthrough);
+    const asked = await next();
+    assert.equal(asked.event, 'approval');
+    assert.equal(asked.sessionId, 'session-1');
+    assert.deepEqual(asked.request, { toolName: 'bash', callId: 'c1', reason: 'write the report', subagent: true });
+    socket.write(JSON.stringify({ answer: asked.questionId, result: 'allowed-once' }) + '\n');
+    assert.equal(await allowed, 'allowed-once');
+    // Anything but an explicit allow is a rejection.
+    const rejected = approve({ agent: dsh.agent, toolName: 'bash' }, fallthrough);
+    socket.write(JSON.stringify({ answer: (await next()).questionId, result: 'maybe' }) + '\n');
+    assert.equal(await rejected, 'rejected');
+    // An aborted approval is cancelled and withdrawn.
+    const controller = new AbortController();
+    const cancelled = approve({ agent: dsh.agent, toolName: 'bash', signal: controller.signal }, fallthrough);
+    await next();
+    controller.abort();
+    assert.equal(await cancelled, 'cancelled');
+    assert.equal((await next()).event, 'question-cancelled');
+  } finally { await stop(server, dsh); }
+});
+

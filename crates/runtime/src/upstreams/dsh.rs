@@ -36,6 +36,30 @@ fn yaml_doc(path: &Path, default: &str) -> Result<Yaml> {
     serde_yaml::from_str(&read(path)?.unwrap_or(default.into()))
         .map_err(|_| anyhow!("Existing DSH YAML is invalid; repair it before switching upstreams"))
 }
+/// The model list for an entry: the selected model first, then the models
+/// written before. DSH threads keep their `["provider","model"]` value, so a
+/// switched model must stay configured or those threads can no longer resume.
+fn models_with(rows: &[Yaml], id: &str, path: &[&str], model: Value) -> Result<Value> {
+    let selected = model["id"].clone();
+    let mut models = vec![model];
+    let existing = rows
+        .iter()
+        .rev()
+        .find(|row| row.get("id").and_then(Yaml::as_str) == Some(id) && row.get("insert").is_none())
+        .and_then(|row| {
+            path.iter()
+                .try_fold(row.get("config")?, |value, key| value.get(*key))
+        })
+        .and_then(Yaml::as_sequence);
+    for entry in existing.into_iter().flatten() {
+        let entry: Value = serde_json::to_value(entry)?;
+        if entry["id"].is_string() && entry["id"] != selected {
+            models.push(entry);
+        }
+    }
+    Ok(Value::Array(models))
+}
+
 fn set_entry(rows: &mut Vec<Yaml>, id: &str, config: Value) -> Result<()> {
     let row = rows.iter_mut().rev().find(|row| {
         row.get("id").and_then(Yaml::as_str) == Some(id) && row.get("insert").is_none()
@@ -71,6 +95,10 @@ fn set_entry(rows: &mut Vec<Yaml>, id: &str, config: Value) -> Result<()> {
     }
     Ok(())
 }
+/// Output cap for compatible models: room for long code edits, within what
+/// OpenAI-style APIs accept.
+const MAX_OUTPUT_TOKENS: i64 = 32_768;
+
 pub fn changes(p: &Profile, root: &Path) -> Result<Vec<(PathBuf, String)>> {
     let paths = paths(p, root)?;
     let key_ref = credential_ref(p);
@@ -94,20 +122,32 @@ pub fn changes(p: &Profile, root: &Path) -> Result<Vec<(PathBuf, String)>> {
         .as_sequence_mut()
         .ok_or_else(|| anyhow!("DSH profile patch must be a YAML sequence"))?;
     let provider = if p.api_type == "anthropic" {
+        let models = models_with(
+            rows,
+            "llm-deepseek",
+            &["models"],
+            json!({"id":p.model,"contextWindow":p.context_window}),
+        )?;
         set_entry(
             rows,
             "llm-deepseek",
-            json!({"baseURL":p.base_url,"apiKeyEnv":key_ref,"models":[{"id":p.model,"contextWindow":p.context_window}]}),
+            json!({"baseURL":p.base_url,"apiKeyEnv":key_ref,"models":models}),
         )?;
         "deepseek-official"
     } else {
+        let models = models_with(
+            rows,
+            "llm-pi-ai",
+            &["providers", "remote-codex", "models"],
+            json!({"id":p.model,"name":p.model,"contextWindow":p.context_window,"maxTokens":p.context_window.min(MAX_OUTPUT_TOKENS)}),
+        )?;
         set_entry(
             rows,
             "llm-pi-ai",
             json!({"providers":{"remote-codex":{
                 "displayName":p.name, "baseURL":p.base_url,"apiKeyEnv":key_ref,
                 "api":if p.api_type == "responses" {"openai-responses"} else {"openai-completions"},
-                "models":[{"id":p.model,"name":p.model,"contextWindow":p.context_window,"maxTokens":p.context_window.min(4096)}],
+                "models":models,
                 "headers":p.settings_config.get("headers").cloned().unwrap_or(json!({}))
             }}}),
         )?;
@@ -315,6 +355,39 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+    #[test]
+    fn switching_the_model_keeps_earlier_models_for_existing_threads() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("isolated-dsh-home");
+        let store = temp.path().join("store");
+        let mut p = super::super::tests::fixture("deepseek");
+        p.api_type = "responses".into();
+        p.model = "first".into();
+        upsert(&store, p.clone()).unwrap();
+        activate_at(&store, &p, &root).unwrap();
+        p.model = "second".into();
+        upsert(&store, p.clone()).unwrap();
+        activate_at(&store, &p, &root).unwrap();
+        let rows = yaml_doc(&root.join("profiles/acp/cordis.patch.yml"), "").unwrap();
+        let rows = rows.as_sequence().unwrap();
+        let pi = rows
+            .iter()
+            .find(|v| v["id"].as_str() == Some("llm-pi-ai"))
+            .unwrap();
+        let ids: Vec<_> = pi["config"]["providers"]["remote-codex"]["models"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|m| m["id"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(ids, ["second", "first"]);
+        let acp = rows
+            .iter()
+            .find(|v| v["id"].as_str() == Some("acp"))
+            .unwrap();
+        assert_eq!(acp["config"]["model"].as_str(), Some("second"));
+    }
+
     #[test]
     fn dsh_official_and_openai_upstreams_preserve_other_routes_and_restore_private_files() {
         let temp = tempfile::tempdir().unwrap();

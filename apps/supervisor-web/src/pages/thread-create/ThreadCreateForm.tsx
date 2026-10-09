@@ -258,9 +258,9 @@ export function ThreadCreateForm({
           cwd: selectedWorkspace.absPath,
         })]).then(([isOwner, catalog]) => {
           if (cancelled || !isOwner) return;
-          const modes = (catalog?.runModes ?? []).filter((mode) => !mode.broken);
+          const modes = catalog?.runModes ?? [];
           setRunModes(modes);
-          setRunMode(modes.find((mode) => mode.isDefault)?.id ?? '');
+          setRunMode(modes.find((mode) => mode.isDefault && !mode.broken)?.id ?? '');
         }, () => undefined);
       })
       .catch((caught) => {
@@ -629,7 +629,7 @@ export function ThreadCreateForm({
               className={controlClass}
             >
               {runModes.map((mode) => (
-                <option key={mode.id} value={mode.id}>{dshRunModeName(mode)}</option>
+                <option key={mode.id} value={mode.id} disabled={Boolean(mode.broken)}>{dshRunModeName(mode)}</option>
               ))}
             </select>
             <p className="host-muted mt-1 text-xs">

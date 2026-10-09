@@ -1467,7 +1467,10 @@ impl AgentRuntime for AcpRuntime {
             Ok(def) => def,
             Err(_) => return Ok(default_model_stub(agent_id.or(self.bound_agent.as_deref()))),
         };
-        if let Some(upstreams) = &self.upstreams {
+        // DSH's own ACP options name its models (`["provider","model"]`) and
+        // already reflect an applied upstream; plain catalog ids are not values.
+        let upstreams = self.upstreams.as_ref().filter(|_| def.id != "deepseek");
+        if let Some(upstreams) = upstreams {
             if let Some((profile, models)) = upstreams.catalog(&def.id).await? {
                 let known = if def.id == "grok" {
                     if models.iter().any(|m| m.reasoning.is_none()) {
@@ -2189,6 +2192,11 @@ impl AgentRuntime for AcpRuntime {
                         }
                         Some(BridgeEvent::Status { session_id: sid, status }) if sid == session_id => {
                             dsh_running = status == "running";
+                        }
+                        Some(BridgeEvent::Usage { session_id: sid, report }) if sid == session_id => {
+                            if let Some(usage) = adapter_usage.apply(report) {
+                                emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden);
+                            }
                         }
                         Some(BridgeEvent::Projection { session_id: sid, key, value }) if sid == session_id => {
                             if key == "goal" {
@@ -3380,15 +3388,40 @@ fn spawn_dsh_mux(inner: Arc<Inner>, process_id: String, bridge: Arc<super::deeps
                             .await;
                     });
                 }
+                BridgeEvent::Approval {
+                    id,
+                    session_id,
+                    request,
+                } => {
+                    let (inner, bridge, process_id, registry) = (
+                        inner.clone(),
+                        bridge.clone(),
+                        process_id.clone(),
+                        questions.clone(),
+                    );
+                    tokio::spawn(async move {
+                        let outcome = answer_dsh_approval(
+                            &inner,
+                            &process_id,
+                            &session_id,
+                            id,
+                            &request,
+                            &registry,
+                        )
+                        .await;
+                        let _ = bridge.answer(id, Ok(json!(outcome))).await;
+                    });
+                }
                 BridgeEvent::QuestionCancelled { id } => {
                     let request_id = questions.lock().unwrap().remove(&id);
                     if let Some(request_id) = request_id {
                         // Dropping the reply sender resolves the request as unanswered.
                         inner.pending_inputs.lock().await.remove(&request_id);
+                        inner.pending_permissions.lock().await.remove(&request_id);
                     }
                 }
                 BridgeEvent::Closed => break,
-                BridgeEvent::Stream { .. } | BridgeEvent::Lagged => {}
+                BridgeEvent::Stream { .. } | BridgeEvent::Usage { .. } | BridgeEvent::Lagged => {}
             }
         }
     });
@@ -3458,6 +3491,120 @@ async fn next_dsh_event(
             }
             Err(broadcast::error::RecvError::Closed) => return None,
         }
+    }
+}
+
+/// Show an ACP-shaped permission request in the active turn and wait for the
+/// user's option (None when cancelled, timed out or no turn can show it).
+async fn ask_permission(
+    inner: &Inner,
+    active: &Option<(String, String, EventBus)>,
+    request_id: &str,
+    params: &Value,
+) -> Option<String> {
+    let choices = parse_permission_choices(params);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    inner.pending_permissions.lock().await.insert(
+        request_id.to_string(),
+        PendingPermission {
+            tx,
+            options: choices.clone(),
+        },
+    );
+    let title = permission_title(params);
+    if let Some((thread_id, turn_id, bus)) = active {
+        let dto = ThreadActionRequestDto {
+            id: request_id.to_string(),
+            kind: "permissionRequest".into(),
+            title: title.clone(),
+            description: permission_description(params),
+            turn_id: Some(turn_id.clone()),
+            item_id: params
+                .pointer("/toolCall/toolCallId")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            created_at: now_rfc3339(),
+            questions: permission_questions(&title, &choices),
+        };
+        inner
+            .pending_dtos
+            .lock()
+            .await
+            .entry(thread_id.clone())
+            .or_default()
+            .push(dto.clone());
+        bus.emit(ThreadEventEnvelope {
+            event_type: "thread.request.created".into(),
+            thread_id: thread_id.clone(),
+            timestamp: now_rfc3339(),
+            payload: json!({ "request": dto }),
+        });
+    }
+    let selected = tokio::time::timeout(Duration::from_secs(300), rx)
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .filter(|option| option != "cancelled");
+    // Include timeout/cancellation, not just replies through HTTP. The
+    // LLM clock and question UI must not remain paused after resolution.
+    inner.pending_permissions.lock().await.remove(request_id);
+    if let Some((thread_id, turn_id, bus)) = active {
+        if let Some(list) = inner.pending_dtos.lock().await.get_mut(thread_id) {
+            list.retain(|request| request.id != request_id);
+        }
+        bus.emit(ThreadEventEnvelope {
+            event_type: "thread.request.resolved".into(),
+            thread_id: thread_id.clone(),
+            timestamp: now_rfc3339(),
+            payload: json!({"requestId":request_id,"turnId":turn_id}),
+        });
+    }
+    selected
+}
+
+/// DSH tool approval (sandbox escalation) for a root session or one of its
+/// subagents, as the thread's permission request. Unanswerable requests are
+/// rejected: DSH must never wait on an approval nobody can see.
+async fn answer_dsh_approval(
+    inner: &Inner,
+    process_id: &str,
+    session_id: &str,
+    approval_id: u64,
+    asked: &Value,
+    registry: &std::sync::Mutex<HashMap<u64, String>>,
+) -> &'static str {
+    let (policy, active) = {
+        let sessions = inner.sessions.lock().await;
+        match sessions
+            .values()
+            .find(|live| live.process.id == process_id && live.session_id == session_id)
+        {
+            Some(live) => (
+                AcpRuntime::policy_from_live(live),
+                live.active
+                    .as_ref()
+                    .map(|a| (a.thread_id.clone(), a.turn_id.clone(), a.bus.clone())),
+            ),
+            None => return "rejected",
+        }
+    };
+    if policy.auto_approve() {
+        return "allowed-once";
+    }
+    if active.is_none() {
+        return "rejected";
+    }
+    let params = super::deepseek::approval_permission(asked);
+    let request_id = format!("dsh-approval-{}", Uuid::new_v4());
+    registry
+        .lock()
+        .unwrap()
+        .insert(approval_id, request_id.clone());
+    let selected = ask_permission(inner, &active, &request_id, &params).await;
+    registry.lock().unwrap().remove(&approval_id);
+    match selected.as_deref() {
+        Some("allow-once") => "allowed-once",
+        _ => "rejected",
     }
 }
 
@@ -3536,49 +3683,8 @@ async fn handle_agent_request(
                 }
                 return Ok(());
             }
-            let request_id = format!("perm-{req_id}");
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            inner.pending_permissions.lock().await.insert(
-                request_id.clone(),
-                PendingPermission {
-                    tx,
-                    options: choices.clone(),
-                },
-            );
-            let title = permission_title(&params);
-            if let Some((thread_id, turn_id, bus)) = &active {
-                let dto = ThreadActionRequestDto {
-                    id: request_id.clone(),
-                    kind: "permissionRequest".into(),
-                    title: title.clone(),
-                    description: permission_description(&params),
-                    turn_id: Some(turn_id.clone()),
-                    item_id: params
-                        .pointer("/toolCall/toolCallId")
-                        .and_then(Value::as_str)
-                        .map(str::to_string),
-                    created_at: now_rfc3339(),
-                    questions: permission_questions(&title, &choices),
-                };
-                inner
-                    .pending_dtos
-                    .lock()
-                    .await
-                    .entry(thread_id.clone())
-                    .or_default()
-                    .push(dto.clone());
-                bus.emit(ThreadEventEnvelope {
-                    event_type: "thread.request.created".into(),
-                    thread_id: thread_id.clone(),
-                    timestamp: now_rfc3339(),
-                    payload: json!({ "request": dto }),
-                });
-            }
-            let selected = tokio::time::timeout(Duration::from_secs(300), rx)
-                .await
-                .ok()
-                .and_then(Result::ok);
-            if let Some(option) = selected.filter(|option| option != "cancelled") {
+            let selected = ask_permission(inner, &active, &format!("perm-{req_id}"), &params).await;
+            if let Some(option) = selected {
                 process
                     .respond(
                         req_id,
@@ -3589,20 +3695,6 @@ async fn handle_agent_request(
                 process
                     .respond(req_id, json!({ "outcome": { "outcome": "cancelled" } }))
                     .await?;
-            }
-            // Include timeout/cancellation, not just replies through HTTP. The
-            // LLM clock and question UI must not remain paused after resolution.
-            inner.pending_permissions.lock().await.remove(&request_id);
-            if let Some((thread_id, turn_id, bus)) = &active {
-                if let Some(list) = inner.pending_dtos.lock().await.get_mut(thread_id) {
-                    list.retain(|request| request.id != request_id);
-                }
-                bus.emit(ThreadEventEnvelope {
-                    event_type: "thread.request.resolved".into(),
-                    thread_id: thread_id.clone(),
-                    timestamp: now_rfc3339(),
-                    payload: json!({"requestId":request_id,"turnId":turn_id}),
-                });
             }
         }
         "fs/read_text_file" => {

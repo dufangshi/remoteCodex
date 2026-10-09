@@ -644,6 +644,7 @@ fn tool_item(turn_id: &str, body: &Value) -> ThreadHistoryItemDto {
         body.get("title").and_then(Value::as_str).unwrap_or("")
     )
     .to_ascii_lowercase();
+    let command = record_value(body.get("rawInput"), &["command", "cmd", "argv"]);
     let kind = if is_subagent_tool(raw_kind, &normalized_name) {
         "agentToolCall"
     } else {
@@ -653,6 +654,10 @@ fn tool_item(turn_id: &str, body: &Value) -> ThreadHistoryItemDto {
             "fetch" => "webSearch",
             "think" => "reasoning",
             "execute" => "commandExecution",
+            // Harnesses that report every tool as "other" (DSH): a command
+            // input is a shell run, and a todo list is not a file.
+            _ if command.is_some() => "commandExecution",
+            _ if normalized_name.contains("todo") => "toolCall",
             _ if normalized_name.contains("web") || normalized_name.contains("http") => "webSearch",
             _ if normalized_name.contains("read") => "fileRead",
             _ if normalized_name.contains("edit")
@@ -672,10 +677,9 @@ fn tool_item(turn_id: &str, body: &Value) -> ThreadHistoryItemDto {
         })
         .collect::<Vec<_>>()
         .join(", ");
-    let command = record_value(body.get("rawInput"), &["command", "cmd", "argv"]);
     let input_path = record_value(
         body.get("rawInput"),
-        &["path", "target_file", "file", "uri"],
+        &["path", "file_path", "target_file", "file", "uri"],
     );
     let title = command
         .clone()
@@ -1110,6 +1114,31 @@ mod stream_tests {
 mod presentation_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn other_kind_tools_are_classified_by_their_input() {
+        // DSH reports every tool as "other" with its name as the title.
+        let item = |name: &str, input: Value| {
+            tool_item(
+                "turn",
+                &json!({"toolCallId":name,"kind":"other","title":name,"status":"completed","rawInput":input}),
+            )
+        };
+        let todo = item(
+            "todo_write",
+            json!({"todos":[{"content":"x","status":"pending"}]}),
+        );
+        assert_eq!(todo.kind, "toolCall");
+        let write = item(
+            "write",
+            json!({"file_path":"inventory/core.py","content":"x"}),
+        );
+        assert_eq!(write.kind, "fileChange");
+        assert_eq!(write.text, "inventory/core.py");
+        let bash = item("bash", json!({"command":"python3 -m unittest"}));
+        assert_eq!(bash.kind, "commandExecution");
+        assert_eq!(bash.text, "python3 -m unittest");
+    }
 
     #[test]
     fn terminal_output_survives_references_deltas_and_final_snapshot() {

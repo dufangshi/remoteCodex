@@ -223,6 +223,19 @@ pub(super) enum BridgeEvent {
     QuestionCancelled {
         id: u64,
     },
+    /// DSH asks to approve a tool call (sandbox escalation) for the session
+    /// or one of its subagents.
+    Approval {
+        id: u64,
+        session_id: String,
+        request: Value,
+    },
+    /// One model call's tokens (the session's or a descendant subagent's),
+    /// as a delta report for the turn's usage accumulator.
+    Usage {
+        session_id: String,
+        report: Value,
+    },
     /// A slow subscriber missed events; re-read the session state.
     Lagged,
     Closed,
@@ -257,9 +270,67 @@ impl BridgeEvent {
             "question-cancelled" => Self::QuestionCancelled {
                 id: message["questionId"].as_u64()?,
             },
+            "approval" => Self::Approval {
+                id: message["questionId"].as_u64()?,
+                session_id: session_id()?,
+                request: message["request"].clone(),
+            },
+            "usage" => Self::Usage {
+                session_id: session_id()?,
+                report: usage_report(message)?,
+            },
             _ => return None,
         })
     }
+}
+
+/// A DSH approval as an ACP-shaped permission request: one-shot choices only,
+/// like DSH's own ACP bridge offers.
+pub(super) fn approval_permission(asked: &Value) -> Value {
+    let tool = asked["toolName"].as_str().unwrap_or("tool");
+    let reason = asked["reason"]
+        .as_str()
+        .filter(|reason| !reason.trim().is_empty());
+    let who = if asked["subagent"] == true {
+        "A DSH subagent"
+    } else {
+        "DSH"
+    };
+    json!({
+        "toolCall": {
+            "toolCallId": asked["callId"],
+            "title": format!("{who} asks to run {tool} with more access"),
+            "kind": "execute",
+            "rawInput": {"command": reason.unwrap_or(tool)},
+        },
+        "options": [
+            {"optionId":"allow-once","name":"Allow once","kind":"allow_once"},
+            {"optionId":"reject-once","name":"Reject","kind":"reject_once"},
+        ],
+    })
+}
+
+/// DSH counts input disjointly from cache reads and writes; the ACP-style
+/// `cached*` names tell the usage parser to add them back into input.
+fn usage_report(message: &Value) -> Option<Value> {
+    let usage = &message["usage"];
+    let number = |key: &str| usage[key].as_u64();
+    let mut total = json!({
+        "inputTokens": number("inputTokens")?,
+        "outputTokens": number("outputTokens")?,
+        "cachedReadTokens": number("cacheReadTokens").unwrap_or(0),
+        "cachedWriteTokens": number("cacheWriteTokens").unwrap_or(0),
+        "reasoningOutputTokens": number("reasoningTokens").unwrap_or(0),
+    });
+    if let Some(sum) = number("totalTokens") {
+        total["totalTokens"] = json!(sum);
+    }
+    let mut report =
+        json!({"total": total, "reportKind": "delta", "reportId": message["reportId"]});
+    if let Some(model) = message["model"].as_str() {
+        report["model"] = json!(model);
+    }
+    Some(report)
 }
 
 type Pending = std::sync::Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>;
@@ -1026,6 +1097,25 @@ mod tests {
         );
         // A reply without the lock bit never offers a run-mode switch.
         assert_eq!(session_meta(&json!({}))["presetLocked"], true);
+    }
+
+    #[test]
+    fn dsh_usage_becomes_a_delta_report_with_cache_in_input() {
+        let event = BridgeEvent::parse(&json!({
+            "event":"usage","sessionId":"s","reportId":"s:7",
+            "usage":{"inputTokens":100,"outputTokens":20,"cacheReadTokens":900,"totalTokens":1020}
+        }))
+        .unwrap();
+        let BridgeEvent::Usage { session_id, report } = event else {
+            panic!("usage event")
+        };
+        assert_eq!(session_id, "s");
+        assert_eq!(report["reportKind"], "delta");
+        let tokens = crate::usage::normalize_usage(&report).unwrap();
+        assert_eq!(tokens["total"]["inputTokens"], 1000);
+        assert_eq!(tokens["total"]["cachedInputTokens"], 900);
+        assert_eq!(tokens["total"]["totalTokens"], 1020);
+        assert!(BridgeEvent::parse(&json!({"event":"usage","sessionId":"s","usage":{}})).is_none());
     }
 
     #[test]

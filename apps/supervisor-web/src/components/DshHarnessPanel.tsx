@@ -125,6 +125,11 @@ const builtinRunMode = (id: string) =>
 export function dshRunModeName(mode: DshRunMode) {
   const known = builtinRunMode(mode.id);
   const name = known ? translate(known[0]) : mode.name ?? mode.id;
+  if (mode.broken) {
+    // DSH or the bridge says why this mode cannot run on the device.
+    const reason = typeof mode.broken === 'string' ? mode.broken : translate('settings.dshRunModeBrokenUnknown');
+    return translate('settings.dshRunModeBroken', { value1: name, value2: reason });
+  }
   return mode.isDefault ? translate('settings.dshRunModeDefault', { value1: name }) : name;
 }
 
@@ -340,7 +345,7 @@ export function DshHarnessPanel({
   const plan = projections.plan;
   const goal = projections.goal;
   const query = filter.toLowerCase();
-  const runModes = (info.runModes ?? []).filter((mode) => !mode.broken);
+  const runModes = info.runModes ?? [];
   const runMode = projections.agentPreset
     ?? runModes.find((mode) => mode.isDefault)?.id ?? '';
   const runModeLocked = info.session?.presetLocked !== false;
@@ -409,7 +414,7 @@ export function DshHarnessPanel({
               disabled={disabled || runModeLocked}
               onChange={(event) => void run({ kind: 'selectRunMode', id: event.target.value })}>
               {runModes.map((mode) => (
-                <option key={mode.id} value={mode.id}>{dshRunModeName(mode)}</option>
+                <option key={mode.id} value={mode.id} disabled={Boolean(mode.broken)}>{dshRunModeName(mode)}</option>
               ))}
             </select>
             <p className="text-xs text-[var(--theme-fg-muted)]">

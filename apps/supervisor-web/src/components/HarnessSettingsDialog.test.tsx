@@ -272,6 +272,15 @@ describe('DeepSeek Harness plugin controls', () => {
     expect(screen.getByText(/Fixed once the first turn starts/)).toBeInTheDocument();
   });
 
+  it('shows a mode that cannot run on the device as disabled with its reason', async () => {
+    const broken = runModes.map((mode) => mode.id === 'ptc' ? { ...mode, broken: 'needs Node.js with TypeScript support' } : mode);
+    panel({ ...live({}), runModes: broken }, vi.fn());
+    const select = await screen.findByRole('combobox', { name: 'Run mode' });
+    const ptc = Array.from(select.querySelectorAll('option')).find((option) => option.value === 'ptc')!;
+    expect(ptc).toBeDisabled();
+    expect(ptc.textContent).toBe('PTC (unavailable: needs Node.js with TypeScript support)');
+  });
+
   it('runs DSH and plugin commands but leaves thread-owned ones to the thread', async () => {
     const commands = [
       { name: 'plan', description: 'Plan mode', hint: null },
