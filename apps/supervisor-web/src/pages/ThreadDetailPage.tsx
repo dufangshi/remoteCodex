@@ -7,6 +7,8 @@ import { WorkbenchCollaboration } from '../components/WorkbenchCollaboration';
 import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { DeviceMonitor } from '../components/DeviceMonitor';
 import { HarnessSettingsDialog, HarnessSettingsFields } from '../components/HarnessSettingsDialog';
+import { DshPluginPanel, type DshConsoleTarget, type DshPanelAction, type DshPanelResult } from '../components/DshHarnessPanel';
+import { DEEPSEEK_HARNESS_PANEL_KIND } from '@remote-codex/thread-ui/builtin-plugins';
 import { ConversationSearch } from '../components/ConversationSearch';
 import { useSearchMessages } from '../components/searchMessages';
 import { useWorkbenchNavigation } from './useWorkbenchNavigation';
@@ -20,7 +22,7 @@ import { ThreadSubagentsControl } from '../components/ThreadSubagentsControl';
 import { PortMappingsControl } from '../components/PortMappingsControl';
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Download, Link2, Network, Users } from 'lucide-react';
+import { Download, Link2, Network, Puzzle, Users } from 'lucide-react';
 
 import { RecentThreadMenu } from '../components/RecentThreadMenu';
 import {
@@ -79,6 +81,8 @@ import {
   fetchAgentBackendAgents,
   fetchAgentBackendModelsFor,
   fetchThreadCapabilitySnapshot,
+  postThreadHarnessAction,
+  dshConsoleUrl,
   fetchThreadModels,
   fetchThreadGroup,
   fetchAgentBackendStatus,
@@ -678,7 +682,12 @@ export function ThreadDetailPage() {
   const referenceDevice = workbenchPresentation.value.referenceDeviceId ?? relayRouteDeviceId ?? 'local';
   const referenceId = workbenchPresentation.value.referenceId === id && referenceDevice === (relayRouteDeviceId ?? 'local') ? null : workbenchPresentation.value.referenceId;
   const [focusedPane, setFocusedPane] = useScopedState<'primary' | 'reference'>(`${routeKey}:${referenceDevice}:${referenceId ?? ''}`, 'primary');
-  const [terminalOpen, setTerminalOpen] = useScopedState(routeKey, false);
+  // One tools drawer: the terminal or a plugin panel (DeepSeek Harness).
+  const [toolPanel, setToolPanel] = useScopedState<'terminal' | 'dsh' | null>(routeKey, null);
+  const terminalOpen = toolPanel === 'terminal';
+  // Terminal callers open or close the drawer; closing closes any panel.
+  const setTerminalOpen = useCallback((next: boolean | ((open: boolean) => boolean)) =>
+    setToolPanel(current => ((typeof next === 'function' ? next(current === 'terminal') : next) ? 'terminal' : null)), [setToolPanel]);
   const [chatDraft, setChatDraft, referenceDraft, setReferenceDraft] = useThreadDrafts(routeKey, `${referenceDevice}:${referenceId ?? ''}`);
   const referenceController = useWorkbenchReference(referenceDevice, referenceId, relayRouteDeviceId ?? 'local');
   const referenceEventRef = useRef(referenceController.onEvent);
@@ -757,6 +766,19 @@ export function ThreadDetailPage() {
   }, [toolsUseReference, toolsDevice, toolsDetail?.workspace.id, relayRouteDeviceId, detail?.workspace.id, workbenchPresentation.update, setFocusedPane]);
   const closeTerminal = useCallback(() => setTerminalOpen(false), [setTerminalOpen]);
   const loadToolsCapabilities = useCallback(() => fetchThreadCapabilitySnapshot(toolsDetail!.thread.id, toolsDevice), [toolsDetail?.thread.id, toolsDevice]);
+  const dshPanelAvailable = toolsDetail?.thread.agentId === 'deepseek'
+    && plugins.getThreadPanels().some(panel => panel.kind === DEEPSEEK_HARNESS_PANEL_KIND);
+  const dshPanelOpen = toolPanel === 'dsh' && dshPanelAvailable;
+  // Harness panel actions edit the device's DSH profile: owner-only on Relay.
+  const referenceHarnessOwner = referenceController.canControl
+    && (referenceController.access?.kind === 'owner' || referenceDevice === 'local' || !relayModeActive());
+  const toolsHarnessOwner = toolsUseReference ? referenceHarnessOwner : relayThreadIsOwner;
+  // Harness panel actions stay on the device that owns the thread.
+  const harnessPanel = useCallback((threadId: string, deviceId: string | null | undefined) => ({
+    runHarnessAction: (action: DshPanelAction) => postThreadHarnessAction<DshPanelResult>(threadId, action, deviceId),
+    dshConsoleUrl: (target: DshConsoleTarget) => dshConsoleUrl(threadId, target, deviceId),
+  }), []);
+  const dshPanelProps = useMemo(() => toolsDetail ? harnessPanel(toolsDetail.thread.id, toolsDevice) : null, [harnessPanel, toolsDetail?.thread.id, toolsDevice]);
   const loadDialogCapabilities = useCallback(() => fetchThreadCapabilitySnapshot(harnessSettingsTarget!.threadId, harnessSettingsTarget!.deviceId), [harnessSettingsTarget?.threadId, harnessSettingsTarget?.deviceId]);
   const openReferenceThread = useCallback((threadId: string) => navigate(threadHref(threadId, referenceDevice === 'local' ? null : referenceDevice)), [navigate, referenceDevice]);
   const loadThreadShares = useCallback(async () => {
@@ -3345,7 +3367,8 @@ export function ThreadDetailPage() {
       models={toolsUseReference ? referenceController.models : modelOptions}
       busy={toolsUseReference ? referenceController.busy : settingsBusy} readOnly={!toolsCanControl}
       onChange={async input => { if (toolsUseReference) await referenceController.updateSettings(input); else await handleUpdateThreadSettings(input); }}
-      loadCapabilities={loadToolsCapabilities} />
+      loadCapabilities={loadToolsCapabilities}
+      {...harnessPanel(toolsDetail.thread.id, toolsDevice)} harnessReadOnly={!toolsHarnessOwner} />
   </div> : null;
   const dialogUseReference = harnessSettingsTarget?.pane === 'reference';
   const dialogDetail = dialogUseReference ? referenceController.detail : detail;
@@ -3814,13 +3837,15 @@ export function ThreadDetailPage() {
         onMakePrimary: makeReferencePrimary,
         focusedPane: toolsUseReference ? 'reference' : 'primary',
         onFocusPane: focusPane,
-        toolsOpen: terminalOpen,
+        toolsOpen: terminalOpen || dshPanelOpen,
         toolsTargetLabel: `${toolsDevice === (relayRouteDeviceId ?? 'local') ? (presentationDeviceName ?? translate('workbench.localDeviceName')) : toolsDevice.slice(0,8)} · ${toolsDetail?.workspace.label ?? ''} · ${toolsDetail?.thread.title ?? ''}`,
-        toolTitle: `${translate('workbench.terminal')} · ${toolsDetail?.workspace.label ?? ''} · ${toolsDetail?.thread.title ?? ''}`,
-        toolContent: terminalOpen ? <WorkbenchTerminal key={`${toolsDevice}:${toolsDetail?.thread.id ?? ''}`} deviceId={toolsDevice} detail={toolsDetail} canControl={toolsCanControl} onClose={closeTerminal} effectiveTheme={shellNav?.effectiveTheme ?? 'dark'} /> : null,
+        toolTitle: `${translate(dshPanelOpen ? 'workbench.deepseekHarness' : 'workbench.terminal')} · ${toolsDetail?.workspace.label ?? ''} · ${toolsDetail?.thread.title ?? ''}`,
+        toolContent: terminalOpen ? <WorkbenchTerminal key={`${toolsDevice}:${toolsDetail?.thread.id ?? ''}`} deviceId={toolsDevice} detail={toolsDetail} canControl={toolsCanControl} onClose={closeTerminal} effectiveTheme={shellNav?.effectiveTheme ?? 'dark'} />
+          : dshPanelOpen && dshPanelProps ? <DshPluginPanel key={`${toolsDevice}:${toolsDetail?.thread.id ?? ''}`} loadCapabilities={loadToolsCapabilities} readOnly={!toolsHarnessOwner} {...dshPanelProps} /> : null,
         onCloseTools: closeTerminal,
         storageFailed: workbenchPresentation.storageFailed,
-      }, statusActions: detail ? <><ThreadSubagentsControl key={`subagents-${detail.thread.id}`} detail={detail} /><ThreadWatchesControl key={`watches-${detail.thread.id}`} thread={detail.thread} /><WorkbenchThreadPicker deviceId={relayRouteDeviceId} workspaceId={detail.workspace.id} threadId={detail.thread.id} threads={threads} navigationThreads={workbenchNavigation.threads} reference={referenceId ? {deviceId: referenceDevice === 'local' ? null : referenceDevice, threadId:referenceId} : null} splitActive={Boolean(referenceId && ['thread','files'].includes(workbenchPresentation.value.mode))} onSelect={selectSplitThread} onRestore={() => changePresentation({mode:'thread'})} onClose={() => changePresentation({mode:'focus'})} onCollaboration={() => changePresentation({mode:'collaboration'})} /></> : null, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView: terminalOpen ? 'shell' : 'chat', terminalEnabled: terminalPluginEnabled, onViewChange: view => setTerminalOpen(view === 'shell'), onNavigate: navigate, onSearch: () => setSearchOpen(true), searchOpen, search: id && detail ? <ConversationSearch key={id} threadId={id} workspaceId={detail.thread.workspaceId}
+      }, statusActions: detail ? <><ThreadSubagentsControl key={`subagents-${detail.thread.id}`} detail={detail} /><ThreadWatchesControl key={`watches-${detail.thread.id}`} thread={detail.thread} /><WorkbenchThreadPicker deviceId={relayRouteDeviceId} workspaceId={detail.workspace.id} threadId={detail.thread.id} threads={threads} navigationThreads={workbenchNavigation.threads} reference={referenceId ? {deviceId: referenceDevice === 'local' ? null : referenceDevice, threadId:referenceId} : null} splitActive={Boolean(referenceId && ['thread','files'].includes(workbenchPresentation.value.mode))} onSelect={selectSplitThread} onRestore={() => changePresentation({mode:'thread'})} onClose={() => changePresentation({mode:'focus'})} onCollaboration={() => changePresentation({mode:'collaboration'})} /></> : null, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView: terminalOpen ? 'shell' : 'chat', terminalEnabled: terminalPluginEnabled, onViewChange: view => setTerminalOpen(view === 'shell'),
+        toolPanels: dshPanelAvailable ? [{ id: 'deepseek-harness', label: translate('workbench.deepseekHarness'), icon: <Puzzle />, active: dshPanelOpen, onToggle: () => setToolPanel(current => current === 'dsh' ? null : 'dsh') }] : [], onNavigate: navigate, onSearch: () => setSearchOpen(true), searchOpen, search: id && detail ? <ConversationSearch key={id} threadId={id} workspaceId={detail.thread.workspaceId}
         deviceLabel={relayRouteDeviceId ?? searchLabels.localDevice}
         allowGlobal={relayThreadIsOwner || (relayAccess?.scope === 'device' && (relayAccess.threadAccess === 'read' || relayAccess.threadAccess === 'control'))}
         onNavigate={match => {
@@ -3885,6 +3910,8 @@ export function ThreadDetailPage() {
         readOnly={dialogUseReference ? !referenceController.canControl : !relayThreadCanControl}
         {...(harnessSettingsTarget?.composerFocusOwner ? {composerFocusOwner:harnessSettingsTarget.composerFocusOwner} : {})}
         loadCapabilities={loadDialogCapabilities}
+        {...harnessPanel(dialogDetail.thread.id, harnessSettingsTarget?.deviceId)}
+        harnessReadOnly={dialogUseReference ? !referenceHarnessOwner : !relayThreadIsOwner}
         onChange={async input => { if (dialogUseReference) await referenceController.updateSettings(input); else await handleUpdateThreadSettings(input); }}
         onClose={() => setHarnessSettingsTarget(null)}
       />}</>}

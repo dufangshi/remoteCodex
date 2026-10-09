@@ -73,6 +73,14 @@ impl Body {
 #[derive(Subcommand)]
 pub enum PreviewCommand {
     /// Reserve a stable private preview address BEFORE starting an HTTP service.
+    #[command(after_long_help = r#"Rules:
+  - Reserve the address BEFORE starting the HTTP service; bind the service to 127.0.0.1
+    on this port (Vite: --strictPort).
+  - Add only the returned hostname/origin to a framework allowlist, and only if the
+    framework needs it; never `*` or disabled host checks.
+  - Give the user `openUrl`. Never copy tokens or launch tickets into reports.
+
+More: remote-codex guide preview"#)]
     Create {
         #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
         port: u16,
@@ -145,6 +153,16 @@ pub enum ThreadCommand {
         #[arg(long)]
         agent: Option<String>,
     },
+    #[command(after_long_help = r#"Rules:
+  - Label the initial prompt with --kind and --subject. It defaults to queue delivery, so
+    the new thread starts working; --delivery inbox makes it passive.
+  - Give delegates a --name, wait with `thread wait NAME`, and `thread close NAME` once
+    collected. Limits: depth 3 and 20 open threads per root; do not retry a refusal.
+  - The model defaults to `default`, not yours. Pass explicitly requested models as given.
+  - --worktree branches from COMMITTED HEAD; commit what the delegate builds on first.
+  - If sending fails after creation, reuse the returned thread ID instead of creating again.
+
+More: remote-codex guide delegate"#)]
     Create {
         /// Other device; requires --workspace and creates no local lineage.
         #[arg(long)]
@@ -183,6 +201,15 @@ pub enum ThreadCommand {
     },
     /// Block until the threads settle (finish, fail, or go idle), one blocks on an
     /// approval, or the timeout passes. Returns each one's closing message.
+    #[command(after_long_help = r#"Rules:
+  - Block here when you will act on the result; your shell may return early, so keep
+    waiting on the same command.
+  - With nothing else to do for a long time, use --wake and end your turn saying what you
+    wait for: exactly one turn is queued on you when they settle. Nothing else wakes you.
+  - `blocked: true` means a delegate waits on an approval or your answer (`waitingOn`).
+  - Settled is not success: check the evidence in each closing message.
+
+More: remote-codex guide delegate"#)]
     Wait {
         #[arg(required = true, num_args = 1..)]
         ids: Vec<String>,
@@ -218,6 +245,17 @@ pub enum ThreadCommand {
     /// Role templates available to `thread create --role`.
     Roles,
     /// Send passive mail or request execution; direct/steer also await the steering acknowledgement when running.
+    #[command(after_long_help = r#"Choosing --delivery:
+  inbox (default)  results, progress, ready inputs, questions, acknowledgements
+  queue            distinct work (--kind task) that can wait for the peer's whole turn
+  steer / direct   correct, stop or reprioritize ACTIVE work, with --interrupt-reason
+                   naming the concrete harm; direct when the peer's state is uncertain
+Never queue a correction, and never use direct because a result is important or the
+peer is idle. Always pass --kind and --subject; use --in-reply-to when answering.
+Read the whole JSON receipt: `queued` is acceptance, `steered` is acknowledgement,
+`held` needs inspection rather than retries. Use --request-id for a send you may retry.
+
+More: remote-codex guide messaging"#)]
     Send {
         id: String,
         #[arg(long)]

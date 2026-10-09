@@ -132,6 +132,11 @@ pub struct StartTurnInput {
     pub turn_id: String,
     pub hidden: bool,
     pub images: Vec<PromptImage>,
+    /// The thread's title, for harnesses that list their own sessions (DSH).
+    pub title: Option<String>,
+    /// This harness session already received the Remote Codex context (it is
+    /// in its history), so a resumed or restarted process must not add it again.
+    pub context_delivered: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -288,6 +293,24 @@ pub trait AgentRuntime: Send + Sync {
     }
     fn toolbox(&self, agent_id: Option<&str>) -> Vec<ToolboxItemDto> {
         remote_codex_protocol::toolbox_from_capabilities(&self.negotiated_caps(agent_id))
+    }
+    /// Harness-specific options for thread creation (DSH run modes), probing
+    /// in `cwd` when nothing is cached. Null when the harness has none.
+    async fn harness_catalog(
+        &self,
+        _agent_id: Option<&str>,
+        _cwd: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        Ok(serde_json::Value::Null)
+    }
+    /// A typed harness-panel action. Adapters accept only their own action
+    /// kinds; this is never a raw passthrough to the harness.
+    async fn harness_action(
+        &self,
+        _session_id: &str,
+        _action: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        anyhow::bail!("this harness has no settings panel actions");
     }
     async fn apply_session_settings(
         &self,

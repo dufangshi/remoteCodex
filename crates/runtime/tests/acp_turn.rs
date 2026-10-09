@@ -358,6 +358,8 @@ fn turn_input(session_id: &str, prompt: &str, turn_id: &str) -> StartTurnInput {
         turn_id: turn_id.into(),
         hidden: false,
         images: Vec::new(),
+        title: None,
+        context_delivered: false,
     }
 }
 

@@ -10,9 +10,17 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 type Failure = (StatusCode, Json<Value>);
 fn failure(e: impl std::fmt::Display) -> Failure {
+    let edit_conflict = e.to_string().contains("edit conflict")
+        || e.to_string().contains("Native configuration changed");
     (
-        StatusCode::BAD_REQUEST,
-        Json(json!({"code":"upstream_error","message":e.to_string()})),
+        if edit_conflict {
+            StatusCode::CONFLICT
+        } else {
+            StatusCode::BAD_REQUEST
+        },
+        Json(
+            json!({"code":if edit_conflict {"edit_conflict"} else {"upstream_error"},"message":e.to_string()}),
+        ),
     )
 }
 fn conflict() -> Failure {
@@ -34,9 +42,36 @@ pub async fn save(
     Json(p): Json<profiles::Profile>,
 ) -> Result<Json<Value>, Failure> {
     let _g = s.upstream_gate.lock().await;
-    profiles::upsert(&profiles::directory(&s.config.database_url), p)
-        .map(Json)
-        .map_err(failure)
+    let dir = profiles::directory(&s.config.database_url);
+    let active = profiles::active_profile(&dir, &p.harness)
+        .map_err(failure)?
+        .is_some_and(|active| active.id == p.id);
+    let _maintenance = if active {
+        Some(
+            s.maintenance_gate
+                .clone()
+                .try_read_owned()
+                .map_err(|_| conflict())?,
+        )
+    } else {
+        None
+    };
+    let _guard = if active {
+        Some(
+            s.harness_gate(&p.harness)
+                .try_write_owned()
+                .map_err(|_| conflict())?,
+        )
+    } else {
+        None
+    };
+    if active {
+        s.restart_harness(&p.harness).await.map_err(failure)?;
+    }
+    let harness = p.harness.clone();
+    let result = profiles::save_and_apply(&dir, p).map_err(failure)?;
+    s.invalidate_models(&harness).await;
+    Ok(Json(result))
 }
 pub async fn models(
     State(s): State<Arc<Supervisor>>,
@@ -109,6 +144,21 @@ pub async fn action(
         return Ok(Json(json!({"ok":true,"restartRequired":false})));
     }
     let p = profiles::profile(&dir, &id).map_err(failure)?;
+    if input.action == "edit" {
+        return profiles::inspect_profile(&dir, &id)
+            .map(Json)
+            .map_err(failure);
+    }
+    if ["up", "down"].contains(&input.action.as_str()) {
+        profiles::reorder(&dir, &id, &input.action).map_err(failure)?;
+        return Ok(Json(json!({"ok":true})));
+    }
+    if input.action == "speed" {
+        return profiles::endpoint_speed(&p)
+            .await
+            .map(Json)
+            .map_err(failure);
+    }
     if input.action == "test" {
         return profiles::test_connection(&p)
             .await
@@ -131,6 +181,7 @@ pub async fn action(
     // always starts with one complete configuration. Active turns are gated.
     let restarted = s.restart_harness(&p.harness).await.map_err(failure)?;
     let backup = profiles::activate(&dir, &id).map_err(failure)?;
+    s.invalidate_models(&p.harness).await;
     Ok(Json(
         json!({"ok":true,"backupId":backup,"restartedSessions":restarted,"restartRequired":false}),
     ))
@@ -254,4 +305,42 @@ pub async fn import_config(
     profiles::upsert(&profiles::directory(&s.config.database_url), p)
         .map(Json)
         .map_err(failure)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LiveImport {
+    harness: String,
+    name: String,
+}
+pub async fn live(
+    State(s): State<Arc<Supervisor>>,
+    Json(input): Json<LiveImport>,
+) -> Result<Json<Value>, Failure> {
+    let _g = s.upstream_gate.lock().await;
+    profiles::import_live(
+        &profiles::directory(&s.config.database_url),
+        &input.harness,
+        &input.name,
+    )
+    .map(Json)
+    .map_err(failure)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn upstream_edit_conflicts_are_distinguished_from_invalid_configuration() {
+        let (status, body) = failure("Native configuration changed: reload before applying.");
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(body.0["code"], "edit_conflict");
+        let (status, body) =
+            failure("Provider edit conflict: configuration changed. Reload before saving.");
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(body.0["code"], "edit_conflict");
+        let (status, body) = failure("Provide a valid API key");
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body.0["code"], "upstream_error");
+    }
 }

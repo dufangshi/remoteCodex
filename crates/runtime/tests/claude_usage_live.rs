@@ -72,7 +72,7 @@ async fn haiku_reports_native_tokens_and_speed_during_first_tool_wait() {
         provider_session_id: thread.provider_session_id.clone().unwrap(), thread_id:thread.id.clone(), turn_id:turn_id.clone(),
         prompt:"This is an isolated throughput acceptance test. Do not edit files, create agents or call remote-codex. First write two short sentences. Then call Bash with exactly sleep 12 and wait for it to finish. Finally reply with CLAUDE_THROUGHPUT_DONE. Only one tool call is needed.".into(),
         model:Some(model.clone()), reasoning_effort:None, sandbox_mode:Some("danger-full-access".into()), collaboration_mode:None,
-        approval_mode:Some("yolo".into()), performance_mode:None, hidden:false, images:vec![],
+        approval_mode:Some("yolo".into()), performance_mode:None, hidden:false, images:vec![], title:None, context_delivered:false,
     };
     let runner = runtime.clone();
     let bus = state.bus.clone();

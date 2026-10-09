@@ -85,6 +85,8 @@ async fn claude_coalesced_prompt_drains_only_proven_completed_work() {
             turn_id: prompt.into(),
             hidden: false,
             images: Vec::new(),
+            title: None,
+            context_delivered: false,
         };
         let turn = runtime.start_turn(input(scenario), bus.clone(), cancel.clone());
         tokio::pin!(turn);
@@ -264,6 +266,8 @@ async fn claude_incomplete_tool_reconciles_only_abandoned_streams() {
                 turn_id: scenario.into(),
                 hidden: false,
                 images: Vec::new(),
+                title: None,
+                context_delivered: false,
             },
             bus,
             CancellationToken::new(),

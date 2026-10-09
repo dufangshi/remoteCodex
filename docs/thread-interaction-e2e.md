@@ -37,7 +37,7 @@
 - [测试镜像 Dockerfile](../e2e/thread-interaction/Dockerfile)
 - [只读验证脚本](../e2e/thread-interaction/verify.py)
 - [CLI 使用说明](thread-interaction.md)
-- [随二进制提供的 skill](../skills/thread-interaction/SKILL.md)
+- [随二进制提供的 skill](../skills/thread-interaction/SKILL.md)（索引和行为规则；详细说明在 [主题指南](../skills/thread-interaction/guides/)，即 `remote-codex guide TOPIC`，以及各命令的 `--help`）
 
 本机测试数据保留在 worktree 的忽略目录 `.local/thread-e2e`，包含回执、编译产物与验证 JSON。凭据和完整真实 transcript 不提交到仓库。
 

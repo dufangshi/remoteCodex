@@ -1129,6 +1129,74 @@ export function fetchThreadCapabilitySnapshot(threadId: string,
   return deviceRequest<AgentCapabilitySnapshotDto>(deviceId, `/api/threads/${encodeURIComponent(threadId)}/capabilities`, { cache: 'no-store' });
 }
 
+export function postThreadHarnessAction<T>(threadId: string,
+  action: unknown,
+  deviceId?: string | null,
+) {
+  return deviceRequest<T>(deviceId, `/api/threads/${encodeURIComponent(threadId)}/harness`, {
+    method: 'POST',
+    body: JSON.stringify(action),
+  });
+}
+
+/** Harness-specific creation options (DSH run modes); null for other harnesses. */
+export function fetchAgentHarnessCatalog<T>(
+  provider: AgentBackendIdDto,
+  options: { agentId?: string | null; cwd?: string | null } = {},
+) {
+  const query = new URLSearchParams();
+  if (options.agentId) query.set('agentId', options.agentId);
+  if (options.cwd) query.set('cwd', options.cwd);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return request<T | null>(
+    `/api/agent-runtimes/${encodeURIComponent(provider)}/harness${suffix}`,
+    { cache: 'no-store' },
+  );
+}
+
+/**
+ * Browser address of a thread's native DSH console (a loopback port on the
+ * device). Relay pages open it through an owner-only port preview; local pages
+ * reach it only from the device itself.
+ */
+export async function dshConsoleUrl(
+  threadId: string,
+  target: { port: number; path: string; mappingId?: string },
+  deviceId?: string | null,
+) {
+  if (!deviceId || deviceId === 'local') {
+    const host = window.location.hostname;
+    if (!['localhost', '127.0.0.1', '[::1]'].includes(host)) {
+      throw new Error(translate('settings.dshConsoleLoopbackOnly'));
+    }
+    // Same site as this page, or the browser withholds DSH's SameSite=Strict
+    // login cookie on the token redirect. The proxy listens on IPv4 loopback.
+    return `http://${host === '[::1]' ? '127.0.0.1' : host}:${target.port}${target.path}`;
+  }
+  const device = `/relay/devices/${encodeURIComponent(deviceId)}`;
+  // The device maps its console port (and drops stopped consoles). Older
+  // devices leave it to the browser: one mapping per thread.
+  let mappingId = target.mappingId;
+  if (!mappingId) {
+    const label = `DSH console ${threadId.slice(0, 8)}`;
+    type Mapping = { id: string; port: number; label: string };
+    const { mappings } = await request<{ mappings: Mapping[] }>(`${device}/api/port-mappings`);
+    await Promise.all(mappings
+      .filter((mapping) => mapping.label === label && mapping.port !== target.port)
+      .map((mapping) => request(`${device}/api/port-mappings/${mapping.id}`, { method: 'DELETE' })));
+    mappingId = (mappings.find((entry) => entry.port === target.port)
+      ?? await request<Mapping>(`${device}/api/port-mappings`, {
+        method: 'POST',
+        body: JSON.stringify({ port: target.port, label }),
+      })).id;
+  }
+  const { url } = await request<{ url: string }>(`${device}/port-mappings/${mappingId}/open`, {
+    method: 'POST',
+    body: JSON.stringify({ path: target.path }),
+  });
+  return url;
+}
+
 export function fetchThreadModels(threadId: string,
   deviceId?: string | null,
 ) {

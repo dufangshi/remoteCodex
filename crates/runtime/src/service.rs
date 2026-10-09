@@ -320,6 +320,10 @@ pub struct Supervisor {
     pub device_monitor: crate::device_metrics::DeviceMonitor,
 }
 
+fn harness_context_key(thread_id: &str) -> String {
+    format!("harness-context:{thread_id}")
+}
+
 impl Supervisor {
     pub async fn invalidate_models(&self, id: &str) {
         for runtime in self.runtimes.values() {
@@ -414,6 +418,25 @@ impl Supervisor {
                     )
                 }
                 "runtime.usage.updated" => supervisor.persist_usage_event(event),
+                "thread.context.delivered" => match event.payload["providerSessionId"].as_str() {
+                    Some(session) => supervisor
+                        .db
+                        .set_kv(&harness_context_key(&event.thread_id), session),
+                    None => Ok(()),
+                },
+                // The harness itself left plan mode (an approved plan review);
+                // the next turn must not switch it back on.
+                "thread.collaboration.updated" => supervisor.db.with(|conn| {
+                    if let Some(mode @ ("default" | "plan")) =
+                        event.payload["collaborationMode"].as_str()
+                    {
+                        conn.execute(
+                            "UPDATE threads SET collaboration_mode=?1 WHERE id=?2",
+                            params![mode, event.thread_id],
+                        )?;
+                    }
+                    Ok(())
+                }),
                 "thread.harness.ready" => supervisor.db.with(|conn| {
                     if let (Some(turn), Some(instance)) = (
                         event.payload["turnId"].as_str(),
@@ -2398,6 +2421,7 @@ impl Supervisor {
             Some(notice) => format!("{notice}\n\n{prompt}"),
             None => prompt,
         };
+        let context_delivered = self.harness_context_delivered(&thread.id, &session_id);
         let bus = self.bus.for_turn(&thread.id, &turn_id);
         let result = runtime
             .start_turn(
@@ -2414,6 +2438,8 @@ impl Supervisor {
                     turn_id: turn_id.clone(),
                     hidden: false,
                     images,
+                    title: Some(title.clone().unwrap_or_else(|| thread.title.clone())),
+                    context_delivered,
                 },
                 bus.clone(),
                 cancel.clone(),
@@ -3206,7 +3232,20 @@ impl Supervisor {
         self.runtime(thread.provider)?
             .compact_session(&session, id, self.bus.clone())
             .await?;
+        // Compaction can drop the context; the next turn delivers it again.
+        self.db.set_kv(&harness_context_key(id), "")?;
         self.get_thread(id)
+    }
+
+    /// Whether this harness session already holds the Remote Codex context.
+    /// A restarted or resumed process replays its history, so this survives
+    /// processes; a new session ID (new thread session, fork) starts over.
+    fn harness_context_delivered(&self, thread_id: &str, session_id: &str) -> bool {
+        self.db
+            .get_kv(&harness_context_key(thread_id))
+            .ok()
+            .flatten()
+            .is_some_and(|delivered| delivered == session_id)
     }
 
     pub async fn resume_thread(self: &Arc<Self>, id: &str) -> Result<ThreadDetailDto> {
@@ -3547,6 +3586,36 @@ impl Supervisor {
         runtime
             .session_capabilities(thread.agent_id.as_deref(), session)
             .await
+    }
+
+    pub async fn harness_catalog(
+        &self,
+        provider: Provider,
+        agent_id: Option<&str>,
+        cwd: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        self.runtime(provider)?.harness_catalog(agent_id, cwd).await
+    }
+
+    /// Typed harness-panel action for the thread's live session.
+    pub async fn thread_harness_action(
+        &self,
+        id: &str,
+        action: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let thread = self.get_thread(id)?;
+        let runtime = self.runtime(thread.provider)?;
+        let session = thread
+            .provider_session_id
+            .as_deref()
+            .ok_or_else(|| anyhow!("thread has no provider session"))?;
+        let cwd = self.session_cwd(&thread);
+        self.with_cli_context(
+            &thread.id,
+            runtime.resume_session(session, cwd.as_deref(), thread_session_settings(&thread)),
+        )
+        .await?;
+        runtime.harness_action(session, action).await
     }
 
     pub async fn install(

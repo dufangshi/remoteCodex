@@ -244,11 +244,13 @@ mod tests {
 #[derive(Subcommand)]
 enum Commands {
     /// Reserve, inspect and diagnose private device web previews.
+    #[command(after_long_help = r#"More: remote-codex guide preview"#)]
     Preview {
         #[command(subcommand)]
         command: threads::PreviewCommand,
     },
     /// Durable device hooks: trigger -> typed condition -> prompt, inbox or script.
+    #[command(after_long_help = r#"More: remote-codex guide automation"#)]
     #[command(alias = "hooks", alias = "hook")]
     Automation {
         #[command(subcommand)]
@@ -260,13 +262,19 @@ enum Commands {
         command: automations::CommandCommand,
     },
     /// Create, contact, and inspect local threads or same-owner device peers.
+    #[command(
+        after_long_help = r#"Rules for delivery and collaboration: remote-codex skill
+Details: remote-codex guide delegate | messaging"#
+    )]
     Thread {
         #[command(subcommand)]
         command: threads::ThreadCommand,
     },
     /// Read recent conversation text, then expand one turn or item.
+    #[command(after_long_help = r#"More: remote-codex guide transcript"#)]
     Transcript(threads::Transcript),
     /// Discover same-owner devices and manage this device's peer access/trust.
+    #[command(after_long_help = r#"More: remote-codex guide devices"#)]
     Device {
         #[command(subcommand)]
         command: threads::DeviceCommand,
@@ -279,14 +287,31 @@ enum Commands {
     /// List cross-device messages waiting for delivery from this device.
     Outbox,
     /// Read and acknowledge persistent peer messages without starting turns.
+    #[command(after_long_help = r#"Rules:
+  - Read at natural checkpoints: when the turn notice names something, before work that
+    depends on a peer, after a build or batch. Not after every tool call.
+  - To wait, use `inbox wait --kind result --kind question` instead of polling.
+  - Ack only what you handled. Do not reply "received"; answer questions before acking.
+
+More: remote-codex guide inbox"#)]
     Inbox(threads::Inbox),
     /// Shared task board for the threads of one lineage.
+    #[command(
+        after_long_help = r#"Delegates loop: `task claim --wait`, do it, `task done --result`, until `finished: true`.
+
+More: remote-codex guide tasks"#
+    )]
     Task {
         #[command(subcommand)]
         command: threads::TaskCommand,
     },
     /// Print the running Supervisor's interaction skill, or the bundled guide offline.
     Skill,
+    /// Print a detailed interaction guide; without a topic, list the topics.
+    Guide {
+        /// Topic name, for example `delegate`, `messaging` or `preview`.
+        topic: Option<String>,
+    },
 
     /// Run the local supervisor HTTP API.
     Supervisor,
@@ -369,6 +394,25 @@ async fn main() -> Result<()> {
                         .filter(|c| (1..=255).contains(c))
                         .unwrap_or(1) as i32,
                 );
+            }
+        }
+        Commands::Guide { topic } => {
+            let guides = remote_codex_protocol::THREAD_INTERACTION_GUIDES;
+            match topic.as_deref() {
+                None => {
+                    println!("Usage: remote-codex guide TOPIC\n\nTopics:");
+                    for (name, summary, _) in guides {
+                        println!("  {name:<11} {summary}");
+                    }
+                }
+                Some(name) => match guides.iter().find(|(topic, _, _)| *topic == name) {
+                    Some((_, _, text)) => print!("{text}"),
+                    None => {
+                        let names: Vec<_> = guides.iter().map(|(name, _, _)| *name).collect();
+                        eprintln!("Unknown guide {name:?}. Topics: {}", names.join(", "));
+                        std::process::exit(2);
+                    }
+                },
             }
         }
         Commands::Skill => {

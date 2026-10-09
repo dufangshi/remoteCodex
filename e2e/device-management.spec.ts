@@ -14,7 +14,11 @@ test('upstream editor and template preview stay usable inside device settings', 
     let result: unknown = {};
     if (p.endsWith('/supervisor'))
       result = { runningVersion: 'test', canUpdate: false };
-    else if (p.endsWith('/harnesses')) result = [];
+    else if (p.endsWith('/harnesses'))
+      result = [
+        { id: 'codex', name: 'OpenAI Codex', base: { installed: true } },
+        { id: 'grok', name: 'Grok Build', base: { installed: true } },
+      ];
     else if (p.endsWith('/upstreams/models'))
       result = {
         models: [{ id: 'test-model', name: 'Test model' }],
@@ -42,6 +46,10 @@ test('upstream editor and template preview stay usable inside device settings', 
   await expect(
     page.getByRole('tab', { name: 'Harnesses', exact: true }),
   ).toHaveAttribute('aria-selected', 'true');
+  await expect(
+    page.getByRole('button', { name: 'Add upstream', exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole('tab', { name: 'Upstreams', exact: true }).click();
   await page.getByRole('button', { name: 'Add upstream', exact: true }).click();
   const editor = page.getByRole('dialog', {
     name: 'Add upstream',
@@ -51,19 +59,20 @@ test('upstream editor and template preview stay usable inside device settings', 
   await editor.getByLabel('Name', { exact: true }).fill('Personal API');
   await editor.getByLabel('Base URL').fill('https://api.example.test/v1');
   await editor.getByLabel('API key').fill('synthetic-key');
-  const model = editor.getByRole('combobox', { name: 'Model', exact: true });
-  await expect(model).toBeEnabled();
-  await model.selectOption('test-model');
+  await editor.getByLabel('Model ID', { exact: true }).fill('test-model');
   await editor.getByRole('button', { name: 'Save upstream' }).click();
   await expect(editor).toBeHidden();
   await expect(page.getByText('Personal API', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Use upstream', exact: true }).click();
+  await page.getByRole('button', { name: 'Enable', exact: true }).click();
   await expect(
-    page.getByRole('button', { name: 'Use upstream', exact: true }),
+    page.getByRole('button', { name: 'Using', exact: true }),
   ).toBeDisabled();
   await page.screenshot({
     path: testInfo.outputPath('settings-harnesses.png'),
   });
+  await page
+    .getByRole('button', { name: 'More actions for Personal API' })
+    .click();
   await page
     .getByRole('button', { name: 'Delete Personal API', exact: true })
     .click();
@@ -75,12 +84,18 @@ test('upstream editor and template preview stay usable inside device settings', 
   await expect(deletion).toBeHidden();
   await expect(page.getByTestId('settingsDialog')).toBeVisible();
   await page
+    .getByRole('button', { name: 'More actions for Personal API' })
+    .click();
+  await page
     .getByRole('button', { name: 'Delete Personal API', exact: true })
     .click();
   await deletion
     .getByRole('button', { name: 'Delete upstream', exact: true })
     .click();
-  await expect(page.getByText('Personal API', { exact: true })).toBeHidden();
+  await expect(deletion).toBeHidden();
+  await expect(
+    page.getByRole('article').filter({ hasText: 'Personal API' }),
+  ).toHaveCount(0);
   await page.getByRole('button', { name: 'Grok Build', exact: true }).click();
   await expect(page.getByText('Personal API', { exact: true })).toBeHidden();
   await page.getByRole('tab', { name: 'Device', exact: true }).click();
@@ -134,7 +149,7 @@ test('thread settings categories and nested dialogs stay usable on narrow screen
   await page.route('**/api/management/**', (route) =>
     route.fulfill({
       json: route.request().url().endsWith('harnesses')
-        ? []
+        ? [{ id: 'codex', name: 'OpenAI Codex', base: { installed: true } }]
         : { profiles: [], active: {}, backups: [] },
     }),
   );
@@ -146,7 +161,7 @@ test('thread settings categories and nested dialogs stay usable on narrow screen
   await expect(
     settings.getByRole('tab', { name: 'Session', exact: true }),
   ).toBeVisible();
-  await settings.getByRole('tab', { name: 'Harnesses', exact: true }).click();
+  await settings.getByRole('tab', { name: 'Upstreams', exact: true }).click();
   await settings
     .getByRole('button', { name: 'Add upstream', exact: true })
     .click();

@@ -1,3 +1,5 @@
+// Provider live backfill / switching adapted from CC Switch services/provider/live.rs.
+// Copyright (c) 2025 Jason Young. MIT; see THIRD_PARTY_NOTICES.md.
 //! Device-local upstream profiles. Only provider-owned fields are changed; no
 //! imported commands, plugins, or arbitrary filesystem paths are executed.
 use anyhow::{anyhow, bail, Context, Result};
@@ -8,7 +10,12 @@ use std::{
     path::{Path, PathBuf},
 };
 use toml_edit::{value, DocumentMut};
+mod cc_switch;
 mod discovery;
+mod dsh;
+mod model_meta;
+mod provider_config;
+mod write_engine;
 pub use discovery::{discover_models, discovery_profile, DiscoveryInput};
 pub(crate) use discovery::{normalize_effort, DiscoveredModel};
 
@@ -30,6 +37,17 @@ pub struct Profile {
     pub api_type: String,
     #[serde(default = "context_window")]
     pub context_window: i64,
+    #[serde(default = "empty_config")]
+    pub settings_config: Value,
+    #[serde(default)]
+    pub sort_index: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_revision: Option<String>,
+}
+fn empty_config() -> Value {
+    json!({})
 }
 fn responses() -> String {
     "responses".into()
@@ -102,10 +120,13 @@ fn redacted(p: &Profile) -> Value {
     let mut v = serde_json::to_value(p).unwrap();
     v.as_object_mut().unwrap().remove("apiKey");
     v["hasApiKey"] = json!(!p.api_key.is_empty());
+    v["settingsConfig"] = provider_config::redact(&p.settings_config);
+    v["revision"] = json!(provider_config::revision(p));
     v
 }
 pub fn inventory(dir: &Path) -> Result<Value> {
-    let s = load(dir)?;
+    let mut s = load(dir)?;
+    s.profiles.sort_by_key(|p| p.sort_index);
     Ok(
         json!({"profiles":s.profiles.iter().map(redacted).collect::<Vec<_>>(),"active":s.active,
         "backups":s.backups.iter().map(|b| json!({"id":b.id,"harness":b.harness,"createdAt":b.created_at})).collect::<Vec<_>>() }),
@@ -115,9 +136,10 @@ pub fn validate(p: &Profile, require_key: bool) -> Result<()> {
     if !["api_key", "bearer"].contains(&p.auth_type.as_str()) {
         bail!("Invalid authentication type");
     }
-    if !["codex", "claude", "gemini", "grok"].contains(&p.harness.as_str()) {
-        bail!("Upstream configuration supports Codex, Claude Code, Gemini CLI and Grok Build");
+    if !["codex", "claude", "gemini", "grok", "deepseek"].contains(&p.harness.as_str()) {
+        bail!("Upstream configuration supports OpenAI Codex, Claude Agent, Gemini CLI, Grok Build and DeepSeek Harness");
     }
+    provider_config::validate_config(p)?;
     if p.name.trim().is_empty()
         || p.name.len() > 120
         || p.model.trim().is_empty()
@@ -146,7 +168,7 @@ pub fn validate(p: &Profile, require_key: bool) -> Result<()> {
     {
         bail!("Upstream URL must not contain credentials, query parameters or fragments");
     }
-    if !["responses", "chat_completions"].contains(&p.api_type.as_str())
+    if !["responses", "chat_completions", "anthropic"].contains(&p.api_type.as_str())
         || p.context_window < 1
         || p.context_window > 100_000_000
     {
@@ -157,22 +179,63 @@ pub fn validate(p: &Profile, require_key: bool) -> Result<()> {
     }
     Ok(())
 }
-pub fn upsert(dir: &Path, mut p: Profile) -> Result<Value> {
+pub fn upsert(dir: &Path, p: Profile) -> Result<Value> {
+    let root = home(&p.harness);
+    upsert_at(dir, p, &root)
+}
+fn upsert_at(dir: &Path, mut p: Profile, root: &Path) -> Result<Value> {
     let mut s = load(dir)?;
+    if let Some(expected) = &p.live_revision {
+        if expected != &live_revision(&p, root)? {
+            bail!(write_engine::CONFLICT);
+        }
+    }
     if p.id.is_empty() {
+        p.sort_index = s
+            .profiles
+            .iter()
+            .filter(|old| old.harness == p.harness)
+            .map(|p| p.sort_index)
+            .max()
+            .unwrap_or(-1)
+            + 1;
         p.id = uuid::Uuid::new_v4().to_string();
     } else if uuid::Uuid::parse_str(&p.id).is_err() {
         bail!("Invalid profile ID");
     }
     if let Some(old) = s.profiles.iter().find(|old| old.id == p.id) {
-        if s.active.values().any(|id| id == &p.id) {
-            bail!("Duplicate the active profile or switch away before editing it");
+        if old.harness != p.harness && s.active.get(&old.harness) == Some(&old.id) {
+            bail!("Cannot change the harness of an active provider");
         }
-        if p.api_key.is_empty() && old.base_url == p.base_url && old.harness == p.harness {
-            p.api_key = old.api_key.clone();
+        if p.revision
+            .as_ref()
+            .is_some_and(|revision| revision != &provider_config::revision(old))
+        {
+            bail!("Provider edit conflict: configuration changed. Reload before saving.");
         }
+        let private_source =
+            if s.active.get(&old.harness) == Some(&old.id) && p.live_revision.is_some() {
+                let live = read_live_profile(&old.harness, &old.name, root)?;
+                (live.base_url == p.base_url && live.harness == p.harness)
+                    .then_some((live.settings_config, live.api_key))
+            } else {
+                (old.base_url == p.base_url && old.harness == p.harness)
+                    .then_some((old.settings_config.clone(), old.api_key.clone()))
+            };
+        if let Some((config, key)) = private_source {
+            provider_config::restore_redacted(&mut p.settings_config, &config);
+            if p.api_key.is_empty() {
+                p.api_key = key;
+            }
+        } else {
+            provider_config::remove_redacted(&mut p.settings_config);
+        }
+    } else {
+        provider_config::remove_redacted(&mut p.settings_config);
     }
     validate(&p, true)?;
+    p.revision = None;
+    p.live_revision = None;
     s.profiles.retain(|old| old.id != p.id);
     s.profiles.push(p.clone());
     save(dir, &s)?;
@@ -373,6 +436,7 @@ fn home(harness: &str) -> PathBuf {
         "codex" => ("CODEX_HOME", ".codex"),
         "claude" => ("CLAUDE_CONFIG_DIR", ".claude"),
         "grok" => ("GROK_HOME", ".grok"),
+        "deepseek" => ("DSH_HOME", ".dsh"),
         _ => ("GEMINI_CLI_HOME", ".gemini"),
     };
     let explicit = std::env::var_os(key)
@@ -484,6 +548,7 @@ fn changes(p: &Profile, root: &Path) -> Result<Vec<(PathBuf, String)>> {
         "codex" => {
             let path = root.join("config.toml");
             let mut doc = toml_doc(&path)?;
+            provider_config::project_codex(&mut doc, &p.settings_config)?;
             doc["model_provider"] = value("remote_codex");
             doc["model"] = value(&p.model);
             doc["model_providers"]["remote_codex"]["name"] = value(&p.name);
@@ -501,6 +566,7 @@ fn changes(p: &Profile, root: &Path) -> Result<Vec<(PathBuf, String)>> {
         "claude" => {
             let path = root.join("settings.json");
             let mut doc = json_doc(&path)?;
+            provider_config::project_claude(&mut doc, &p.settings_config)?;
             let (auth, other) = if p.auth_type == "bearer" {
                 ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY")
             } else {
@@ -535,6 +601,7 @@ fn changes(p: &Profile, root: &Path) -> Result<Vec<(PathBuf, String)>> {
             output.push((path, serde_json::to_string_pretty(&doc)?));
             let path = root.join(".env");
             let old = read(&path)?.unwrap_or_default();
+            let old = provider_config::project_gemini_env(&old, &p.settings_config)?;
             let mut lines: Vec<String> = old
                 .lines()
                 .filter(|line| {
@@ -563,6 +630,7 @@ fn changes(p: &Profile, root: &Path) -> Result<Vec<(PathBuf, String)>> {
             configure_grok_models(&mut doc, p, std::iter::empty(), &mut BTreeMap::new())?;
             output.push((path, doc.to_string()));
         }
+        "deepseek" => return dsh::changes(p, root),
         _ => bail!("Unsupported harness"),
     }
     Ok(output)
@@ -571,49 +639,122 @@ pub fn activate(dir: &Path, id: &str) -> Result<String> {
     let p = profile(dir, id)?;
     activate_at(dir, &p, &home(&p.harness))
 }
-fn activate_at(dir: &Path, p: &Profile, root: &Path) -> Result<String> {
-    validate(p, true)?;
+fn native_paths(p: &Profile, root: &Path) -> Result<Vec<PathBuf>> {
+    Ok(match p.harness.as_str() {
+        "codex" => vec![root.join("config.toml"), root.join("auth.json")],
+        "claude" => vec![root.join("settings.json")],
+        "gemini" => vec![root.join("settings.json"), root.join(".env")],
+        "grok" => vec![root.join("config.toml")],
+        "deepseek" => return dsh::paths(p, root),
+        _ => bail!("Unsupported harness"),
+    })
+}
+fn activate_at(dir: &Path, target: &Profile, root: &Path) -> Result<String> {
+    validate(target, true)?;
     let mut s = load(dir)?;
+    let files = native_paths(target, root)?
+        .into_iter()
+        .map(|path| {
+            Ok(FileSnapshot {
+                content: read(&path)?,
+                path,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if let Some(expected) = &target.live_revision {
+        use sha2::{Digest, Sha256};
+        let current = hex::encode(Sha256::digest(serde_json::to_vec(
+            &files
+                .iter()
+                .map(|file| file.content.clone())
+                .collect::<Vec<_>>(),
+        )?));
+        if expected != &current {
+            bail!(write_engine::CONFLICT);
+        }
+    }
+    let mut p = target.clone();
+    let previous = s.active.get(&p.harness).cloned();
+    if let Some(id) = &previous {
+        if id != &p.id {
+            if let Some(old) = s.profiles.iter_mut().find(|old| &old.id == id) {
+                // Backfill before stripping: manually adjusted tier mappings,
+                // headers and exclusive knobs travel with the outgoing provider.
+                old.settings_config = provider_config::capture(&p.harness, root)?;
+                if let Ok(live) = read_live_profile(&p.harness, &old.name, root) {
+                    old.base_url = live.base_url;
+                    old.api_key = live.api_key;
+                    old.model = live.model;
+                    old.auth_type = live.auth_type;
+                    old.api_type = live.api_type;
+                    old.context_window = live.context_window;
+                }
+            }
+        }
+    } else if ["claude", "codex", "gemini"].contains(&p.harness.as_str()) {
+        // Adopt unowned tuning on the first managed activation, including
+        // legacy profiles and explicit presets. Supplied fields take precedence.
+        let mut native = provider_config::capture(&p.harness, root)?;
+        provider_config::strip_basic_auth(&mut native);
+        provider_config::merge_defaults(&mut p.settings_config, native);
+        if let Some(saved) = s.profiles.iter_mut().find(|old| old.id == p.id) {
+            saved.settings_config = p.settings_config.clone();
+        }
+    }
     let edits = if p.harness == "grok" {
         let path = root.join("config.toml");
         let mut doc = toml_doc(&path)?;
-        configure_grok_models(&mut doc, p, std::iter::empty(), &mut s.grok_models)?;
+        configure_grok_models(&mut doc, &p, std::iter::empty(), &mut s.grok_models)?;
         vec![(path, doc.to_string())]
     } else {
-        changes(p, root)?
+        changes(&p, root)?
     };
-    let files = edits
+    // Plan was computed from the same observed generation as the snapshot.
+    for file in &files {
+        if read(&file.path)? != file.content {
+            bail!(write_engine::CONFLICT);
+        }
+    }
+    let staged = edits
         .iter()
-        .map(|(path, _)| {
-            Ok(FileSnapshot {
-                path: path.clone(),
-                content: read(path)?,
-            })
-        })
+        .map(|(path, text)| write_engine::stage(path, text.as_bytes()))
         .collect::<Result<Vec<_>>>()?;
     let backup = Backup {
         id: uuid::Uuid::new_v4().to_string(),
         harness: p.harness.clone(),
         created_at: chrono::Utc::now().to_rfc3339(),
-        active: s.active.get(&p.harness).cloned(),
+        active: previous,
         files,
     };
-    // Persist the recovery snapshot before touching live files.
     s.backups.push(backup.clone());
     save(dir, &s)?;
+    let mut committed = Vec::new();
     let result = (|| -> Result<()> {
-        for (path, text) in &edits {
-            private_write(path, text.as_bytes())?;
+        for ((path, text), staged) in edits.iter().zip(staged) {
+            let before = backup.files.iter().find(|file| &file.path == path).unwrap();
+            write_engine::commit(staged, path, before.content.as_deref())?;
+            committed.push((before, text));
         }
         s.active.insert(p.harness.clone(), p.id.clone());
         save(dir, &s)
     })();
     if let Err(error) = result {
-        restore_files(&backup)?;
-        return Err(error.context("Switch failed; previous configuration restored"));
+        // Restore only our successful writes, and never overwrite a subsequent
+        // external change while rolling back another file's failed commit.
+        for (before, written) in committed.into_iter().rev() {
+            if read(&before.path)?.as_deref() == Some(written.as_str()) {
+                if let Some(original) = &before.content {
+                    private_write(&before.path, original.as_bytes())?;
+                } else {
+                    std::fs::remove_file(&before.path)?;
+                }
+            }
+        }
+        return Err(error);
     }
     Ok(backup.id)
 }
+
 fn restore_files(backup: &Backup) -> Result<()> {
     for f in &backup.files {
         if let Some(text) = &f.content {
@@ -671,7 +812,7 @@ pub async fn test_connection(p: &Profile) -> Result<Value> {
         .build()?;
     let base = p.base_url.trim_end_matches('/');
     let (url, body) = match p.harness.as_str() {
-        "claude" => (
+        "claude" | "deepseek" if p.harness == "claude" || p.api_type == "anthropic" => (
             format!(
                 "{base}/{}messages",
                 if base.ends_with("/v1") { "" } else { "v1/" }
@@ -707,16 +848,20 @@ pub async fn test_connection(p: &Profile) -> Result<Value> {
 }
 
 fn authenticated(p: &Profile, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-    match p.harness.as_str() {
+    let mut request = match p.harness.as_str() {
         "claude" if p.auth_type == "bearer" => request
             .bearer_auth(&p.api_key)
             .header("anthropic-version", "2023-06-01"),
-        "claude" => request
+        "claude" | "deepseek" if p.harness == "claude" || p.api_type == "anthropic" => request
             .header("x-api-key", &p.api_key)
             .header("anthropic-version", "2023-06-01"),
         "gemini" => request.header("x-goog-api-key", &p.api_key),
         _ => request.bearer_auth(&p.api_key),
+    };
+    for (name, value) in provider_config::headers(p) {
+        request = request.header(name, value);
     }
+    request
 }
 
 async fn response_json(request: reqwest::RequestBuilder) -> Result<Value> {
@@ -753,6 +898,7 @@ async fn response_json(request: reqwest::RequestBuilder) -> Result<Value> {
 fn validate_model_response(p: &Profile, body: &Value) -> Result<()> {
     let expected = match p.harness.as_str() {
         "claude" => "content",
+        "deepseek" if p.api_type == "anthropic" => "content",
         "gemini" => "candidates",
         _ if p.api_type == "chat_completions" => "choices",
         _ => "output",
@@ -772,6 +918,9 @@ fn validate_model_response(p: &Profile, body: &Value) -> Result<()> {
 }
 
 pub fn import_config(harness: &str, name: &str, text: &str, key: &str) -> Result<Profile> {
+    if harness == "deepseek" {
+        bail!("Import DSH using the current live configuration or its provider form");
+    }
     // Accept native provider configuration or a CC Switch settingsConfig object.
     let parsed = serde_json::from_str::<Value>(text).ok();
     let wrapper = parsed
@@ -792,6 +941,10 @@ pub fn import_config(harness: &str, name: &str, text: &str, key: &str) -> Result
         model: String::new(),
         api_type: responses(),
         context_window: context_window(),
+        settings_config: empty_config(),
+        sort_index: 0,
+        revision: None,
+        live_revision: None,
     };
     if matches!(harness, "codex" | "grok") {
         let doc = native
@@ -878,15 +1031,62 @@ pub fn import_config(harness: &str, name: &str, text: &str, key: &str) -> Result
             .into();
         p.model = env[model]
             .as_str()
+            .or_else(|| doc.get("model").and_then(Value::as_str))
             .or_else(|| doc.pointer("/model/name").and_then(Value::as_str))
             .unwrap_or_default()
             .into();
         if p.api_key.is_empty() {
             p.api_key = env[secret]
                 .as_str()
-                .or_else(|| env["ANTHROPIC_API_KEY"].as_str())
+                .filter(|key| !key.trim().is_empty())
+                .or_else(|| {
+                    env[if harness == "gemini" {
+                        "GOOGLE_API_KEY"
+                    } else {
+                        "ANTHROPIC_API_KEY"
+                    }]
+                    .as_str()
+                })
                 .unwrap_or_default()
                 .into();
+        }
+    }
+    if harness == "claude" {
+        if let Some(doc) = wrapper.and_then(Value::as_object) {
+            for (key, value) in doc {
+                if cc_switch::claude_provider_top(key) {
+                    p.settings_config[key] = value.clone();
+                }
+            }
+            if let Some(env) = doc.get("env").and_then(Value::as_object) {
+                p.settings_config["env"] = json!({});
+                for (key, value) in env {
+                    if cc_switch::claude_provider_env(key) {
+                        p.settings_config["env"][key] = value.clone();
+                    }
+                }
+            }
+        }
+    } else if harness == "gemini" {
+        p.settings_config["env"] = json!({});
+        if let Some(env) = wrapper.and_then(|v| v.get("env").unwrap_or(v).as_object()) {
+            for (key, value) in env {
+                if cc_switch::gemini_provider_env(key) {
+                    p.settings_config["env"][key] = value.clone();
+                }
+            }
+        }
+    } else if harness == "codex" {
+        let doc: toml::Value = native.parse()?;
+        for (key, value) in doc.as_table().unwrap() {
+            if cc_switch::codex_provider_top(key) {
+                p.settings_config[key] = serde_json::to_value(value)?;
+            }
+        }
+        if let Some(selected) = doc.get("model_provider").and_then(toml::Value::as_str) {
+            if let Some(provider) = doc.get("model_providers").and_then(|v| v.get(selected)) {
+                p.settings_config["provider"] = serde_json::to_value(provider)?;
+            }
         }
     }
     validate(&p, true)?;
@@ -1096,6 +1296,10 @@ mod tests {
             model: "test-model".into(),
             api_type: responses(),
             context_window: context_window(),
+            settings_config: empty_config(),
+            sort_index: 0,
+            revision: None,
+            live_revision: None,
         }
     }
     #[test]
@@ -1161,7 +1365,7 @@ mod tests {
             ("ANTHROPIC_AUTH_TOKEN", "bearer", "ANTHROPIC_API_KEY"),
         ] {
             let text =
-                json!({"settingsConfig":{"env":{key:"synthetic", "ANTHROPIC_MODEL":"test"}}})
+                json!({"settingsConfig":{"env":{key:"synthetic",other:"", "ANTHROPIC_MODEL":"test"}}})
                     .to_string();
             let p = import_config("claude", "Imported", &text, "").unwrap();
             assert_eq!(p.auth_type, mode);
@@ -1178,6 +1382,122 @@ mod tests {
             assert_eq!(doc["env"][key], "synthetic");
             assert!(doc["env"].get(other).is_none());
             assert_eq!(doc["permissions"]["allow"][0], "Read");
+        }
+    }
+    #[test]
+    fn claude_gateway_tuning_backfills_and_returns_with_its_provider() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("claude");
+        let store = temp.path().join("store");
+        let original = json!({"env":{"ANTHROPIC_CUSTOM_HEADERS":"x-gateway-auth: native","ANTHROPIC_DEFAULT_HAIKU_MODEL":"native-haiku"},"modelOverrides":{"alias":"native"},"fallbackModel":"native-fallback"}).to_string();
+        private_write(&root.join("settings.json"), original.as_bytes()).unwrap();
+        let a = fixture("claude");
+        let b = fixture("claude");
+        upsert(&store, a.clone()).unwrap();
+        upsert(&store, b.clone()).unwrap();
+        activate_at(&store, &a, &root).unwrap();
+        let mut live = json_doc(&root.join("settings.json")).unwrap();
+        assert_eq!(
+            live["env"]["ANTHROPIC_CUSTOM_HEADERS"],
+            "x-gateway-auth: native"
+        );
+        live["env"]["ANTHROPIC_DEFAULT_SONNET_MODEL"] = json!("manually-edited-sonnet");
+        live["env"]["CLAUDE_CODE_SUBAGENT_MODEL"] = json!("manual-subagent");
+        private_write(
+            &root.join("settings.json"),
+            serde_json::to_string(&live).unwrap().as_bytes(),
+        )
+        .unwrap();
+        activate_at(&store, &b, &root).unwrap();
+        assert!(json_doc(&root.join("settings.json")).unwrap()["env"]
+            .get("ANTHROPIC_CUSTOM_HEADERS")
+            .is_none());
+        activate_at(&store, &profile(&store, &a.id).unwrap(), &root).unwrap();
+        let restored = json_doc(&root.join("settings.json")).unwrap();
+        for key in [
+            "ANTHROPIC_CUSTOM_HEADERS",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+            "CLAUDE_CODE_SUBAGENT_MODEL",
+        ] {
+            assert_eq!(restored["env"][key], live["env"][key]);
+        }
+        assert_eq!(restored["modelOverrides"], live["modelOverrides"]);
+        assert_eq!(restored["fallbackModel"], live["fallbackModel"]);
+    }
+    #[test]
+    fn claude_switch_never_removes_tool_environment_or_user_settings() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("claude");
+        let store = temp.path().join("store");
+        let original = json!({"env":{"AWS_PROFILE":"staging","AWS_REGION":"ca-central-1","GOOGLE_APPLICATION_CREDENTIALS":"/isolated/google.json","CLOUD_ML_REGION":"test","CLAUDE_CODE_USE_NATIVE_FILE_SEARCH":"1","USER_SETTING":"keep"},"hooks":{"SessionStart":[]},"permissions":{"allow":["Read"]},"apiKeyHelper":"user-helper"});
+        private_write(
+            &root.join("settings.json"),
+            serde_json::to_vec(&original).unwrap().as_slice(),
+        )
+        .unwrap();
+        for _ in 0..3 {
+            let p = fixture("claude");
+            upsert(&store, p.clone()).unwrap();
+            activate_at(&store, &p, &root).unwrap();
+        }
+        let live = json_doc(&root.join("settings.json")).unwrap();
+        for (key, value) in original["env"].as_object().unwrap() {
+            assert_eq!(&live["env"][key], value);
+        }
+        for key in ["hooks", "permissions", "apiKeyHelper"] {
+            assert_eq!(live[key], original[key]);
+        }
+    }
+    #[test]
+    fn codex_and_gemini_strip_outgoing_provider_knobs_and_backfill_them() {
+        for harness in ["codex", "gemini"] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().join(harness);
+            let store = temp.path().join("store");
+            let mut a = fixture(harness);
+            let b = fixture(harness);
+            a.settings_config = if harness == "codex" {
+                json!({"model_reasoning_effort":"high","review_model":"review-a","experimental_bearer_token":"test-token","provider":{"http_headers":{"x-gateway":"a"}}})
+            } else {
+                json!({"env":{"GOOGLE_API_KEY":"test-google-key","GEMINI_CLI_CUSTOM_HEADERS":"x-gateway: a"}})
+            };
+            upsert(&store, a.clone()).unwrap();
+            upsert(&store, b.clone()).unwrap();
+            activate_at(&store, &a, &root).unwrap();
+            activate_at(&store, &b, &root).unwrap();
+            let saved = profile(&store, &a.id).unwrap();
+            if harness == "codex" {
+                let live = toml_doc(&root.join("config.toml")).unwrap();
+                for key in [
+                    "model_reasoning_effort",
+                    "review_model",
+                    "experimental_bearer_token",
+                ] {
+                    assert!(live.get(key).is_none());
+                    assert!(saved.settings_config.get(key).is_some());
+                }
+            } else {
+                let live = read(&root.join(".env")).unwrap().unwrap();
+                assert!(!live.contains("GOOGLE_API_KEY="));
+                assert!(!live.contains("GEMINI_CLI_CUSTOM_HEADERS="));
+                assert_eq!(
+                    saved.settings_config["env"]["GOOGLE_API_KEY"],
+                    "test-google-key"
+                );
+            }
+            activate_at(&store, &saved, &root).unwrap();
+            if harness == "codex" {
+                assert_eq!(
+                    toml_doc(&root.join("config.toml")).unwrap()["review_model"].as_str(),
+                    Some("review-a")
+                );
+            } else {
+                assert!(read(&root.join(".env"))
+                    .unwrap()
+                    .unwrap()
+                    .contains("GOOGLE_API_KEY="));
+            }
         }
     }
     #[test]
@@ -1206,4 +1526,284 @@ fn templates_allow_model_omission_for_upstream_discovery() {
     }))
     .unwrap();
     assert_eq!(template.profiles[0].model, "");
+}
+
+/// Read native provider parameters; callers redact before returning over HTTP.
+fn read_live_profile(harness: &str, name: &str, root: &Path) -> Result<Profile> {
+    if harness == "deepseek" {
+        return dsh::import_live(root, name);
+    }
+    let native = if harness == "codex" {
+        json!({"config":read(&root.join("config.toml"))?.unwrap_or_default(),"auth":json_doc(&root.join("auth.json"))?}).to_string()
+    } else if harness == "grok" {
+        read(&root.join("config.toml"))?.unwrap_or_default()
+    } else if harness == "claude" {
+        json_doc(&root.join("settings.json"))?.to_string()
+    } else {
+        provider_config::capture(harness, root)?.to_string()
+    };
+    let mut p = import_config(harness, name, &native, "")?;
+    p.settings_config = provider_config::capture(harness, root)?;
+    Ok(p)
+}
+fn live_revision(p: &Profile, root: &Path) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    let files = native_paths(p, root)?
+        .iter()
+        .map(|path| read(path))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(hex::encode(Sha256::digest(serde_json::to_vec(&files)?)))
+}
+pub fn inspect_profile(dir: &Path, id: &str) -> Result<Value> {
+    let p = profile(dir, id)?;
+    inspect_profile_at(dir, id, &home(&p.harness))
+}
+fn inspect_profile_at(dir: &Path, id: &str, root: &Path) -> Result<Value> {
+    let mut p = profile(dir, id)?;
+    if active_profile(dir, &p.harness)?.is_some_and(|active| active.id == id) {
+        let before = live_revision(&p, root)?;
+        p.settings_config = provider_config::capture(&p.harness, root)?;
+        if let Ok(live) = read_live_profile(&p.harness, &p.name, root) {
+            p.base_url = live.base_url;
+            p.model = live.model;
+            p.api_key = live.api_key;
+            p.auth_type = live.auth_type;
+            p.api_type = live.api_type;
+        }
+        if before != live_revision(&p, root)? {
+            bail!(write_engine::CONFLICT);
+        }
+        let mut result = redacted(&p);
+        result["revision"] = json!(provider_config::revision(&profile(dir, id)?));
+        result["liveRevision"] = json!(before);
+        return Ok(result);
+    }
+    Ok(redacted(&p))
+}
+pub fn save_and_apply(dir: &Path, p: Profile) -> Result<Value> {
+    let root = home(&p.harness);
+    save_and_apply_at(dir, p, &root)
+}
+fn save_and_apply_at(dir: &Path, p: Profile, root: &Path) -> Result<Value> {
+    let original = load(dir)?;
+    let active = original.active.get(&p.harness) == Some(&p.id);
+    let expected = p.live_revision.clone();
+    let saved = upsert_at(dir, p, root)?;
+    if active {
+        let mut target = profile(dir, saved["id"].as_str().unwrap())?;
+        target.live_revision = expected;
+        if let Err(error) = activate_at(dir, &target, root) {
+            save(dir, &original)?;
+            return Err(error);
+        }
+    }
+    Ok(saved)
+}
+pub fn import_live(dir: &Path, harness: &str, name: &str) -> Result<Value> {
+    upsert(dir, read_live_profile(harness, name, &home(harness))?)
+}
+pub fn reorder(dir: &Path, id: &str, direction: &str) -> Result<()> {
+    let mut store = load(dir)?;
+    let harness = store
+        .profiles
+        .iter()
+        .find(|p| p.id == id)
+        .ok_or_else(|| anyhow!("Profile not found"))?
+        .harness
+        .clone();
+    let mut rows = store
+        .profiles
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.harness == harness)
+        .map(|(i, p)| (i, p.sort_index))
+        .collect::<Vec<_>>();
+    rows.sort_by_key(|(_, sort)| *sort);
+    let index = rows
+        .iter()
+        .position(|(i, _)| store.profiles[*i].id == id)
+        .unwrap();
+    let target = match direction {
+        "up" => index.saturating_sub(1),
+        "down" => (index + 1).min(rows.len() - 1),
+        _ => bail!("Unknown reorder direction"),
+    };
+    rows.swap(index, target);
+    for (sort, (i, _)) in rows.into_iter().enumerate() {
+        store.profiles[i].sort_index = sort as i64;
+    }
+    save(dir, &store)
+}
+pub async fn endpoint_speed(p: &Profile) -> Result<Value> {
+    validate(p, true)?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?;
+    let start = std::time::Instant::now();
+    let suffix = if p.harness == "gemini" {
+        "v1beta/models"
+    } else if p.harness == "claude" || p.api_type == "anthropic" {
+        "v1/models"
+    } else {
+        "models"
+    };
+    let base = p.base_url.trim_end_matches('/');
+    let suffix = if base.ends_with("/v1") || base.ends_with("/v1beta") {
+        "models"
+    } else {
+        suffix
+    };
+    let response = authenticated(p, client.get(format!("{base}/{suffix}")))
+        .send()
+        .await
+        .map_err(|_| anyhow!("Endpoint speed test failed or timed out"))?;
+    Ok(json!({"latencyMs":start.elapsed().as_millis(),"status":response.status().as_u16()}))
+}
+
+#[cfg(test)]
+mod provider_edit_tests {
+    use super::*;
+    #[test]
+    fn stale_provider_editor_is_rejected_and_private_fragments_stay_private() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path();
+        let mut p = tests::fixture("claude");
+        p.settings_config =
+            json!({"env":{"ANTHROPIC_CUSTOM_HEADERS":"x-gateway-token: synthetic-private"}});
+        let mut view = upsert(dir, p.clone()).unwrap();
+        assert!(!view.to_string().contains("synthetic-private"));
+        view.as_object_mut().unwrap().remove("hasApiKey");
+        let old: Profile = serde_json::from_value(view.clone()).unwrap();
+        p.name = "Other edit".into();
+        upsert(dir, p).unwrap();
+        assert!(upsert(dir, old)
+            .unwrap_err()
+            .to_string()
+            .contains("edit conflict"));
+        view = inventory(dir).unwrap()["profiles"][0].clone();
+        view.as_object_mut().unwrap().remove("hasApiKey");
+        let mut current: Profile = serde_json::from_value(view).unwrap();
+        current.name = "My edit".into();
+        upsert(dir, current.clone()).unwrap();
+        assert_eq!(
+            profile(dir, &current.id).unwrap().settings_config["env"]["ANTHROPIC_CUSTOM_HEADERS"],
+            "x-gateway-token: synthetic-private"
+        );
+    }
+    #[test]
+    fn duplicating_redacted_fragments_never_writes_secret_placeholders() {
+        let temp = tempfile::tempdir().unwrap();
+        for harness in ["claude", "deepseek"] {
+            let mut p = tests::fixture(harness);
+            p.settings_config = if harness == "claude" {
+                json!({"env":{"ANTHROPIC_CUSTOM_HEADERS":"X-Key: original-private"}})
+            } else {
+                json!({"headers":{"X-Key":"original-private"}})
+            };
+            let mut view = upsert(temp.path(), p).unwrap();
+            view.as_object_mut().unwrap().remove("hasApiKey");
+            let mut copy: Profile = serde_json::from_value(view).unwrap();
+            copy.id.clear();
+            copy.revision = None;
+            copy.api_key = "synthetic-new-key".into();
+            let copied = upsert(temp.path(), copy).unwrap();
+            let stored = profile(temp.path(), copied["id"].as_str().unwrap()).unwrap();
+            assert!(!stored
+                .settings_config
+                .to_string()
+                .contains("[stored privately]"));
+            assert!(!stored
+                .settings_config
+                .to_string()
+                .contains("original-private"));
+        }
+    }
+    #[test]
+    fn first_explicit_preset_adopts_unowned_tuning_and_active_edit_reapplies_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("claude");
+        let dir = temp.path().join("store");
+        private_write(&root.join("settings.json"),br#"{"env":{"ANTHROPIC_DEFAULT_HAIKU_MODEL":"custom-haiku","AWS_PROFILE":"tool-account"},"modelOverrides":{"sonnet":"custom-sonnet"}}"#).unwrap();
+        let mut p = tests::fixture("claude");
+        p.settings_config = json!({"env":{"ANTHROPIC_DEFAULT_OPUS_MODEL":"preset-opus"}});
+        upsert(&dir, p.clone()).unwrap();
+        activate_at(&dir, &p, &root).unwrap();
+        let mut saved = profile(&dir, &p.id).unwrap();
+        assert_eq!(
+            saved.settings_config["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"],
+            "custom-haiku"
+        );
+        saved.settings_config["env"]["ANTHROPIC_DEFAULT_OPUS_MODEL"] = json!("edited-opus");
+        save_and_apply_at(&dir, saved, &root).unwrap();
+        let doc = json_doc(&root.join("settings.json")).unwrap();
+        assert_eq!(doc["env"]["ANTHROPIC_DEFAULT_OPUS_MODEL"], "edited-opus");
+        assert_eq!(doc["env"]["AWS_PROFILE"], "tool-account");
+    }
+    #[test]
+    fn active_editor_preserves_live_tuning_and_rejects_changes_after_opening() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("claude");
+        let dir = temp.path().join("store");
+        let p = tests::fixture("claude");
+        upsert(&dir, p.clone()).unwrap();
+        activate_at(&dir, &p, &root).unwrap();
+        let path = root.join("settings.json");
+        let mut doc = json_doc(&path).unwrap();
+        doc["env"]["ANTHROPIC_CUSTOM_HEADERS"] = json!("X-Key: synthetic-live-secret");
+        doc["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = json!("live-haiku");
+        doc["env"]["ANTHROPIC_API_KEY"] = json!("synthetic-manually-rotated-key");
+        private_write(&path, doc.to_string().as_bytes()).unwrap();
+        let mut view = inspect_profile_at(&dir, &p.id, &root).unwrap();
+        assert!(!view.to_string().contains("synthetic-live-secret"));
+        view.as_object_mut().unwrap().remove("hasApiKey");
+        let mut editor: Profile = serde_json::from_value(view).unwrap();
+        editor.name = "Renamed".into();
+        save_and_apply_at(&dir, editor, &root).unwrap();
+        assert_eq!(
+            json_doc(&path).unwrap()["env"]["ANTHROPIC_CUSTOM_HEADERS"],
+            "X-Key: synthetic-live-secret"
+        );
+        assert_eq!(
+            profile(&dir, &p.id).unwrap().api_key,
+            "synthetic-manually-rotated-key"
+        );
+        assert_eq!(
+            json_doc(&path).unwrap()["env"]["ANTHROPIC_API_KEY"],
+            "synthetic-manually-rotated-key"
+        );
+        let mut stale = inspect_profile_at(&dir, &p.id, &root).unwrap();
+        stale.as_object_mut().unwrap().remove("hasApiKey");
+        doc = json_doc(&path).unwrap();
+        doc["newExternalSetting"] = json!(true);
+        private_write(&path, doc.to_string().as_bytes()).unwrap();
+        let before = read(&path).unwrap();
+        let old_name = profile(&dir, &p.id).unwrap().name;
+        let error =
+            save_and_apply_at(&dir, serde_json::from_value(stale).unwrap(), &root).unwrap_err();
+        assert!(error.to_string().contains("Native configuration changed"));
+        assert_eq!(read(&path).unwrap(), before);
+        assert_eq!(profile(&dir, &p.id).unwrap().name, old_name);
+    }
+    #[test]
+    fn ordering_is_persistent_and_scoped_to_harness() {
+        let temp = tempfile::tempdir().unwrap();
+        let a = tests::fixture("codex");
+        let b = tests::fixture("codex");
+        let c = tests::fixture("claude");
+        for p in [&a, &b, &c] {
+            upsert(temp.path(), p.clone()).unwrap();
+        }
+        reorder(temp.path(), &b.id, "up").unwrap();
+        let rows = inventory(temp.path()).unwrap();
+        let rows = rows["profiles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|p| p["harness"] == "codex")
+            .collect::<Vec<_>>();
+        assert_eq!(rows[0]["id"], b.id);
+        assert_eq!(rows[1]["id"], a.id);
+        assert_eq!(profile(temp.path(), &c.id).unwrap().sort_index, 0);
+    }
 }

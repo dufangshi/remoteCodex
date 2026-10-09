@@ -313,19 +313,31 @@ async fn cli_identity_is_rebound_when_a_loaded_session_changes_thread_context() 
         performance_mode: None,
         hidden: false,
         images: vec![],
+        title: None,
+        context_delivered: false,
     };
+    let bus = EventBus::new();
+    let mut events = bus.subscribe();
     for text in ["first", "second"] {
         s.with_cli_context(
             "thread-a",
             runtime.start_turn(
                 prompt("thread-a", text),
-                EventBus::new(),
+                bus.clone(),
                 tokio_util::sync::CancellationToken::new(),
             ),
         )
         .await
         .unwrap();
     }
+    // The service persists this so a restarted process does not resend it.
+    let mut delivered = Vec::new();
+    while let Ok(event) = events.try_recv() {
+        if event.event_type == "thread.context.delivered" {
+            delivered.push(event.payload["providerSessionId"].clone());
+        }
+    }
+    assert_eq!(delivered, [serde_json::json!(started.provider_session_id)]);
     let prompts = || {
         std::fs::read_to_string(dir.path().join("prompts.jsonl"))
             .unwrap()
@@ -382,6 +394,36 @@ async fn cli_identity_is_rebound_when_a_loaded_session_changes_thread_context() 
         })
         .await
     );
+    // A new process resuming the same session replays its history, which
+    // already holds the context: the turn the service marks delivered gets none.
+    runtime
+        .release_session(&started.provider_session_id)
+        .await
+        .unwrap();
+    s.with_cli_context(
+        "thread-b",
+        runtime.resume_session(
+            &started.provider_session_id,
+            Some(&dir.path().to_string_lossy()),
+            SessionSettings::default(),
+        ),
+    )
+    .await
+    .unwrap();
+    s.with_cli_context(
+        "thread-b",
+        runtime.start_turn(
+            StartTurnInput {
+                context_delivered: true,
+                ..prompt("thread-b", "after restart")
+            },
+            EventBus::new(),
+            tokio_util::sync::CancellationToken::new(),
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(prompts()[4], "after restart");
 }
 
 #[tokio::test]

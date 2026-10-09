@@ -3,7 +3,8 @@ pub use automation::*;
 mod interaction;
 mod metrics;
 pub use interaction::{
-    ThreadSendInput, ThreadTranscriptQuery, MESSAGE_KINDS, THREAD_INTERACTION_SKILL,
+    ThreadSendInput, ThreadTranscriptQuery, MESSAGE_KINDS, THREAD_INTERACTION_GUIDES,
+    THREAD_INTERACTION_SKILL,
 };
 pub use metrics::*;
 use std::collections::BTreeMap;

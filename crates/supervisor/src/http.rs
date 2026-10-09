@@ -108,6 +108,10 @@ pub fn router(state: AppState) -> Router {
             post(crate::upstreams::import_config),
         )
         .route(
+            "/api/management/upstreams/live",
+            post(crate::upstreams::live),
+        )
+        .route(
             "/api/management/upstreams/models",
             post(crate::upstreams::models),
         )
@@ -154,6 +158,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/agent-runtimes", get(agent_runtimes))
         .route("/api/agent-runtimes/{provider}/status", get(agent_status))
         .route("/api/agent-runtimes/{provider}/models", get(agent_models))
+        .route("/api/agent-runtimes/{provider}/harness", get(agent_harness))
         .route("/api/agent-runtimes/{provider}/agents", get(agent_agents))
         .route(
             "/api/agent-runtimes/{provider}/capabilities",
@@ -272,6 +277,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/threads/{id}/fork-turns", get(thread_fork_turns))
         .route("/api/threads/{id}/capabilities", get(thread_capabilities))
+        .route("/api/threads/{id}/harness", post(thread_harness_action))
         .route("/api/threads/{id}/fork", post(thread_fork))
         .route("/api/threads/{id}/compact", post(thread_compact))
         .route(
@@ -718,6 +724,19 @@ async fn agent_models(
     Ok(Json(serde_json::to_value(models).unwrap_or(json!([]))))
 }
 
+async fn agent_harness(
+    Path(provider): Path<String>,
+    Query(query): Query<AgentQuery>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiErr> {
+    let provider = parse_provider(&provider)?;
+    let catalog = state
+        .harness_catalog(provider, query.agent_id.as_deref(), query.cwd.as_deref())
+        .await
+        .map_err(map_err)?;
+    Ok(Json(catalog))
+}
+
 async fn agent_agents(
     Path(provider): Path<String>,
     State(state): State<AppState>,
@@ -733,6 +752,29 @@ async fn thread_capabilities(
 ) -> Result<Json<Value>, ApiErr> {
     let caps = state.thread_capabilities(&id).await.map_err(map_err)?;
     Ok(Json(serde_json::to_value(caps).unwrap_or(json!({}))))
+}
+
+async fn thread_harness_action(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Json(action): Json<Value>,
+) -> Result<Json<Value>, ApiErr> {
+    let console = action["kind"] == "console";
+    let mut result = state
+        .thread_harness_action(&id, action)
+        .await
+        .map_err(map_err)?;
+    // Relay browsers reach the console's loopback port through a preview.
+    let port = result["console"]["port"]
+        .as_u64()
+        .and_then(|port| u16::try_from(port).ok());
+    if let (true, true, Some(port)) = (console, state.config.relay_server_url.is_some(), port) {
+        let mapping = crate::ports::dsh_console_mapping(&state, &id, port)
+            .await
+            .map_err(map_err)?;
+        result["console"]["mappingId"] = json!(mapping.id);
+    }
+    Ok(Json(result))
 }
 
 async fn agent_caps(
@@ -2320,22 +2362,49 @@ fn terminal_plugin(state: &Supervisor) -> Value {
     })
 }
 
+const DSH_PLUGIN_ID: &str = "remote-codex.deepseek-harness";
+
+/// Native DeepSeek Harness controls for DSH threads: run modes, DSH plugins
+/// and profile settings, commands and the native console.
+fn dsh_plugin(state: &Supervisor) -> Value {
+    let available = remote_codex_runtime::acp::builtin_agents(None)
+        .iter()
+        .find(|agent| agent.id == "deepseek")
+        .is_some_and(|agent| remote_codex_runtime::acp::command_available(&agent.base_command));
+    json!({
+        "id": DSH_PLUGIN_ID,
+        "name": "DeepSeek Harness",
+        "version": state.config.app_version.as_str(),
+        "description": "Run modes, DSH plugins, profile settings, commands and the native DSH console for DeepSeek Harness threads.",
+        "remoteCodex": format!(">={}", state.config.app_version),
+        "capabilities": { "artifactTypes": [], "timelineRenderers": [], "threadPanels": [{ "id": "deepseek-harness", "label": "DeepSeek Harness", "kind": "harness:deepseek", "artifactTypes": [] }] },
+        "enabled": available && state.plugin_enabled(DSH_PLUGIN_ID, true),
+        "source": "builtin",
+        "available": available,
+        "unavailableReasonCode": if available { Value::Null } else { json!("harness_missing") },
+        "unavailableReason": if available { Value::Null } else { json!("Install DeepSeek Harness (dsh) on this device to use this plugin.") }
+    })
+}
+
+fn builtin_plugin(state: &Supervisor, id: &str) -> Option<Value> {
+    match id {
+        TERMINAL_PLUGIN_ID => Some(terminal_plugin(state)),
+        DSH_PLUGIN_ID => Some(dsh_plugin(state)),
+        _ => None,
+    }
+}
+
 async fn list_plugins(State(state): State<AppState>) -> Json<Value> {
-    Json(json!([terminal_plugin(&state)]))
+    Json(json!([terminal_plugin(&state), dsh_plugin(&state)]))
 }
 
 async fn get_plugin(
     Path(id): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Json<Value>, ApiErr> {
-    if id != TERMINAL_PLUGIN_ID {
-        return Err(err(
-            StatusCode::NOT_FOUND,
-            "not_found",
-            "Plugin was not found.",
-        ));
-    }
-    Ok(Json(terminal_plugin(&state)))
+    builtin_plugin(&state, &id)
+        .map(Json)
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "not_found", "Plugin was not found."))
 }
 
 async fn import_plugin_unsupported() -> ApiErr {
@@ -2347,7 +2416,7 @@ async fn import_plugin_unsupported() -> ApiErr {
 }
 
 async fn delete_plugin(Path(id): Path<String>) -> Result<Json<Value>, ApiErr> {
-    if id == TERMINAL_PLUGIN_ID {
+    if matches!(id.as_str(), TERMINAL_PLUGIN_ID | DSH_PLUGIN_ID) {
         return Err(err(
             StatusCode::CONFLICT,
             "unsupported",
@@ -2366,13 +2435,13 @@ async fn update_plugin(
     State(state): State<AppState>,
     Json(input): Json<UpdatePluginInput>,
 ) -> Result<Json<Value>, ApiErr> {
-    if id != TERMINAL_PLUGIN_ID {
+    if builtin_plugin(&state, &id).is_none() {
         return Err(err(StatusCode::NOT_FOUND, "not_found", "plugin not found"));
     }
     state
-        .set_plugin_enabled(TERMINAL_PLUGIN_ID, input.enabled)
+        .set_plugin_enabled(&id, input.enabled)
         .map_err(map_err)?;
-    Ok(Json(terminal_plugin(&state)))
+    Ok(Json(builtin_plugin(&state, &id).unwrap_or(Value::Null)))
 }
 
 async fn ws_upgrade(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {

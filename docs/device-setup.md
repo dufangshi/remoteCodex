@@ -39,10 +39,11 @@ Cursor Agent, GitHub Copilot and OpenCode. Codex and Claude also install the ACP
 adapter. Updates preserve the detected installation owner. DeepSeek/custom
 executables still need an externally managed installation.
 
-Upstream profiles currently support Codex Responses, Claude Messages, Gemini
-GenerateContent and Grok Responses/Chat Completions. Profiles, keys and exact
+Upstream profiles support OpenAI Codex Responses, Claude Agent Messages, Gemini
+GenerateContent, Grok Responses/Chat Completions, and DSH DeepSeek official /
+OpenAI-compatible APIs. Profiles, keys and exact
 configuration backups are stored privately on the device. The browser receives
-only a `hasApiKey` flag. Activation updates provider-owned fields while preserving
+a `hasApiKey` flag and redacted provider fragments. Activation updates provider-owned fields while preserving
 MCP, skills and other settings. It retires idle ACP processes; the next turn
 reloads the configuration and resumes the session. A busy harness returns a
 conflict; finish or stop its current tasks before switching. Restore recovers
