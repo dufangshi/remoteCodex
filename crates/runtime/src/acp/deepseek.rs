@@ -1,30 +1,49 @@
-//! DSH startup discovery runs as a plugin in the process owned by ACP. The
-//! appReady boundary joins asynchronous provider loading before initialize/new.
-use anyhow::{bail, Context, Result};
+//! DSH bridge. A plugin inserted with DSH's `--patch` into the ACP-owned process
+//! reverse-connects after `appReady`, before ACP initialize/new, so the provider
+//! catalog is complete. ACP keeps prompts, tools, permissions and cancellation;
+//! the bridge carries metadata, allowlisted DSH Remote calls, projection views,
+//! live assistant text and human questions. It never writes to the ACP stdio.
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+
+use anyhow::{anyhow, bail, Context, Result};
+use remote_codex_protocol::{AgentProviderCapabilitiesDto, ModelOptionDto};
 use serde_json::{json, Value};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
-    net::TcpListener,
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+    net::{tcp::OwnedWriteHalf, TcpListener},
+    sync::{broadcast, oneshot, Mutex},
 };
 
-pub(super) struct Discovery {
+use super::modes::ProductSessionPolicy;
+
+/// DSH reads its process-wide sandbox default from this variable at boot.
+pub(super) const PERMISSION_ENV: &str = "DSH_PERMISSION_MODE";
+const PROTOCOL: u64 = 1;
+const MAX_LINE: u64 = 2 * 1024 * 1024;
+const CALL_TIMEOUT: Duration = Duration::from_secs(20);
+/// `/compact` summarizes with a model call; mode commands return at once.
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(600);
+
+pub(super) struct Launch {
     listener: TcpListener,
     token: String,
-    pub directory: tempfile::TempDir,
+    directory: tempfile::TempDir,
 }
 
-impl Discovery {
+impl Launch {
     pub async fn prepare(command: &mut String) -> Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let token = uuid::Uuid::new_v4().to_string();
         let directory = tempfile::tempdir()?;
-        let plugin = directory.path().join("discovery.mjs");
-        std::fs::write(&plugin, include_str!("deepseek-plugin.mjs"))?;
+        let plugin = directory.path().join("remote-codex-bridge.mjs");
+        std::fs::write(&plugin, include_str!("deepseek-bridge.mjs"))?;
         let patch = directory.path().join("patch.json");
         std::fs::write(
             &patch,
             serde_json::to_vec(&json!([{"insert":[{
-                "id":"remote-codex-discovery", "name":plugin,
+                "id":"remote-codex-bridge", "name":plugin,
                 "config":{"port":listener.local_addr()?.port(),"token":token}
             }]}]))?,
         )?;
@@ -42,15 +61,17 @@ impl Discovery {
         })
     }
 
-    pub async fn receive(&self) -> Result<Value> {
+    /// Wait for the plugin's hello. Strangers without the token are dropped.
+    pub async fn connect(self) -> Result<(Bridge, Value)> {
         loop {
             let (stream, _) = self.listener.accept().await?;
-            let mut reader = BufReader::new(stream.take(2 * 1024 * 1024));
+            let (read, writer) = stream.into_split();
+            let mut reader = BufReader::new(read);
             let mut line = String::new();
             if !matches!(
                 tokio::time::timeout(
-                    std::time::Duration::from_secs(3),
-                    reader.read_line(&mut line)
+                    Duration::from_secs(3),
+                    (&mut reader).take(MAX_LINE).read_line(&mut line)
                 )
                 .await,
                 Ok(Ok(_))
@@ -64,12 +85,616 @@ impl Discovery {
                 continue;
             }
             if let Some(error) = value["error"].as_str() {
-                bail!("DSH discovery: {error}");
+                bail!("DSH bridge: {error}");
             }
-            return value
-                .get("data")
+            let hello = value
+                .get("hello")
                 .cloned()
-                .context("DSH discovery returned no data");
+                .context("DSH bridge sent no hello")?;
+            if hello["protocol"].as_u64() != Some(PROTOCOL) {
+                bail!("DSH bridge protocol {} is not supported", hello["protocol"]);
+            }
+            let (events, _) = broadcast::channel(1024);
+            let bridge = Bridge {
+                writer: Mutex::new(writer),
+                pending: Default::default(),
+                next_id: AtomicU64::new(1),
+                events,
+                _directory: self.directory,
+            };
+            // Keep the buffered reader: events may already follow the hello.
+            bridge.spawn_reader(reader);
+            return Ok((bridge, hello));
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum BridgeEvent {
+    Stream {
+        session_id: String,
+        attempt_id: String,
+        kind: String,
+        text: Option<String>,
+        outcome: Option<String>,
+    },
+    Status {
+        session_id: String,
+        status: String,
+    },
+    Projection {
+        session_id: String,
+        key: String,
+        value: Value,
+    },
+    Question {
+        id: u64,
+        session_id: String,
+        questions: Value,
+    },
+    QuestionCancelled {
+        id: u64,
+    },
+    /// A slow subscriber missed events; re-read the session state.
+    Lagged,
+    Closed,
+}
+
+impl BridgeEvent {
+    fn parse(message: &Value) -> Option<Self> {
+        let session_id = || message["sessionId"].as_str().map(str::to_string);
+        let text = |key: &str| message[key].as_str().map(str::to_string);
+        Some(match message["event"].as_str()? {
+            "stream" => Self::Stream {
+                session_id: session_id()?,
+                attempt_id: text("attemptId")?,
+                kind: text("kind")?,
+                text: text("text"),
+                outcome: text("outcome"),
+            },
+            "status" => Self::Status {
+                session_id: session_id()?,
+                status: text("status")?,
+            },
+            "projection" => Self::Projection {
+                session_id: session_id()?,
+                key: text("key")?,
+                value: message["value"].clone(),
+            },
+            "question" => Self::Question {
+                id: message["questionId"].as_u64()?,
+                session_id: session_id()?,
+                questions: message["questions"].clone(),
+            },
+            "question-cancelled" => Self::QuestionCancelled {
+                id: message["questionId"].as_u64()?,
+            },
+            _ => return None,
+        })
+    }
+}
+
+type Pending = std::sync::Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>;
+
+pub(super) struct Bridge {
+    writer: Mutex<OwnedWriteHalf>,
+    pending: std::sync::Arc<Pending>,
+    next_id: AtomicU64,
+    events: broadcast::Sender<BridgeEvent>,
+    _directory: tempfile::TempDir,
+}
+
+impl Bridge {
+    fn spawn_reader(&self, mut reader: BufReader<tokio::net::tcp::OwnedReadHalf>) {
+        let pending = self.pending.clone();
+        let events = self.events.clone();
+        tokio::spawn(async move {
+            loop {
+                let mut line = String::new();
+                match (&mut reader).take(MAX_LINE).read_line(&mut line).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) if !line.ends_with('\n') => break,
+                    Ok(_) => {}
+                }
+                let Ok(message) = serde_json::from_str::<Value>(&line) else {
+                    continue;
+                };
+                if let Some(id) = message.get("id").and_then(Value::as_u64) {
+                    let result = match message.get("error") {
+                        Some(error) => Err(error["message"]
+                            .as_str()
+                            .unwrap_or("DSH bridge call failed")
+                            .to_string()),
+                        None => Ok(message.get("result").cloned().unwrap_or(Value::Null)),
+                    };
+                    if let Some(sender) = pending.lock().unwrap().remove(&id) {
+                        let _ = sender.send(result);
+                    }
+                } else if let Some(event) = BridgeEvent::parse(&message) {
+                    let _ = events.send(event);
+                }
+            }
+            for (_, sender) in pending.lock().unwrap().drain() {
+                let _ = sender.send(Err("DSH bridge disconnected".into()));
+            }
+            let _ = events.send(BridgeEvent::Closed);
+        });
+    }
+
+    async fn write(&self, message: &Value) -> Result<()> {
+        let mut line = serde_json::to_vec(message)?;
+        line.push(b'\n');
+        let mut writer = self.writer.lock().await;
+        tokio::time::timeout(CALL_TIMEOUT, writer.write_all(&line))
+            .await
+            .map_err(|_| anyhow!("DSH bridge write timed out"))??;
+        Ok(())
+    }
+
+    pub async fn call(&self, method: &str, params: Value) -> Result<Value> {
+        self.call_with_timeout(method, params, CALL_TIMEOUT).await
+    }
+
+    async fn call_with_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value> {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let (sender, receiver) = oneshot::channel();
+        self.pending.lock().unwrap().insert(id, sender);
+        let result = async {
+            self.write(&json!({"id":id,"method":method,"params":params}))
+                .await?;
+            tokio::time::timeout(timeout, receiver)
+                .await
+                .map_err(|_| anyhow!("DSH bridge {method} timed out"))?
+                .map_err(|_| anyhow!("DSH bridge disconnected"))?
+                .map_err(|error| anyhow!("{error}"))
+        }
+        .await;
+        self.pending.lock().unwrap().remove(&id);
+        result
+    }
+
+    pub async fn command(&self, session_id: &str, line: &str) -> Result<Value> {
+        let response = self
+            .call_with_timeout(
+                "command",
+                json!({"sessionId":session_id,"line":line}),
+                COMMAND_TIMEOUT,
+            )
+            .await?;
+        if response["result"]["kind"] == "error" {
+            bail!(
+                "DSH {line}: {}",
+                response["result"]["text"].as_str().unwrap_or("failed")
+            );
+        }
+        Ok(response)
+    }
+
+    pub async fn answer(&self, question: u64, result: Result<Value, String>) -> Result<()> {
+        self.write(&match result {
+            Ok(value) => json!({"answer":question,"result":value}),
+            Err(error) => json!({"answer":question,"error":error}),
+        })
+        .await
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<BridgeEvent> {
+        self.events.subscribe()
+    }
+}
+
+/// ACP options are the selectable truth, including an uncatalogued current
+/// model. Discovery adds each model's own reasoning levels and provider name;
+/// ACP's reasoning option only describes the current model.
+pub(super) fn catalog(
+    acp: Vec<ModelOptionDto>,
+    discovered: &Value,
+    current_effort: Option<&str>,
+) -> Vec<ModelOptionDto> {
+    let discovered: Vec<ModelOptionDto> =
+        serde_json::from_value(discovered.clone()).unwrap_or_default();
+    acp.into_iter()
+        .map(|mut model| {
+            if let Some(known) = discovered.iter().find(|known| known.model == model.model) {
+                model.display_name = known.display_name.clone();
+                if !known.description.is_empty() {
+                    model.description = known.description.clone();
+                }
+                model.supported_reasoning_efforts = known.supported_reasoning_efforts.clone();
+                model.default_reasoning_effort = known.default_reasoning_effort.clone();
+            } else if model.is_default {
+                model.default_reasoning_effort = current_effort.map(str::to_string);
+            } else {
+                model.supported_reasoning_efforts.clear();
+                model.default_reasoning_effort = None;
+            }
+            model
+        })
+        .collect()
+}
+
+/// Typed panel actions. The HTTP body never reaches DSH as a raw Remote call.
+#[derive(Debug, PartialEq)]
+pub(super) enum PanelAction {
+    Refresh,
+    Settings,
+    UpdateSetting {
+        ns: String,
+        key: String,
+        value: Value,
+        revision: Option<u64>,
+    },
+    SetPluginEnabled {
+        id: String,
+        enabled: bool,
+    },
+    SetBundleEnabled {
+        name: String,
+        enabled: bool,
+    },
+    /// Stop autonomous work (goal rounds, background wakeups) outside a turn.
+    Stop,
+}
+
+impl PanelAction {
+    pub fn parse(action: &Value) -> Result<Self> {
+        let text = |key: &str| {
+            action[key]
+                .as_str()
+                .filter(|value| !value.trim().is_empty())
+                .map(str::to_string)
+                .ok_or_else(|| anyhow!("{key} is required"))
+        };
+        let enabled = || {
+            action["enabled"]
+                .as_bool()
+                .ok_or_else(|| anyhow!("enabled must be a boolean"))
+        };
+        Ok(match action["kind"].as_str() {
+            Some("refresh") => Self::Refresh,
+            Some("settings") => Self::Settings,
+            Some("updateSetting") => {
+                let value = action.get("value").cloned().unwrap_or(Value::Null);
+                if value.is_array() || value.is_object() {
+                    bail!("DSH settings accept JSON scalars only");
+                }
+                Self::UpdateSetting {
+                    ns: text("ns")?,
+                    key: text("key")?,
+                    value,
+                    revision: action["revision"].as_u64(),
+                }
+            }
+            Some("setPluginEnabled") => Self::SetPluginEnabled {
+                id: text("id")?,
+                enabled: enabled()?,
+            },
+            Some("setBundleEnabled") => Self::SetBundleEnabled {
+                name: text("name")?,
+                enabled: enabled()?,
+            },
+            Some("stop") => Self::Stop,
+            other => bail!("Unknown DSH panel action {other:?}"),
+        })
+    }
+}
+
+/// Controls the bridge provides through DSH's own commands and goal service.
+pub(super) fn patch_capabilities(caps: &mut AgentProviderCapabilitiesDto, hello: &Value) {
+    let features = &hello["features"];
+    let commands = features["commands"].as_bool().unwrap_or(false);
+    caps.controls.plan_mode = commands;
+    caps.turns.compact = commands;
+    caps.controls.goals = commands && features["goals"].as_bool().unwrap_or(false);
+}
+
+/// Panel metadata: the startup snapshot without the model catalog (served by
+/// the model list) plus this session's live projection views.
+pub(super) fn harness_view(
+    hello: &Value,
+    projections: &serde_json::Map<String, Value>,
+    running: bool,
+) -> Value {
+    let mut view = hello.clone();
+    if let Some(object) = view.as_object_mut() {
+        object.remove("models");
+        object.insert("kind".into(), json!("dsh"));
+        object.insert(
+            "session".into(),
+            json!({"projections": projections, "running": running}),
+        );
+    }
+    view
+}
+
+/// DSH permission preset (sandbox + approval) for the product policy.
+pub(super) fn permission_preset(policy: &ProductSessionPolicy) -> &'static str {
+    if policy.allows_writes_outside_workspace() {
+        "danger-full-access"
+    } else if policy.sandbox_mode.as_deref() == Some("read-only") {
+        "read-only"
+    } else {
+        "workspace-write"
+    }
+}
+
+pub(super) fn wants_plan(policy: &ProductSessionPolicy) -> bool {
+    policy.collaboration_mode.as_deref() == Some("plan")
+}
+
+/// DSH questions in the product's native question shape. A plan review keeps
+/// its plan in `detail`; the reviewer must see it beside the choice.
+pub(super) fn questions(questions: &Value) -> Vec<Value> {
+    questions
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|question| {
+            let id = question["id"].as_str()?;
+            let prompt = question["question"].as_str().unwrap_or(id);
+            let text = match question["detail"].as_str() {
+                Some(detail) if !detail.trim().is_empty() => format!("{prompt}\n\n{detail}"),
+                _ => prompt.to_string(),
+            };
+            let options = question["options"]
+                .as_array()
+                .filter(|options| !options.is_empty());
+            Some(json!({
+                "id": id,
+                "header": question["header"].as_str().unwrap_or("Question"),
+                "question": text,
+                // Plan reviews accept feedback; generic questions accept free text.
+                "isOther": true,
+                "isSecret": false,
+                "multiSelect": question["multiSelect"].as_bool().unwrap_or(false),
+                "options": options.map(|options| json!(options.iter().map(|option| json!({
+                    "label": option["label"],
+                    "description": option["description"].as_str().unwrap_or(""),
+                })).collect::<Vec<_>>())).unwrap_or(Value::Null),
+            }))
+        })
+        .collect()
+}
+
+/// Product answers (`{id:{answers:[…]}}`) as a DSH answer batch. Values that
+/// are not offered options become the single free-text `custom` reply.
+pub(super) fn answer(questions: &Value, answers: &Value) -> Result<Value> {
+    let mut batch = Vec::new();
+    for question in questions.as_array().into_iter().flatten() {
+        let id = question["id"]
+            .as_str()
+            .ok_or_else(|| anyhow!("DSH question has no id"))?;
+        let labels: Vec<&str> = question["options"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|option| option["label"].as_str())
+            .collect();
+        let values: Vec<&str> = answers[id]["answers"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .collect();
+        if values.is_empty() {
+            bail!("Answer required for {id}");
+        }
+        let (selected, custom): (Vec<&str>, Vec<&str>) =
+            values.into_iter().partition(|value| labels.contains(value));
+        let mut item = json!({"id":id,"selected":selected});
+        if !custom.is_empty() {
+            item["custom"] = json!(custom.join("\n"));
+        }
+        batch.push(item);
+    }
+    Ok(json!({"answers":batch}))
+}
+
+/// DSH `todos` projection as product plan steps.
+pub(super) fn todo_steps(value: &Value) -> Option<Vec<(String, String)>> {
+    let todos = value.as_array()?;
+    Some(
+        todos
+            .iter()
+            .filter_map(|todo| {
+                let step = todo["content"].as_str()?.to_string();
+                let status = match todo["status"].as_str() {
+                    Some("completed") => "completed",
+                    Some("in_progress") => "inProgress",
+                    _ => "pending",
+                };
+                Some((step, status.to_string()))
+            })
+            .collect(),
+    )
+}
+
+/// DSH `goal` projection as the product goal state. `blocked` keeps the goal
+/// live but stopped, which the product represents as paused.
+pub(super) fn goal_state(value: &Value) -> Option<crate::actor::GoalState> {
+    let goal = &value["goal"];
+    let objective = goal["objective"].as_str()?;
+    let status = match goal["phase"].as_str() {
+        Some("complete") => "complete",
+        Some("paused" | "blocked") => "paused",
+        _ => "active",
+    };
+    Some(crate::actor::GoalState {
+        objective: objective.into(),
+        status: status.into(),
+        tokens_used: 0,
+        time_used_seconds: 0,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn product_policy_selects_the_matching_dsh_preset() {
+        let policy = |sandbox: Option<&str>, approval: &str| ProductSessionPolicy {
+            collaboration_mode: None,
+            sandbox_mode: sandbox.map(str::to_string),
+            approval_mode: Some(approval.into()),
+        };
+        assert_eq!(
+            permission_preset(&policy(Some("read-only"), "guarded")),
+            "read-only"
+        );
+        assert_eq!(
+            permission_preset(&policy(Some("workspace-write"), "yolo")),
+            "workspace-write"
+        );
+        assert_eq!(
+            permission_preset(&policy(None, "guarded")),
+            "workspace-write"
+        );
+        assert_eq!(
+            permission_preset(&policy(None, "yolo")),
+            "danger-full-access"
+        );
+        assert_eq!(
+            permission_preset(&policy(Some("danger-full-access"), "guarded")),
+            "danger-full-access"
+        );
+    }
+
+    #[test]
+    fn plan_review_keeps_the_plan_and_round_trips_feedback() {
+        let asked = json!([{
+            "id":"plan-review","header":"Plan review",
+            "question":"Approve this plan and leave plan mode?","detail":"# Plan\n- ship",
+            "options":[{"label":"Approve","description":"Leave plan mode"},{"label":"Keep planning"}],
+            "intent":{"kind":"plan-review","approve":"Approve"}
+        }]);
+        let shown = questions(&asked);
+        assert_eq!(
+            shown[0]["question"],
+            "Approve this plan and leave plan mode?\n\n# Plan\n- ship"
+        );
+        assert_eq!(shown[0]["options"][1]["description"], "");
+        assert_eq!(shown[0]["isOther"], true);
+        assert_eq!(
+            answer(&asked, &json!({"plan-review":{"answers":["Approve"]}})).unwrap(),
+            json!({"answers":[{"id":"plan-review","selected":["Approve"]}]})
+        );
+        assert_eq!(
+            answer(
+                &asked,
+                &json!({"plan-review":{"answers":["Add tests first"]}})
+            )
+            .unwrap(),
+            json!({"answers":[{"id":"plan-review","selected":[],"custom":"Add tests first"}]})
+        );
+        assert!(answer(&asked, &json!({"plan-review":{"answers":[" "]}})).is_err());
+    }
+
+    #[test]
+    fn projections_map_to_product_plan_and_goal() {
+        assert_eq!(
+            todo_steps(&json!([
+                {"content":"a","status":"completed"},
+                {"content":"b","status":"in_progress"},
+                {"content":"c","status":"pending"}
+            ])),
+            Some(vec![
+                ("a".into(), "completed".into()),
+                ("b".into(), "inProgress".into()),
+                ("c".into(), "pending".into()),
+            ])
+        );
+        assert_eq!(todo_steps(&Value::Null), None);
+        let goal =
+            goal_state(&json!({"goal":{"objective":"ship","phase":"blocked"},"roundsStarted":2}))
+                .unwrap();
+        assert_eq!(
+            (goal.objective.as_str(), goal.status.as_str()),
+            ("ship", "paused")
+        );
+        assert!(goal_state(&Value::Null).is_none());
+    }
+
+    #[test]
+    fn acp_options_stay_authoritative_and_discovery_adds_per_model_reasoning() {
+        // DSH 0.2.0-rc.2: the acp row's default is not in the provider catalog.
+        let options = json!([
+            {"id":"model","category":"model","type":"select",
+             "currentValue":"[\"deepseek-official\",\"deepseek-v4-flash\"]",
+             "options":[{"group":"deepseek-official","name":"DeepSeek","options":[
+                {"value":"[\"deepseek-official\",\"deepseek-v4-flash\"]","name":"deepseek-v4-flash"},
+                {"value":"[\"deepseek-official\",\"deepseek-v4-pro\"]","name":"DeepSeek-V4-Pro"},
+                {"value":"[\"custom\",\"plain\"]","name":"Plain"}]}]},
+            {"id":"reasoning_effort","category":"thought_level","type":"select","currentValue":"high",
+             "options":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]}
+        ]);
+        let discovered = json!([{
+            "id":"[\"deepseek-official\",\"deepseek-v4-pro\"]","model":"[\"deepseek-official\",\"deepseek-v4-pro\"]",
+            "displayName":"DeepSeek · DeepSeek-V4-Pro","description":"Stronger","isDefault":false,"hidden":false,
+            "supportedReasoningEfforts":[{"reasoningEffort":"off","description":"Off"},{"reasoningEffort":"max","description":"Max"}],
+            "defaultReasoningEffort":"max","selectionKind":"model","acpAgent":null
+        }]);
+        let models = catalog(
+            super::super::runtime::models_from_config_options(&options),
+            &discovered,
+            Some("high"),
+        );
+        assert_eq!(models.len(), 3);
+        assert!(models[0].is_default);
+        assert_eq!(models[0].default_reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(models[0].supported_reasoning_efforts.len(), 2);
+        assert_eq!(models[1].display_name, "DeepSeek · DeepSeek-V4-Pro");
+        assert_eq!(models[1].default_reasoning_effort.as_deref(), Some("max"));
+        assert!(models[2].supported_reasoning_efforts.is_empty());
+        assert_eq!(models[2].default_reasoning_effort, None);
+    }
+
+    #[test]
+    fn panel_actions_are_typed_and_reject_structured_setting_values() {
+        assert_eq!(
+            PanelAction::parse(
+                &json!({"kind":"setPluginEnabled","id":"include:web","enabled":false})
+            )
+            .unwrap(),
+            PanelAction::SetPluginEnabled {
+                id: "include:web".into(),
+                enabled: false
+            }
+        );
+        assert!(
+            PanelAction::parse(&json!({"kind":"setPluginEnabled","id":"x","enabled":"no"}))
+                .is_err()
+        );
+        assert!(
+            PanelAction::parse(&json!({"kind":"updateSetting","ns":"agent-loop","key":"k",
+            "value":{"__jsExpr":"process.exit()"}}))
+            .is_err()
+        );
+        assert!(PanelAction::parse(&json!({"kind":"invoke","namespace":"credentials"})).is_err());
+    }
+
+    #[test]
+    fn bridge_events_require_their_identity_fields() {
+        assert_eq!(
+            BridgeEvent::parse(&json!({"event":"status","sessionId":"s","status":"running"})),
+            Some(BridgeEvent::Status {
+                session_id: "s".into(),
+                status: "running".into()
+            })
+        );
+        assert_eq!(
+            BridgeEvent::parse(&json!({"event":"status","status":"running"})),
+            None
+        );
+        assert_eq!(
+            BridgeEvent::parse(&json!({"event":"unknown","sessionId":"s"})),
+            None
+        );
     }
 }

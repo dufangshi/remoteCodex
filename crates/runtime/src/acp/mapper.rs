@@ -29,7 +29,26 @@ pub struct TurnMapper {
     plans: Vec<ThreadHistoryItemDto>,
     compactions: Vec<ThreadHistoryItemDto>,
     subagents: HashMap<String, ThreadSubagentDto>,
+    stream: Option<LiveStream>,
+    agent_reconcile: Option<Reconcile>,
+    thought_reconcile: Option<Reconcile>,
     seq: i64,
+}
+
+/// Display-only text of one live model attempt (DSH streams it beside ACP,
+/// which sends only committed messages). Committed chunks confirm or replace it.
+struct LiveStream {
+    attempt_id: String,
+    agent: Option<usize>,
+    thought: Option<usize>,
+    reconciled: bool,
+}
+
+struct Reconcile {
+    index: usize,
+    /// Provisional text not yet matched by committed chunks.
+    remaining: String,
+    started: bool,
 }
 
 impl TurnMapper {
@@ -47,8 +66,191 @@ impl TurnMapper {
             plans: Vec::new(),
             compactions: Vec::new(),
             subagents: HashMap::new(),
+            stream: None,
+            agent_reconcile: None,
+            thought_reconcile: None,
             seq: 0,
         }
+    }
+
+    pub fn stream_start(&mut self, attempt_id: &str) {
+        self.stream = Some(LiveStream {
+            attempt_id: attempt_id.into(),
+            agent: None,
+            thought: None,
+            reconciled: false,
+        });
+    }
+
+    pub fn stream_text(&mut self, attempt_id: &str, kind: &str, text: &str) -> MappedUpdate {
+        let mut mapped = MappedUpdate::default();
+        let Some(stream) = self
+            .stream
+            .as_ref()
+            .filter(|stream| stream.attempt_id == attempt_id && !stream.reconciled)
+        else {
+            return mapped;
+        };
+        let (agent, thought) = (stream.agent, stream.thought);
+        if kind == "text" {
+            let index = match agent {
+                Some(index) => index,
+                None => {
+                    let index = self.push_segment("agentMessage");
+                    self.active_thought_segment = None;
+                    self.stream.as_mut().unwrap().agent = Some(index);
+                    index
+                }
+            };
+            let segment = &mut self.agent_segments[index];
+            segment.text.push_str(text);
+            mapped.deltas.push((
+                segment.id.clone(),
+                text.to_string(),
+                segment.sequence.unwrap_or_default(),
+            ));
+        } else if kind == "reasoning" {
+            let index = match thought {
+                Some(index) => index,
+                None => {
+                    let index = self.push_segment("reasoning");
+                    self.stream.as_mut().unwrap().thought = Some(index);
+                    index
+                }
+            };
+            let segment = &mut self.thought_segments[index];
+            segment.text.push_str(text);
+            mapped.items.push(segment.clone());
+        }
+        mapped
+    }
+
+    /// A committed attempt waits for its ACP chunks; a discarded one keeps its
+    /// partial text as failed output, and a retry streams into new segments.
+    pub fn stream_end(&mut self, attempt_id: &str, committed: bool) -> MappedUpdate {
+        let mut mapped = MappedUpdate::default();
+        if self
+            .stream
+            .as_ref()
+            .map(|stream| stream.attempt_id.as_str())
+            != Some(attempt_id)
+        {
+            return mapped;
+        }
+        let stream = self.stream.take().unwrap();
+        if stream.reconciled {
+            return mapped;
+        }
+        if committed {
+            self.agent_reconcile = stream.agent.map(|index| Reconcile {
+                index,
+                remaining: self.agent_segments[index].text.clone(),
+                started: false,
+            });
+            self.thought_reconcile = stream.thought.map(|index| Reconcile {
+                index,
+                remaining: self.thought_segments[index].text.clone(),
+                started: false,
+            });
+        } else {
+            if let Some(index) = stream.agent {
+                let segment = &mut self.agent_segments[index];
+                segment.status = Some("failed".into());
+                mapped.items.push(segment.clone());
+            }
+            if let Some(index) = stream.thought {
+                let segment = &mut self.thought_segments[index];
+                segment.status = Some("failed".into());
+                mapped.items.push(segment.clone());
+            }
+            self.close_text_segments();
+        }
+        mapped
+    }
+
+    fn push_segment(&mut self, kind: &str) -> usize {
+        let sequence = self.next_sequence();
+        let (segments, name) = if kind == "reasoning" {
+            (&mut self.thought_segments, "thought")
+        } else {
+            (&mut self.agent_segments, "assistant")
+        };
+        let index = segments.len();
+        let mut segment = item(
+            format!("{}:{name}:{}", self.turn_id, index + 1),
+            kind,
+            String::new(),
+            "running",
+            &self.turn_id,
+        );
+        segment.sequence = Some(sequence);
+        segments.push(segment);
+        index
+    }
+
+    /// The live segment a committed chunk must confirm, if one was streamed.
+    fn take_reconcile(&mut self, thought: bool) -> Option<Reconcile> {
+        let pending = if thought {
+            self.thought_reconcile.take()
+        } else {
+            self.agent_reconcile.take()
+        };
+        if pending.is_some() {
+            return pending;
+        }
+        // ACP outran the bridge's end frame: freeze the live attempt now.
+        let stream = self.stream.as_mut()?;
+        let index = if thought {
+            stream.thought
+        } else {
+            stream.agent
+        }?;
+        stream.reconciled = true;
+        let segments = if thought {
+            &self.thought_segments
+        } else {
+            &self.agent_segments
+        };
+        Some(Reconcile {
+            index,
+            remaining: segments[index].text.clone(),
+            started: false,
+        })
+    }
+
+    /// Apply a committed chunk to its streamed segment. Matching text is
+    /// already displayed; divergent text replaces the provisional stream.
+    fn reconcile_chunk(
+        &mut self,
+        thought: bool,
+        mut pending: Reconcile,
+        text: &str,
+    ) -> MappedUpdate {
+        let mut mapped = MappedUpdate::default();
+        let segment = if thought {
+            &mut self.thought_segments[pending.index]
+        } else {
+            &mut self.agent_segments[pending.index]
+        };
+        if !pending.started {
+            segment.text.clear();
+            pending.started = true;
+        }
+        segment.text.push_str(text);
+        if pending.remaining.starts_with(text) {
+            pending.remaining.drain(..text.len());
+        } else {
+            pending.remaining.clear();
+            mapped.items.push(segment.clone());
+        }
+        if !pending.remaining.is_empty() {
+            if thought {
+                self.thought_reconcile = Some(pending);
+            } else {
+                self.agent_reconcile = Some(pending);
+            }
+        }
+        mapped
     }
 
     pub fn apply(&mut self, update: &Value) -> MappedUpdate {
@@ -66,6 +268,12 @@ impl TurnMapper {
                         .get("messageId")
                         .and_then(Value::as_str)
                         .map(str::to_owned);
+                    if let Some(pending) = self.take_reconcile(false) {
+                        self.active_agent_segment = Some(pending.index);
+                        self.active_thought_segment = None;
+                        self.agent_message_id = message_id;
+                        return self.reconcile_chunk(false, pending, &text);
+                    }
                     if message_id.is_some() && message_id != self.agent_message_id {
                         self.active_agent_segment = None;
                     }
@@ -107,6 +315,12 @@ impl TurnMapper {
                         .get("messageId")
                         .and_then(Value::as_str)
                         .map(str::to_owned);
+                    if let Some(pending) = self.take_reconcile(true) {
+                        self.active_thought_segment = Some(pending.index);
+                        self.active_agent_segment = None;
+                        self.thought_message_id = message_id;
+                        return self.reconcile_chunk(true, pending, &text);
+                    }
                     if message_id.is_some()
                         && (message_id != self.thought_message_id || text == "\n\n")
                     {
@@ -152,6 +366,9 @@ impl TurnMapper {
                         .map(|candidate| (candidate.created_at.clone(), candidate.sequence));
                     if existing_metadata.is_none() {
                         self.close_text_segments();
+                        // A step's committed text precedes its tool calls.
+                        self.agent_reconcile = None;
+                        self.thought_reconcile = None;
                     }
                     let payload = merge_tool_payload(self.tool_payloads.get(tool_id), body);
                     self.tool_payloads
@@ -785,6 +1002,85 @@ fn item(id: String, kind: &str, text: String, status: &str, turn_id: &str) -> Th
         source_turn_id: Some(turn_id.into()),
         artifact: None,
         extra: Default::default(),
+    }
+}
+
+#[cfg(test)]
+mod stream_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn chunk(kind: &str, text: &str) -> Value {
+        json!({"sessionUpdate":kind,"messageId":"m1","content":{"type":"text","text":text}})
+    }
+
+    #[test]
+    fn committed_chunks_confirm_streamed_text_without_duplicates() {
+        let mut mapper = TurnMapper::new("turn");
+        mapper.stream_start("a1");
+        assert!(mapper.stream_text("a1", "reasoning", "think").items[0].text == "think");
+        let first = mapper.stream_text("a1", "text", "Hel");
+        let second = mapper.stream_text("a1", "text", "lo");
+        assert_eq!(first.deltas[0].1, "Hel");
+        assert_eq!(second.deltas[0].0, first.deltas[0].0);
+        assert!(mapper.stream_end("a1", true).items.is_empty());
+        let thought = mapper.apply(&chunk("agent_thought_chunk", "think"));
+        let message = mapper.apply(&chunk("agent_message_chunk", "Hello"));
+        assert!(thought.items.is_empty() && thought.deltas.is_empty());
+        assert!(message.items.is_empty() && message.deltas.is_empty());
+        let items = mapper.finish(false);
+        let texts: Vec<_> = items
+            .iter()
+            .map(|item| (item.kind.as_str(), item.text.as_str()))
+            .collect();
+        assert_eq!(texts, [("reasoning", "think"), ("agentMessage", "Hello")]);
+    }
+
+    #[test]
+    fn divergent_committed_text_replaces_the_stream_and_later_blocks_append() {
+        let mut mapper = TurnMapper::new("turn");
+        mapper.stream_start("a1");
+        mapper.stream_text("a1", "text", "draft");
+        mapper.stream_end("a1", true);
+        let replaced = mapper.apply(&chunk("agent_message_chunk", "final"));
+        assert_eq!(replaced.items[0].text, "final");
+        let appended = mapper.apply(&chunk("agent_message_chunk", " block"));
+        assert_eq!(appended.deltas[0].1, " block");
+        assert_eq!(mapper.finish(false)[0].text, "final block");
+    }
+
+    #[test]
+    fn discarded_attempts_fail_and_retries_stream_into_new_segments() {
+        let mut mapper = TurnMapper::new("turn");
+        mapper.stream_start("a1");
+        let partial = mapper.stream_text("a1", "text", "par");
+        let failed = mapper.stream_end("a1", false);
+        assert_eq!(failed.items[0].status.as_deref(), Some("failed"));
+        mapper.stream_start("a2");
+        let retry = mapper.stream_text("a2", "text", "ok");
+        assert_ne!(retry.deltas[0].0, partial.deltas[0].0);
+        mapper.stream_end("a2", true);
+        assert!(mapper
+            .apply(&chunk("agent_message_chunk", "ok"))
+            .deltas
+            .is_empty());
+        let items = mapper.finish(false);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[1].text, "ok");
+    }
+
+    #[test]
+    fn committed_chunk_before_end_frame_freezes_the_live_attempt() {
+        let mut mapper = TurnMapper::new("turn");
+        mapper.stream_start("a1");
+        mapper.stream_text("a1", "text", "same");
+        assert!(mapper
+            .apply(&chunk("agent_message_chunk", "same"))
+            .items
+            .is_empty());
+        assert!(mapper.stream_text("a1", "text", " late").deltas.is_empty());
+        assert!(mapper.stream_end("a1", true).items.is_empty());
+        assert_eq!(mapper.finish(false)[0].text, "same");
     }
 }
 

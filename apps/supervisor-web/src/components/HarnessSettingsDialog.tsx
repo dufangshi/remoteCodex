@@ -5,7 +5,13 @@ import type {
   ModelOptionDto,
   ThreadDto,
 } from '@remote-codex/shared';
-import { fetchThreadCapabilitySnapshot } from '../lib/api';
+import { fetchThreadCapabilitySnapshot, postThreadHarnessAction } from '../lib/api';
+import {
+  DshHarnessPanel,
+  isDshHarness,
+  type DshPanelAction,
+  type DshPanelResult,
+} from './DshHarnessPanel';
 import { FormDialog } from './FormDialog';
 
 export interface HarnessSettingsFieldsProps {
@@ -19,6 +25,10 @@ export interface HarnessSettingsFieldsProps {
     sandboxMode?: Exclude<ThreadDto['sandboxMode'], undefined>;
   }) => Promise<void>;
   loadCapabilities?: () => Promise<AgentCapabilitySnapshotDto>;
+  /** Device-scoped typed panel action; defaults to the local supervisor. */
+  runHarnessAction?: (action: DshPanelAction) => Promise<DshPanelResult>;
+  /** Reconnect the session so restart-required harness changes load. */
+  onReconnect?: () => Promise<void>;
 }
 
 export function HarnessSettingsDialog({
@@ -61,6 +71,8 @@ export function HarnessSettingsFields({
   readOnly = false,
   onChange,
   loadCapabilities,
+  runHarnessAction,
+  onReconnect,
 }: HarnessSettingsFieldsProps) {
   useI18n();
   const [info, setInfo] = useState<{
@@ -68,6 +80,8 @@ export function HarnessSettingsFields({
     notice?: string;
     plugins?: { id: string; name: string; enabled: boolean }[];
   } | null>(null);
+  const harnessAction = runHarnessAction
+    ?? ((action: DshPanelAction) => postThreadHarnessAction<DshPanelResult>(thread.id, action));
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
   useEffect(() => {
@@ -170,10 +184,16 @@ export function HarnessSettingsFields({
       {thread.activeTurnId && (
         <p>{translate('settings.sessionSettingsCanBeChangedAfterThe')}</p>
       )}
+      {isDshHarness(info) ? (
+        <DshHarnessPanel info={info} readOnly={readOnly}
+          runAction={harnessAction}
+          {...(onReconnect ? { onReconnect } : {})} />
+      ) : (
       <p className="text-[var(--theme-fg-muted)]">
         {info?.notice ?? translate('settings.loadingHarnessCapabilities')}
       </p>
-      {info && (
+      )}
+      {info && !isDshHarness(info) && (
         <section
           aria-label={translate('settings.harnessPlugins')}
           className="space-y-2"

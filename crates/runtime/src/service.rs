@@ -411,6 +411,19 @@ impl Supervisor {
                     )
                 }
                 "runtime.usage.updated" => supervisor.persist_usage_event(event),
+                // The harness itself left plan mode (an approved plan review);
+                // the next turn must not switch it back on.
+                "thread.collaboration.updated" => supervisor.db.with(|conn| {
+                    if let Some(mode @ ("default" | "plan")) =
+                        event.payload["collaborationMode"].as_str()
+                    {
+                        conn.execute(
+                            "UPDATE threads SET collaboration_mode=?1 WHERE id=?2",
+                            params![mode, event.thread_id],
+                        )?;
+                    }
+                    Ok(())
+                }),
                 "thread.harness.ready" => supervisor.db.with(|conn| {
                     if let (Some(turn), Some(instance)) = (
                         event.payload["turnId"].as_str(),
@@ -3544,6 +3557,27 @@ impl Supervisor {
         runtime
             .session_capabilities(thread.agent_id.as_deref(), session)
             .await
+    }
+
+    /// Typed harness-panel action for the thread's live session.
+    pub async fn thread_harness_action(
+        &self,
+        id: &str,
+        action: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let thread = self.get_thread(id)?;
+        let runtime = self.runtime(thread.provider)?;
+        let session = thread
+            .provider_session_id
+            .as_deref()
+            .ok_or_else(|| anyhow!("thread has no provider session"))?;
+        let cwd = self.session_cwd(&thread);
+        self.with_cli_context(
+            &thread.id,
+            runtime.resume_session(session, cwd.as_deref(), thread_session_settings(&thread)),
+        )
+        .await?;
+        runtime.harness_action(session, action).await
     }
 
     pub async fn install(

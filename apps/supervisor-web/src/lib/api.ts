@@ -1129,6 +1129,16 @@ export function fetchThreadCapabilitySnapshot(threadId: string,
   return deviceRequest<AgentCapabilitySnapshotDto>(deviceId, `/api/threads/${encodeURIComponent(threadId)}/capabilities`, { cache: 'no-store' });
 }
 
+export function postThreadHarnessAction<T>(threadId: string,
+  action: unknown,
+  deviceId?: string | null,
+) {
+  return deviceRequest<T>(deviceId, `/api/threads/${encodeURIComponent(threadId)}/harness`, {
+    method: 'POST',
+    body: JSON.stringify(action),
+  });
+}
+
 export function fetchThreadModels(threadId: string,
   deviceId?: string | null,
 ) {
@@ -1571,8 +1581,8 @@ export function resumeThread(id: string, input: ResumeThreadInput = {},
   });
 }
 
-export function disconnectThread(id: string) {
-  return request<ThreadDetailDto>(`/api/threads/${id}/disconnect`, {
+export function disconnectThread(id: string, deviceId?: string | null) {
+  return deviceRequest<ThreadDetailDto>(deviceId, `/api/threads/${id}/disconnect`, {
     method: 'POST',
   });
 }

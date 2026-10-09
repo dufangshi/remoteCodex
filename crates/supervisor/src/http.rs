@@ -267,6 +267,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/threads/{id}/watches", get(thread_watches))
         .route("/api/threads/{id}/fork-turns", get(thread_fork_turns))
         .route("/api/threads/{id}/capabilities", get(thread_capabilities))
+        .route("/api/threads/{id}/harness", post(thread_harness_action))
         .route("/api/threads/{id}/fork", post(thread_fork))
         .route("/api/threads/{id}/compact", post(thread_compact))
         .route(
@@ -728,6 +729,18 @@ async fn thread_capabilities(
 ) -> Result<Json<Value>, ApiErr> {
     let caps = state.thread_capabilities(&id).await.map_err(map_err)?;
     Ok(Json(serde_json::to_value(caps).unwrap_or(json!({}))))
+}
+
+async fn thread_harness_action(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Json(action): Json<Value>,
+) -> Result<Json<Value>, ApiErr> {
+    let result = state
+        .thread_harness_action(&id, action)
+        .await
+        .map_err(map_err)?;
+    Ok(Json(result))
 }
 
 async fn agent_caps(

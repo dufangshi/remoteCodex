@@ -289,6 +289,15 @@ pub trait AgentRuntime: Send + Sync {
     fn toolbox(&self, agent_id: Option<&str>) -> Vec<ToolboxItemDto> {
         remote_codex_protocol::toolbox_from_capabilities(&self.negotiated_caps(agent_id))
     }
+    /// A typed harness-panel action. Adapters accept only their own action
+    /// kinds; this is never a raw passthrough to the harness.
+    async fn harness_action(
+        &self,
+        _session_id: &str,
+        _action: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        anyhow::bail!("this harness has no settings panel actions");
+    }
     async fn apply_session_settings(
         &self,
         _session_id: &str,

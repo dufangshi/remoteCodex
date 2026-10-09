@@ -7,6 +7,7 @@ import { WorkbenchCollaboration } from '../components/WorkbenchCollaboration';
 import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import { DeviceMonitor } from '../components/DeviceMonitor';
 import { HarnessSettingsDialog, HarnessSettingsFields } from '../components/HarnessSettingsDialog';
+import type { DshPanelAction, DshPanelResult } from '../components/DshHarnessPanel';
 import { ConversationSearch } from '../components/ConversationSearch';
 import { useSearchMessages } from '../components/searchMessages';
 import { useWorkbenchNavigation } from './useWorkbenchNavigation';
@@ -79,6 +80,7 @@ import {
   fetchAgentBackendAgents,
   fetchAgentBackendModelsFor,
   fetchThreadCapabilitySnapshot,
+  postThreadHarnessAction,
   fetchThreadModels,
   fetchThreadGroup,
   fetchAgentBackendStatus,
@@ -757,6 +759,14 @@ export function ThreadDetailPage() {
   }, [toolsUseReference, toolsDevice, toolsDetail?.workspace.id, relayRouteDeviceId, detail?.workspace.id, workbenchPresentation.update, setFocusedPane]);
   const closeTerminal = useCallback(() => setTerminalOpen(false), [setTerminalOpen]);
   const loadToolsCapabilities = useCallback(() => fetchThreadCapabilitySnapshot(toolsDetail!.thread.id, toolsDevice), [toolsDetail?.thread.id, toolsDevice]);
+  // Harness panel actions and reconnects stay on the device that owns the thread.
+  const harnessPanel = useCallback((threadId: string, deviceId: string | null | undefined) => ({
+    runHarnessAction: (action: DshPanelAction) => postThreadHarnessAction<DshPanelResult>(threadId, action, deviceId),
+    onReconnect: async () => {
+      await disconnectThread(threadId, deviceId);
+      await resumeThread(threadId, {}, deviceId);
+    },
+  }), []);
   const loadDialogCapabilities = useCallback(() => fetchThreadCapabilitySnapshot(harnessSettingsTarget!.threadId, harnessSettingsTarget!.deviceId), [harnessSettingsTarget?.threadId, harnessSettingsTarget?.deviceId]);
   const openReferenceThread = useCallback((threadId: string) => navigate(threadHref(threadId, referenceDevice === 'local' ? null : referenceDevice)), [navigate, referenceDevice]);
   const loadThreadShares = useCallback(async () => {
@@ -3345,7 +3355,8 @@ export function ThreadDetailPage() {
       models={toolsUseReference ? referenceController.models : modelOptions}
       busy={toolsUseReference ? referenceController.busy : settingsBusy} readOnly={!toolsCanControl}
       onChange={async input => { if (toolsUseReference) await referenceController.updateSettings(input); else await handleUpdateThreadSettings(input); }}
-      loadCapabilities={loadToolsCapabilities} />
+      loadCapabilities={loadToolsCapabilities}
+      {...harnessPanel(toolsDetail.thread.id, toolsDevice)} />
   </div> : null;
   const dialogUseReference = harnessSettingsTarget?.pane === 'reference';
   const dialogDetail = dialogUseReference ? referenceController.detail : detail;
@@ -3885,6 +3896,7 @@ export function ThreadDetailPage() {
         readOnly={dialogUseReference ? !referenceController.canControl : !relayThreadCanControl}
         {...(harnessSettingsTarget?.composerFocusOwner ? {composerFocusOwner:harnessSettingsTarget.composerFocusOwner} : {})}
         loadCapabilities={loadDialogCapabilities}
+        {...harnessPanel(dialogDetail.thread.id, harnessSettingsTarget?.deviceId)}
         onChange={async input => { if (dialogUseReference) await referenceController.updateSettings(input); else await handleUpdateThreadSettings(input); }}
         onClose={() => setHarnessSettingsTarget(null)}
       />}</>}

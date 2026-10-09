@@ -75,8 +75,11 @@ enum TurnOutcome {
 struct LiveSession {
     process: Arc<AcpProcess>,
     codex_bridge: Option<Arc<super::codex_bridge::CodexBridge>>,
-    _discovery_directory: Option<tempfile::TempDir>,
+    dsh: Option<Arc<super::deepseek::Bridge>>,
     harness_info: Option<Value>,
+    /// Latest DSH projection views (`plan`, `goal`, `todos`, `permissions`).
+    dsh_projections: serde_json::Map<String, Value>,
+    dsh_running: bool,
     session_id: String,
     cwd: PathBuf,
     yolo: bool,
@@ -273,8 +276,13 @@ impl AcpRuntime {
             None
         };
         let mut server_command = agent_server_command(def, yolo);
-        let discovery = if def.id == "deepseek" {
-            Some(super::deepseek::Discovery::prepare(&mut server_command).await?)
+        let dsh_launch = if def.id == "deepseek" {
+            // DSH sandboxes its own tools; ACP client fs/terminal policy never applies.
+            extra_env.push((
+                super::deepseek::PERMISSION_ENV,
+                super::deepseek::permission_preset(&policy).into(),
+            ));
+            Some(super::deepseek::Launch::prepare(&mut server_command).await?)
         } else {
             None
         };
@@ -286,17 +294,28 @@ impl AcpRuntime {
         .map_err(|_| anyhow!("ACP spawn timeout"))??;
         let process = Arc::new(process);
         let mut startup_process = StartupProcess(Some(process.clone()));
-        let harness_info = if let Some(discovery) = &discovery {
-            match tokio::time::timeout(self.startup_timeout, discovery.receive()).await {
-                Ok(Ok(info)) => Some(info),
+        // ACP goes live before sibling plugins settle; the bridge hello arrives
+        // after appReady, so initialize/new see the complete provider catalog.
+        let (dsh, harness_info) = if let Some(launch) = dsh_launch {
+            match tokio::time::timeout(self.startup_timeout, launch.connect()).await {
+                Ok(Ok((bridge, hello))) => (Some(Arc::new(bridge)), Some(hello)),
                 result => {
                     let _ = process.shutdown().await;
-                    bail!("DSH startup discovery failed (requires DSH 0.1.5-rc.1 or newer): {result:?}");
+                    let reason = match result {
+                        Ok(Err(error)) => format!("{error:#}"),
+                        _ => "timed out waiting for DSH startup".into(),
+                    };
+                    bail!(
+                        "DSH bridge failed to start (requires DSH 0.1.5-rc.1 or newer): {reason}"
+                    );
                 }
             }
         } else {
-            None
+            (None, None)
         };
+        if let Some(bridge) = &dsh {
+            spawn_dsh_mux(self.inner.clone(), process.id.clone(), bridge.clone());
+        }
         let init = process
             .request(
                 "initialize",
@@ -338,6 +357,9 @@ impl AcpRuntime {
         }
         let mut caps = AgentProviderCapabilitiesDto::conversational();
         adapter.patch_capabilities(&mut caps, &negotiated);
+        if let Some(info) = &harness_info {
+            super::deepseek::patch_capabilities(&mut caps, info);
+        }
         let toolbox = adapter.toolbox_items(&caps, &negotiated);
         negotiated.compact = caps.turns.compact;
         negotiated.fork = caps.branching.fork;
@@ -443,11 +465,21 @@ impl AcpRuntime {
         };
         let (current_mode_id, available_modes) = parse_available_modes(&raw_session);
         let scoped = Self::scoped_id(&def.id, &session_id);
+        let harness_models = match &harness_info {
+            Some(info) => super::deepseek::catalog(
+                models_from_config_options(&config_options),
+                &info["models"],
+                reasoning_effort.as_deref(),
+            ),
+            None => harness_models,
+        };
         let mut live = LiveSession {
             process,
             codex_bridge,
-            _discovery_directory: discovery.map(|discovery| discovery.directory),
-            harness_info: harness_info.clone(),
+            dsh,
+            harness_info,
+            dsh_projections: Default::default(),
+            dsh_running: false,
             session_id,
             cwd: PathBuf::from(cwd),
             yolo,
@@ -464,21 +496,7 @@ impl AcpRuntime {
             operation: Arc::new(Mutex::new(())),
             config_options: config_options.clone(),
             harness_state,
-            harness_models: if let Some(info) = &harness_info {
-                let mut models: Vec<ModelOptionDto> =
-                    serde_json::from_value(info["models"].clone())?;
-                let current = models_from_config_options(&config_options)
-                    .into_iter()
-                    .find(|model| model.is_default);
-                for model in &mut models {
-                    model.is_default = current
-                        .as_ref()
-                        .is_some_and(|current| current.model == model.model);
-                }
-                models
-            } else {
-                harness_models
-            },
+            harness_models,
             available_modes,
             current_mode_id,
             context_thread_id: None,
@@ -717,6 +735,14 @@ impl AcpRuntime {
                 if Some(config_id.as_str()) == reasoning_config_id(&live.config_options) {
                     live.reasoning_effort = Some(value.clone());
                 }
+                if let Some(info) = &live.harness_info {
+                    // DSH drops an uncatalogued model once the session leaves it.
+                    live.harness_models = super::deepseek::catalog(
+                        models_from_config_options(&live.config_options),
+                        &info["models"],
+                        live.reasoning_effort.as_deref(),
+                    );
+                }
                 if let Some(proj) = adapter_for(&live.adapter_id).project_session(&response) {
                     apply_projection(live, proj);
                 }
@@ -825,6 +851,9 @@ impl AcpRuntime {
         if let Some(bridge) = &live.codex_bridge {
             bridge.set_policy(&live.session_id, &policy).await?;
         }
+        if let Some(bridge) = live.dsh.clone() {
+            return Self::apply_dsh_mode(&bridge, live, &policy).await;
+        }
         if let Some(mode_id) = resolve_mode(&live.available_modes, &policy) {
             if live.current_mode_id.as_deref() != Some(mode_id.as_str()) {
                 Self::apply_setting_op(process, live, SessionSettingOp::SetMode { mode_id })
@@ -839,6 +868,46 @@ impl AcpRuntime {
                 SessionSettingOp::SetConfig { config_id, value },
             )
             .await?;
+        }
+        Ok(())
+    }
+
+    /// DSH has no ACP modes. Its own commands switch the session's permission
+    /// preset (a user `permission.defaultPreset` overrides the launch env) and
+    /// plan mode; the session projections are read back, not assumed.
+    async fn apply_dsh_mode(
+        bridge: &super::deepseek::Bridge,
+        live: &mut LiveSession,
+        policy: &ProductSessionPolicy,
+    ) -> Result<()> {
+        let state = bridge
+            .call("session", json!({"sessionId": live.session_id}))
+            .await?;
+        let projections = &state["projections"];
+        let preset = super::deepseek::permission_preset(policy);
+        if projections["permissions"]["currentValue"].as_str() != Some(preset) {
+            bridge
+                .command(&live.session_id, &format!("/permission {preset}"))
+                .await?;
+        }
+        let commands = state["commands"].as_array().cloned().unwrap_or_default();
+        let plan_available = commands.iter().any(|command| command["name"] == "plan");
+        // A pending selection flips the logged mode at the next turn boundary.
+        let plan_active = projections["plan"]["active"].as_bool().unwrap_or(false)
+            != projections["plan"]["pending"].as_bool().unwrap_or(false);
+        let wants_plan = super::deepseek::wants_plan(policy);
+        if plan_available && wants_plan != plan_active {
+            bridge
+                .command(
+                    &live.session_id,
+                    if wants_plan { "/plan" } else { "/plan off" },
+                )
+                .await?;
+        } else if wants_plan && !plan_available {
+            bail!("This DSH profile has no plan mode");
+        }
+        if let Some(values) = projections.as_object() {
+            live.dsh_projections.extend(values.clone());
         }
         Ok(())
     }
@@ -1419,12 +1488,20 @@ impl AgentRuntime for AcpRuntime {
             let adapter = adapter_for(&live.adapter_id);
             let mut caps = AgentProviderCapabilitiesDto::conversational();
             adapter.patch_capabilities(&mut caps, &negotiated);
+            if let Some(info) = &live.harness_info {
+                super::deepseek::patch_capabilities(&mut caps, info);
+            }
             apply_config_option_caps(&mut caps, &live.config_options);
             snapshot.toolbox_items = adapter.toolbox_items(&caps, &negotiated);
             snapshot.effective_capabilities = Some(caps);
             if let Some(info) = &live.harness_info {
+                let harness = super::deepseek::harness_view(
+                    info,
+                    &live.dsh_projections,
+                    live.dsh_running && live.active.is_none(),
+                );
                 snapshot.negotiated =
-                    Some(json!({"harness":info,"configOptions":live.config_options}));
+                    Some(json!({"harness":harness,"configOptions":live.config_options}));
                 snapshot.toolbox_items.push(ToolboxItemDto {
                     action: "harness".into(),
                     command: "/harness".into(),
@@ -1674,7 +1751,17 @@ impl AgentRuntime for AcpRuntime {
             input.performance_mode,
         )
         .await?;
-        let (process, session_id, cwd, image_capable, adapter_id, harness_state, needs_context) = {
+        let (
+            process,
+            session_id,
+            cwd,
+            image_capable,
+            adapter_id,
+            harness_state,
+            needs_context,
+            dsh,
+            mut dsh_goal_active,
+        ) = {
             let sessions = self.inner.sessions.lock().await;
             let live = sessions
                 .get(&input.provider_session_id)
@@ -1687,8 +1774,19 @@ impl AgentRuntime for AcpRuntime {
                 live.adapter_id.clone(),
                 live.harness_state.clone(),
                 live.context_thread_id.as_deref() != Some(input.thread_id.as_str()),
+                live.dsh.clone(),
+                live.dsh_projections
+                    .get("goal")
+                    .and_then(super::deepseek::goal_state)
+                    .is_some_and(|goal| goal.status == "active"),
             )
         };
+        // The goal wire prompt is a DSH command: it starts autonomous rounds
+        // that this turn follows until DSH is idle. ACP does not parse commands.
+        let dsh_goal_command = dsh
+            .as_ref()
+            .filter(|_| input.prompt.starts_with("/goal "))
+            .cloned();
         let adapter = adapter_for(&adapter_id);
         let prompt = adapter
             .prompt_preamble()
@@ -1740,13 +1838,26 @@ impl AgentRuntime for AcpRuntime {
             reader.expect_prompt(&prompt);
         }
         let mut usage_tick = tokio::time::interval(Duration::from_secs(1));
-        let prompt_rpc = process.request(
-            "session/prompt",
-            json!({
-                "sessionId": session_id,
-                "prompt": prompt_blocks
-            }),
-        );
+        let mut dsh_events = dsh.as_ref().map(|bridge| bridge.subscribe());
+        let mut dsh_running = false;
+        let prompt_rpc: std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<Value>> + Send + '_>,
+        > = if let Some(bridge) = dsh_goal_command {
+            let (session_id, line) = (session_id.clone(), input.prompt.clone());
+            dsh_goal_active = true;
+            Box::pin(async move {
+                bridge.command(&session_id, &line).await?;
+                Ok(json!({"stopReason":"end_turn"}))
+            })
+        } else {
+            Box::pin(process.request(
+                "session/prompt",
+                json!({
+                    "sessionId": session_id,
+                    "prompt": prompt_blocks
+                }),
+            ))
+        };
         let mut mapper = TurnMapper::new(&input.turn_id);
         if !input.hidden {
             bus.emit(ThreadEventEnvelope {
@@ -1937,7 +2048,68 @@ impl AgentRuntime for AcpRuntime {
                         }
                     }
                 }
-                _ = tokio::time::sleep(Duration::from_millis(250)), if prompt_done => {
+                event = next_dsh_event(&mut dsh_events) => {
+                    use super::deepseek::BridgeEvent;
+                    match event {
+                        Some(BridgeEvent::Stream { session_id: sid, attempt_id, kind, text, outcome }) if sid == session_id => {
+                            let mapped = match kind.as_str() {
+                                "start" => { mapper.stream_start(&attempt_id); MappedUpdate::default() }
+                                "end" => mapper.stream_end(&attempt_id, outcome.as_deref() == Some("committed")),
+                                _ => mapper.stream_text(&attempt_id, &kind, text.as_deref().unwrap_or("")),
+                            };
+                            emit_mapped(&bus, &input.thread_id, &input.turn_id, mapped, input.hidden);
+                        }
+                        Some(BridgeEvent::Status { session_id: sid, status }) if sid == session_id => {
+                            dsh_running = status == "running";
+                        }
+                        Some(BridgeEvent::Projection { session_id: sid, key, value }) if sid == session_id => {
+                            if key == "goal" {
+                                dsh_goal_active = super::deepseek::goal_state(&value)
+                                    .is_some_and(|goal| goal.status == "active");
+                            } else if key == "plan" && value["active"] == false && value["pending"] == false {
+                                // An approved plan review left DSH plan mode.
+                                let left_plan = self.inner.sessions.lock().await
+                                    .get_mut(&input.provider_session_id)
+                                    .filter(|live| live.collaboration_mode.as_deref() == Some("plan"))
+                                    .map(|live| live.collaboration_mode = Some("default".into()))
+                                    .is_some();
+                                if left_plan {
+                                    bus.emit(ThreadEventEnvelope {
+                                        event_type: "thread.collaboration.updated".into(),
+                                        thread_id: input.thread_id.clone(),
+                                        timestamp: now_rfc3339(),
+                                        payload: json!({"turnId": input.turn_id, "collaborationMode": "default"}),
+                                    });
+                                }
+                            } else if key == "todos" {
+                                if let Some(plan) = super::deepseek::todo_steps(&value) {
+                                    emit_mapped(&bus, &input.thread_id, &input.turn_id,
+                                        MappedUpdate { plan: Some(plan), ..Default::default() }, input.hidden);
+                                }
+                            }
+                        }
+                        Some(BridgeEvent::Lagged) => {
+                            // A missed idle status must not hold the turn open.
+                            if let Some(bridge) = &dsh {
+                                if let Ok(state) = bridge.call("session", json!({"sessionId": session_id})).await {
+                                    dsh_running = state["running"].as_bool().unwrap_or(false);
+                                    dsh_goal_active = super::deepseek::goal_state(&state["projections"]["goal"])
+                                        .is_some_and(|goal| goal.status == "active");
+                                }
+                            }
+                        }
+                        Some(BridgeEvent::Closed) | None => {
+                            dsh_events = None;
+                            dsh_running = false;
+                        }
+                        Some(_) => {}
+                    }
+                }
+                // DSH keeps working after its ACP prompt settles (goal rounds,
+                // background subagents). The turn lasts until DSH is idle; an
+                // active goal gets time for its driver to admit the next round.
+                _ = tokio::time::sleep(Duration::from_millis(if dsh_goal_active { 3000 } else { 250 })),
+                    if prompt_done && (!dsh_running || cancel.is_cancelled()) => {
                     break if cancel.is_cancelled() { TurnOutcome::Interrupted } else { TurnOutcome::Completed };
                 }
                 _ = tokio::time::sleep(Duration::from_millis(500)), if !prompt_done => {
@@ -2060,7 +2232,11 @@ impl AgentRuntime for AcpRuntime {
     }
 
     async fn interrupt(&self, session_id: &str, turn_id: &str) -> Result<()> {
-        if let Some(live) = self.inner.sessions.lock().await.get(session_id) {
+        let goal_bridge = {
+            let sessions = self.inner.sessions.lock().await;
+            let Some(live) = sessions.get(session_id) else {
+                return Ok(());
+            };
             if !live
                 .active
                 .as_ref()
@@ -2071,6 +2247,18 @@ impl AgentRuntime for AcpRuntime {
             live.process
                 .notify("session/cancel", json!({ "sessionId": live.session_id }))
                 .await?;
+            live.dsh
+                .clone()
+                .filter(|_| {
+                    live.goal
+                        .as_ref()
+                        .is_some_and(|goal| goal.status == "active")
+                })
+                .map(|bridge| (bridge, live.session_id.clone()))
+        };
+        // Cancel stops the running round; pausing keeps the goal from re-arming.
+        if let Some((bridge, raw_session)) = goal_bridge {
+            bridge.command(&raw_session, "/goal pause").await?;
         }
         Ok(())
     }
@@ -2137,6 +2325,25 @@ impl AgentRuntime for AcpRuntime {
         thread_id: &str,
         bus: EventBus,
     ) -> Result<()> {
+        let dsh = self
+            .inner
+            .sessions
+            .lock()
+            .await
+            .get(session_id)
+            .and_then(|live| {
+                live.dsh
+                    .clone()
+                    .map(|bridge| (bridge, live.session_id.clone(), live.operation.clone()))
+            });
+        if let Some((bridge, raw_session, operation)) = dsh {
+            // A DSH command, not a model turn: ACP would send `/compact` as text.
+            let _operation = operation
+                .try_lock()
+                .map_err(|_| anyhow!("conflict: The session is busy."))?;
+            bridge.command(&raw_session, "/compact").await?;
+            return Ok(());
+        }
         let agent_id = session_id.split("::").next().unwrap_or("codex");
         let adapter = adapter_for(agent_id);
         let prompt = adapter
@@ -2310,8 +2517,10 @@ impl AgentRuntime for AcpRuntime {
             LiveSession {
                 process,
                 codex_bridge,
-                _discovery_directory: None,
+                dsh: None,
                 harness_info: None,
+                dsh_projections: Default::default(),
+                dsh_running: false,
                 session_id: new_id,
                 cwd,
                 yolo,
@@ -2398,8 +2607,10 @@ impl AgentRuntime for AcpRuntime {
         let live = sessions
             .get(session_id)
             .ok_or_else(|| anyhow!("ACP session is not running"))?;
-        Ok((live.adapter_id == "codex" && live.negotiated.goals)
-            .then(|| format!("/goal {argument}")))
+        Ok(
+            ((live.adapter_id == "codex" && live.negotiated.goals) || live.dsh.is_some())
+                .then(|| format!("/goal {argument}")),
+        )
     }
 
     async fn get_goal(&self, session_id: &str) -> Result<Option<GoalState>> {
@@ -2418,6 +2629,42 @@ impl AgentRuntime for AcpRuntime {
         objective: Option<String>,
         status: Option<String>,
     ) -> Result<Option<GoalState>> {
+        let dsh = self
+            .inner
+            .sessions
+            .lock()
+            .await
+            .get(session_id)
+            .and_then(|live| {
+                live.dsh
+                    .clone()
+                    .map(|bridge| (bridge, live.session_id.clone(), live.goal.is_some()))
+            });
+        if let Some((bridge, raw_session, has_goal)) = dsh {
+            // New and resumed goals run as turns (`goal_prompt`); this edits
+            // or stops the existing goal without starting autonomous rounds.
+            let line = match (objective.as_deref().map(str::trim), status.as_deref()) {
+                (Some(objective), _) if !objective.is_empty() && has_goal => {
+                    format!("/goal edit {objective}")
+                }
+                (Some(objective), _) if !objective.is_empty() => {
+                    bail!("Start a DSH goal from the goal composer")
+                }
+                (_, Some("paused")) => "/goal pause".into(),
+                (_, Some("clear" | "terminated")) | (None, None) => "/goal clear".into(),
+                (_, Some(other)) => bail!("DSH goals cannot be set to {other}"),
+                _ => bail!("objective must not be empty"),
+            };
+            bridge.command(&raw_session, &line).await?;
+            let state = bridge
+                .call("session", json!({"sessionId": raw_session}))
+                .await?;
+            let goal = super::deepseek::goal_state(&state["projections"]["goal"]);
+            if let Some(live) = self.inner.sessions.lock().await.get_mut(session_id) {
+                live.goal = goal.clone();
+            }
+            return Ok(goal);
+        }
         let (process, provider_session_id, method) = {
             let sessions = self.inner.sessions.lock().await;
             let live = sessions
@@ -2482,6 +2729,100 @@ impl AgentRuntime for AcpRuntime {
             .into();
         }
         Ok(live.goal.clone())
+    }
+
+    async fn harness_action(&self, session_id: &str, action: Value) -> Result<Value> {
+        use super::deepseek::PanelAction;
+        let action = PanelAction::parse(&action)?;
+        let (bridge, raw_session, process, turn_active, goal_active) = {
+            let sessions = self.inner.sessions.lock().await;
+            let live = sessions
+                .get(session_id)
+                .ok_or_else(|| anyhow!("ACP session is not running"))?;
+            (
+                live.dsh
+                    .clone()
+                    .ok_or_else(|| anyhow!("this harness has no settings panel actions"))?,
+                live.session_id.clone(),
+                live.process.clone(),
+                live.active.is_some(),
+                live.goal
+                    .as_ref()
+                    .is_some_and(|goal| goal.status == "active"),
+            )
+        };
+        let invoke = |method: &str, args: Value| json!({"namespace":"pluginManager","method":method,"args":args});
+        let result = match action {
+            PanelAction::Refresh => Value::Null,
+            PanelAction::Settings => {
+                return Ok(json!({"settings": bridge.call("settings", json!({})).await?}));
+            }
+            PanelAction::UpdateSetting {
+                ns,
+                key,
+                value,
+                revision,
+            } => {
+                bridge
+                    .call(
+                        "updateSetting",
+                        json!({"ns":ns,"key":key,"value":value,"revision":revision}),
+                    )
+                    .await?
+            }
+            PanelAction::SetPluginEnabled { id, enabled } => {
+                bridge
+                    .call(
+                        "invoke",
+                        invoke("setPluginEnabled", json!({"id":id,"enabled":enabled})),
+                    )
+                    .await?
+            }
+            PanelAction::SetBundleEnabled { name, enabled } => {
+                bridge
+                    .call(
+                        "invoke",
+                        invoke("setBundleEnabled", json!({"name":name,"enabled":enabled})),
+                    )
+                    .await?
+            }
+            PanelAction::Stop => {
+                if turn_active {
+                    bail!("conflict: Use the turn's Stop button while a turn is running");
+                }
+                // Without an ACP prompt in flight DSH cancels its autonomous work.
+                process
+                    .notify("session/cancel", json!({"sessionId": raw_session}))
+                    .await?;
+                if goal_active {
+                    bridge.command(&raw_session, "/goal pause").await?;
+                }
+                Value::Null
+            }
+        };
+        // Profile edits change the plugin and bundle inventory; keep discovery models.
+        let mut snapshot = bridge.call("snapshot", json!({})).await?;
+        let state = bridge
+            .call("session", json!({"sessionId": raw_session}))
+            .await?;
+        let mut sessions = self.inner.sessions.lock().await;
+        let live = sessions
+            .get_mut(session_id)
+            .filter(|live| Arc::ptr_eq(&live.process, &process))
+            .ok_or_else(|| anyhow!("ACP session changed during the harness action"))?;
+        if let Some(projections) = state["projections"].as_object() {
+            live.dsh_projections.extend(projections.clone());
+        }
+        if let Some(info) = live.harness_info.as_mut() {
+            snapshot["models"] = info["models"].take();
+            *info = snapshot;
+        }
+        let harness = super::deepseek::harness_view(
+            live.harness_info.as_ref().unwrap_or(&Value::Null),
+            &live.dsh_projections,
+            live.dsh_running && live.active.is_none(),
+        );
+        Ok(json!({"result": result, "harness": harness}))
     }
 
     async fn apply_session_settings(
@@ -2661,6 +3002,152 @@ fn spawn_mux(
     });
 }
 
+/// DSH bridge signals outside the turn loop: projection state for the panel
+/// and goal display, activity status, and human questions such as plan reviews.
+fn spawn_dsh_mux(inner: Arc<Inner>, process_id: String, bridge: Arc<super::deepseek::Bridge>) {
+    use super::deepseek::BridgeEvent;
+    let mut events = bridge.subscribe();
+    tokio::spawn(async move {
+        let questions: Arc<std::sync::Mutex<HashMap<u64, String>>> = Default::default();
+        loop {
+            let event = match events.recv().await {
+                Ok(event) => event,
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            };
+            match event {
+                BridgeEvent::Projection {
+                    session_id,
+                    key,
+                    value,
+                } => {
+                    let mut sessions = inner.sessions.lock().await;
+                    if let Some(live) = sessions
+                        .values_mut()
+                        .find(|live| live.process.id == process_id && live.session_id == session_id)
+                    {
+                        if key == "goal" {
+                            live.goal = super::deepseek::goal_state(&value);
+                        }
+                        live.dsh_projections.insert(key, value);
+                    }
+                }
+                BridgeEvent::Status { session_id, status } => {
+                    let mut sessions = inner.sessions.lock().await;
+                    if let Some(live) = sessions
+                        .values_mut()
+                        .find(|live| live.process.id == process_id && live.session_id == session_id)
+                    {
+                        live.dsh_running = status == "running";
+                    }
+                }
+                BridgeEvent::Question {
+                    id,
+                    session_id,
+                    questions: asked,
+                } => {
+                    let (inner, bridge, process_id, registry) = (
+                        inner.clone(),
+                        bridge.clone(),
+                        process_id.clone(),
+                        questions.clone(),
+                    );
+                    tokio::spawn(async move {
+                        let result = answer_dsh_question(
+                            &inner,
+                            &process_id,
+                            &session_id,
+                            id,
+                            &asked,
+                            &registry,
+                        )
+                        .await;
+                        let _ = bridge
+                            .answer(id, result.map_err(|error| error.to_string()))
+                            .await;
+                    });
+                }
+                BridgeEvent::QuestionCancelled { id } => {
+                    let request_id = questions.lock().unwrap().remove(&id);
+                    if let Some(request_id) = request_id {
+                        // Dropping the reply sender resolves the request as unanswered.
+                        inner.pending_inputs.lock().await.remove(&request_id);
+                    }
+                }
+                BridgeEvent::Closed => break,
+                BridgeEvent::Stream { .. } | BridgeEvent::Lagged => {}
+            }
+        }
+    });
+}
+
+async fn answer_dsh_question(
+    inner: &Inner,
+    process_id: &str,
+    session_id: &str,
+    question_id: u64,
+    asked: &Value,
+    registry: &std::sync::Mutex<HashMap<u64, String>>,
+) -> Result<Value> {
+    let active = {
+        let sessions = inner.sessions.lock().await;
+        sessions
+            .values()
+            .find(|live| live.process.id == process_id && live.session_id == session_id)
+            .and_then(|live| live.active.as_ref())
+            .map(|active| {
+                (
+                    active.thread_id.clone(),
+                    active.turn_id.clone(),
+                    active.bus.clone(),
+                )
+            })
+    }
+    .ok_or_else(|| anyhow!("No Remote Codex turn is active to answer this DSH question"))?;
+    let request_id = format!("dsh-question-{}", Uuid::new_v4());
+    registry
+        .lock()
+        .unwrap()
+        .insert(question_id, request_id.clone());
+    let questions = super::deepseek::questions(asked);
+    let params = json!({ "questions": questions });
+    let response = ask_user(
+        inner,
+        &active,
+        &request_id,
+        (params, true),
+        questions,
+        None,
+        None,
+    )
+    .await;
+    registry.lock().unwrap().remove(&question_id);
+    emit_request_resolved(&active, &request_id);
+    let answers = &response["answers"];
+    if answers.as_object().is_none_or(|answers| answers.is_empty()) {
+        bail!("The user dismissed the question in Remote Codex; stop and wait for their next message.");
+    }
+    super::deepseek::answer(asked, answers)
+}
+
+async fn next_dsh_event(
+    events: &mut Option<broadcast::Receiver<super::deepseek::BridgeEvent>>,
+) -> Option<super::deepseek::BridgeEvent> {
+    let Some(receiver) = events else {
+        return std::future::pending().await;
+    };
+    loop {
+        match receiver.recv().await {
+            Ok(event) => return Some(event),
+            // Committed ACP chunks replace any stream text a lag skipped.
+            Err(broadcast::error::RecvError::Lagged(_)) => {
+                return Some(super::deepseek::BridgeEvent::Lagged)
+            }
+            Err(broadcast::error::RecvError::Closed) => return None,
+        }
+    }
+}
+
 async fn handle_agent_request(
     inner: &Inner,
     process: &AcpProcess,
@@ -2692,71 +3179,32 @@ async fn handle_agent_request(
         "elicitation/create" | "item/tool/requestUserInput" => {
             let native = method == "item/tool/requestUserInput";
             let questions = super::elicitation::questions(&params, native)?;
-            let (thread_id, turn_id, bus) = active
+            let active = active
                 .as_ref()
                 .ok_or_else(|| anyhow!("No active turn for user input request"))?;
             let request_id = format!("input-{}", uuid::Uuid::new_v4());
-            let (tx, mut rx) = tokio::sync::oneshot::channel();
-            inner.pending_inputs.lock().await.insert(
-                request_id.clone(),
-                PendingInput {
-                    tx,
-                    params: params.clone(),
-                    native,
-                },
-            );
-            let dto = ThreadActionRequestDto {
-                id: request_id.clone(),
-                kind: "requestUserInput".into(),
-                title: "Question".into(),
-                description: None,
-                turn_id: Some(turn_id.clone()),
-                item_id: params
-                    .get("toolCallId")
-                    .or_else(|| params.get("itemId"))
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
-                created_at: now_rfc3339(),
-                questions,
-            };
-            inner
-                .pending_dtos
-                .lock()
-                .await
-                .entry(thread_id.clone())
-                .or_default()
-                .push(dto.clone());
-            bus.emit(ThreadEventEnvelope {
-                event_type: "thread.request.created".into(),
-                thread_id: thread_id.clone(),
-                timestamp: now_rfc3339(),
-                payload: json!({"request":dto}),
-            });
+            let item_id = params
+                .get("toolCallId")
+                .or_else(|| params.get("itemId"))
+                .and_then(Value::as_str)
+                .map(str::to_string);
             let deadline = params
                 .get("autoResolutionMs")
                 .or_else(|| params.pointer("/_meta/codex/autoResolutionMs"))
                 .and_then(Value::as_u64)
                 .and_then(|ms| std::time::Instant::now().checked_add(Duration::from_millis(ms)));
-            let response = loop {
-                tokio::select! {
-                    reply = &mut rx => break reply.unwrap_or_else(|_| if native {json!({"answers":{}})} else {json!({"action":"cancel"})}),
-                    _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                        let still_active = inner.sessions.lock().await.values().any(|session|session.active.as_ref().is_some_and(|a|a.thread_id == *thread_id && a.turn_id == *turn_id));
-                        if !still_active || deadline.is_some_and(|end| std::time::Instant::now() >= end) {break if native {json!({"answers":{}})} else {json!({"action":"cancel"})};}
-                    }
-                }
-            };
-            inner.pending_inputs.lock().await.remove(&request_id);
-            if let Some(list) = inner.pending_dtos.lock().await.get_mut(thread_id) {
-                list.retain(|q| q.id != request_id);
-            }
+            let response = ask_user(
+                inner,
+                active,
+                &request_id,
+                (params, native),
+                questions,
+                item_id,
+                deadline,
+            )
+            .await;
             process.respond(req_id, response).await?;
-            bus.emit(ThreadEventEnvelope {
-                event_type: "thread.request.resolved".into(),
-                thread_id: thread_id.clone(),
-                timestamp: now_rfc3339(),
-                payload: json!({"requestId":request_id}),
-            });
+            emit_request_resolved(active, &request_id);
         }
         "session/request_permission" => {
             let choices = parse_permission_choices(&params);
@@ -2966,6 +3414,78 @@ async fn handle_agent_request(
         }
     }
     Ok(())
+}
+
+/// Present product questions for the active turn and wait for the reply, the
+/// turn's end, or an optional deadline. Unanswered requests resolve empty.
+async fn ask_user(
+    inner: &Inner,
+    (thread_id, turn_id, bus): &(String, String, EventBus),
+    request_id: &str,
+    (params, native): (Value, bool),
+    questions: Vec<Value>,
+    item_id: Option<String>,
+    deadline: Option<std::time::Instant>,
+) -> Value {
+    let (tx, mut rx) = tokio::sync::oneshot::channel();
+    inner
+        .pending_inputs
+        .lock()
+        .await
+        .insert(request_id.to_string(), PendingInput { tx, params, native });
+    let dto = ThreadActionRequestDto {
+        id: request_id.to_string(),
+        kind: "requestUserInput".into(),
+        title: "Question".into(),
+        description: None,
+        turn_id: Some(turn_id.clone()),
+        item_id,
+        created_at: now_rfc3339(),
+        questions,
+    };
+    inner
+        .pending_dtos
+        .lock()
+        .await
+        .entry(thread_id.clone())
+        .or_default()
+        .push(dto.clone());
+    bus.emit(ThreadEventEnvelope {
+        event_type: "thread.request.created".into(),
+        thread_id: thread_id.clone(),
+        timestamp: now_rfc3339(),
+        payload: json!({"request":dto}),
+    });
+    let empty = || {
+        if native {
+            json!({"answers":{}})
+        } else {
+            json!({"action":"cancel"})
+        }
+    };
+    let response = loop {
+        tokio::select! {
+            reply = &mut rx => break reply.unwrap_or_else(|_| empty()),
+            _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                let still_active = inner.sessions.lock().await.values().any(|session|session.active.as_ref().is_some_and(|a|a.thread_id == *thread_id && a.turn_id == *turn_id));
+                if !still_active || deadline.is_some_and(|end| std::time::Instant::now() >= end) {break empty();}
+            }
+        }
+    };
+    inner.pending_inputs.lock().await.remove(request_id);
+    if let Some(list) = inner.pending_dtos.lock().await.get_mut(thread_id) {
+        list.retain(|q| q.id != request_id);
+    }
+    response
+}
+
+fn emit_request_resolved((thread_id, _, bus): &(String, String, EventBus), request_id: &str) {
+    bus.emit(ThreadEventEnvelope {
+        event_type: "thread.request.resolved".into(),
+        thread_id: thread_id.clone(),
+        timestamp: now_rfc3339(),
+        payload: json!({"requestId":request_id}),
+    });
 }
 
 async fn apply_mode_update(inner: &Inner, update: &Value) {
