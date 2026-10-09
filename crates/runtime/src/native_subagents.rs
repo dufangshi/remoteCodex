@@ -802,10 +802,11 @@ impl NativeSubagentsCache {
 impl crate::Supervisor {
     pub async fn native_subagents(&self, thread_id: &str, agent_id: Option<&str>) -> Result<Value> {
         let thread = self.get_thread(thread_id)?;
-        let provider = if thread.provider == remote_codex_protocol::Provider::Codex {
-            "codex"
-        } else {
-            thread.agent_id.as_deref().unwrap_or("")
+        let provider = match thread.provider {
+            remote_codex_protocol::Provider::Codex | remote_codex_protocol::Provider::Claude => {
+                thread.provider.as_str()
+            }
+            _ => thread.agent_id.as_deref().unwrap_or(""),
         }
         .to_owned();
         let Some(session) = thread.provider_session_id else {

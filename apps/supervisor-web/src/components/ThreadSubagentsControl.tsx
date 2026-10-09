@@ -60,9 +60,9 @@ export function ThreadSubagentsControl({
 }) {
   useI18n();
   const provider =
-    detail.thread.provider === 'codex'
-      ? 'codex'
-      : (detail.thread.agentId ?? '');
+    detail.thread.provider === 'acp'
+      ? (detail.thread.agentId ?? '')
+      : detail.thread.provider;
   const [agents, setAgents] = useState<NativeSubagentDto[] | null>(null);
   const [discovering, setDiscovering] = useState(false);
   const [open, setOpen] = useState(false);
