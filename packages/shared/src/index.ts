@@ -103,6 +103,7 @@ export interface RelayHealthDto {
 export type RelayUserRoleDto = 'admin' | 'user';
 
 export interface RelayUserDto {
+  avatarUrl?: string | null;
   id: string;
   email: string;
   username: string;

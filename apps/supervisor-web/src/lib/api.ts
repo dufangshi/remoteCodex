@@ -747,7 +747,7 @@ export function deleteRelayDevice(deviceId: string) {
   );
 }
 
-export function updateRelayAccount(input: { username?: string }) {
+export function updateRelayAccount(input: { username?: string; avatarUrl?: string | null }) {
   return request<RelayUserDto>('/relay/account', {
     method: 'PATCH',
     body: JSON.stringify(input),

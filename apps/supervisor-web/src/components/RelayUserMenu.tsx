@@ -1,5 +1,5 @@
 import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
-import { LogOut, Settings } from 'lucide-react';
+import { LogOut, Settings, UserRound, MonitorSmartphone } from 'lucide-react';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   useEffect,
@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
+import { useAppShellNav } from './AppShellNavContext';
 import type { RelaySessionDto } from '@remote-codex/shared';
 import {
   ApiError,
@@ -42,6 +43,7 @@ export function RelayUserMenu({
   menuAlign?: 'left' | 'right';
 }) {
   useI18n();
+  const shellNav = useAppShellNav();
   const navigate = useNavigate();
   const location = useLocation();
   const menuId = useId();
@@ -59,7 +61,7 @@ export function RelayUserMenu({
       return;
     }
     let cancelled = false;
-    fetchRelaySession()
+    const refresh = () => { fetchRelaySession()
       .then((nextSession) => {
         if (!cancelled) {
           setSession(nextSession.authenticated ? nextSession : null);
@@ -69,9 +71,12 @@ export function RelayUserMenu({
         if (!cancelled) {
           setSession(null);
         }
-      });
+      }); };
+    refresh();
+    window.addEventListener('remote-codex-account-updated', refresh);
     return () => {
       cancelled = true;
+      window.removeEventListener('remote-codex-account-updated', refresh);
     };
   }, [location.pathname]);
 
@@ -196,7 +201,7 @@ export function RelayUserMenu({
         ref={triggerRef}
         type="button"
       >
-        {label}
+        {user.avatarUrl ? <img src={user.avatarUrl} alt="" className="h-full w-full rounded-full object-cover" /> : label}
       </button>
       {open ? (
         <div
@@ -220,8 +225,18 @@ export function RelayUserMenu({
             role="menuitem"
             to="/relay-account"
           >
-            <Settings aria-hidden="true" className="h-4 w-4" />
+            <UserRound aria-hidden="true" className="h-4 w-4" />
             {translate("auth.accountSettings")}</Link>
+
+          {shellNav && <button type="button" role="menuitem"
+            className="flex h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-[var(--theme-fg)] hover:bg-[var(--theme-hover)] focus-visible:bg-[var(--theme-hover)]"
+            onClick={() => { setOpen(false); shellNav.openSettings(); }}>
+            <Settings aria-hidden="true" className="h-4 w-4" />{translate('files.settings')}
+          </button>}
+          <Link to="/relay-devices" role="menuitem" onClick={() => setOpen(false)}
+            className="flex h-11 items-center gap-2 rounded-md px-3 text-sm text-[var(--theme-fg)] hover:bg-[var(--theme-hover)] focus-visible:bg-[var(--theme-hover)]">
+            <MonitorSmartphone aria-hidden="true" className="h-4 w-4" />{translate('files.deviceManagement')}
+          </Link>
 
           <button
             aria-busy={loggingOut}

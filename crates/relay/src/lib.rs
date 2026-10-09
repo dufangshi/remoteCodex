@@ -31,7 +31,7 @@ use std::path::{Path as FsPath, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use axum::body::{to_bytes, Body, Bytes};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{DefaultBodyLimit, Path, Query, Request, State};
@@ -529,6 +529,7 @@ struct UserRow {
     role: String,
     enabled: i64,
     created_at: String,
+    avatar_url: Option<String>,
 }
 
 fn user_json(user: &UserRow) -> Value {
@@ -538,7 +539,8 @@ fn user_json(user: &UserRow) -> Value {
         "username": user.username,
         "role": user.role,
         "enabled": user.enabled == 1,
-        "createdAt": user.created_at
+        "createdAt": user.created_at,
+        "avatarUrl": user.avatar_url
     })
 }
 
@@ -629,7 +631,7 @@ fn extract_session_token(headers: &HeaderMap, query: &TokenQuery) -> Option<Stri
 
 fn load_user_by_id(conn: &Connection, user_id: &str) -> Option<UserRow> {
     conn.query_row(
-        "SELECT id, email, username, role, enabled, created_at FROM relay_users WHERE id=?1",
+        "SELECT id, email, username, role, enabled, created_at, (SELECT avatar_data_url FROM relay_user_profiles WHERE user_id=relay_users.id) FROM relay_users WHERE id=?1",
         params![user_id],
         |row| {
             Ok(UserRow {
@@ -639,6 +641,7 @@ fn load_user_by_id(conn: &Connection, user_id: &str) -> Option<UserRow> {
                 role: row.get(3)?,
                 enabled: row.get(4)?,
                 created_at: row.get(5)?,
+                avatar_url: row.get(6)?,
             })
         },
     )
@@ -1385,25 +1388,64 @@ fn oauth_error_redirect(message: &str) -> Response {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct UpdateAccountInput {
     username: Option<String>,
+    // Missing preserves the image; null explicitly restores the default avatar.
+    #[serde(default)]
+    avatar_url: Value,
+}
+
+fn avatar_data(input: &Value) -> Result<Option<&str>> {
+    if input.is_null() {
+        return Ok(None);
+    }
+    let value = input
+        .as_str()
+        .context("Avatar must be an uploaded raster image")?;
+    if value.len() > 131072 {
+        bail!("Avatar must be no larger than 128 KiB after resizing");
+    }
+    let (mime, encoded) = value.split_once(",").context("Invalid avatar data")?;
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let bytes = STANDARD
+        .decode(encoded)
+        .context("Invalid avatar encoding")?;
+    let valid = match mime {
+        "data:image/png;base64" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+        "data:image/jpeg;base64" => bytes.starts_with(&[0xff, 0xd8, 0xff]),
+        "data:image/webp;base64" => bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP"),
+        _ => false,
+    };
+    if !valid {
+        bail!("Upload a PNG, JPEG or WebP avatar; remote URLs and SVG are not supported");
+    }
+    Ok(Some(value))
 }
 
 async fn update_account(
     headers: HeaderMap,
     Query(query): Query<TokenQuery>,
     State(state): State<Arc<AppState>>,
-    Json(body): Json<UpdateAccountInput>,
+    Json(input): Json<Value>,
 ) -> impl IntoResponse {
-    let conn = state.store.conn.lock().await;
+    let mut conn = state.store.conn.lock().await;
     let Some(user) = authenticated_user(&conn, &state.store.session_secret, &headers, &query)
     else {
         return unauthorized();
     };
-    let Some(username) = body.username else {
-        return Json(user_json(&user)).into_response();
+    let Ok(body) = serde_json::from_value::<UpdateAccountInput>(input.clone()) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new("bad_request", "Invalid profile fields")),
+        )
+            .into_response();
     };
-    let username = normalize_username(&username);
+    let username = body
+        .username
+        .as_deref()
+        .map(normalize_username)
+        .unwrap_or_else(|| user.username.clone());
     if username.len() < 3 {
         return (
             StatusCode::BAD_REQUEST,
@@ -1414,16 +1456,36 @@ async fn update_account(
         )
             .into_response();
     }
-    if conn
-        .execute(
+    let avatar = match avatar_data(&body.avatar_url) {
+        Ok(avatar) => avatar,
+        Err(error) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ApiError::new("bad_request", error.to_string())),
+            )
+                .into_response()
+        }
+    };
+    let result = (|| -> Result<()> {
+        let tx = conn.transaction()?;
+        tx.execute(
             "UPDATE relay_users SET username=?1 WHERE id=?2",
             params![username, user.id],
-        )
-        .is_err()
-    {
+        )?;
+        if input.get("avatarUrl").is_some() {
+            tx.execute("INSERT INTO relay_user_profiles(user_id,avatar_data_url) VALUES(?1,?2) ON CONFLICT(user_id) DO UPDATE SET avatar_data_url=excluded.avatar_data_url", params![user.id,avatar])?;
+        }
+        tx.commit()?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        tracing::warn!(%error, "profile update failed");
         return (
             StatusCode::CONFLICT,
-            Json(ApiError::new("conflict", "Username is already in use")),
+            Json(ApiError::new(
+                "conflict",
+                "Profile could not be saved; username may already be in use",
+            )),
         )
             .into_response();
     }
@@ -4681,6 +4743,23 @@ mod tests {
             }),
             data_dir,
         )
+    }
+
+    #[test]
+    fn avatar_rejects_remote_active_invalid_and_oversized_content() {
+        assert_eq!(avatar_data(&Value::Null).unwrap(), None);
+        for value in [
+            json!("https://example.test/avatar.png"),
+            json!("data:image/svg+xml;base64,PHN2Zy8+"),
+            json!("data:image/png;base64,aGVsbG8="),
+            json!("data:image/png;base64,!!!"),
+            json!(42),
+            json!(format!("data:image/png;base64,{}", "A".repeat(131072))),
+        ] {
+            assert!(avatar_data(&value).is_err());
+        }
+        let image = json!("data:image/png;base64,iVBORw0KGgo=");
+        assert_eq!(avatar_data(&image).unwrap(), image.as_str());
     }
 
     fn device_socket(connection_id: Uuid) -> (DeviceSocket, tokio::sync::mpsc::Receiver<String>) {

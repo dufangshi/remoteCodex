@@ -1,4 +1,5 @@
 import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { ProductHeader } from '../components/ProductHeader';
 import { RelayNotifications } from '../components/RelayNotifications';
 import {
   RelaySecurityPanel,
@@ -6,7 +7,7 @@ import {
 } from '../components/RelaySecurity';
 import { securityRequest, type SecurityStatus } from '../lib/relaySecurity';
 import { FormDialog } from '../components/FormDialog';
-import { ArrowLeft, RefreshCw, Save, KeyRound } from 'lucide-react';
+import { RefreshCw, Save, KeyRound } from 'lucide-react';
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
@@ -27,6 +28,24 @@ function errorMessage(caught: unknown, fallback: string) {
       : fallback;
 }
 
+async function resizeAvatar(file: File): Promise<string> {
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) throw new Error('Invalid avatar');
+  const url = URL.createObjectURL(file);
+  try {
+    const image = new Image(); image.src = url;
+    await image.decode();
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 192;
+    const context = canvas.getContext('2d');
+    if (!context || !image.naturalWidth || !image.naturalHeight) throw new Error('Invalid image');
+    const size = Math.min(image.naturalWidth, image.naturalHeight);
+    context.drawImage(image, (image.naturalWidth - size) / 2, (image.naturalHeight - size) / 2, size, size, 0, 0, 192, 192);
+    // Re-encoding strips metadata and bounds the persisted payload.
+    const data = canvas.toDataURL('image/webp', 0.85);
+    if (data.length > 131072) throw new Error('Avatar too large');
+    return data;
+  } finally { URL.revokeObjectURL(url); }
+}
+
 export function RelayAccountSettingsPanel({
   className = '',
 }: {
@@ -35,6 +54,8 @@ export function RelayAccountSettingsPanel({
   const { locale: i18nLocale } = useI18n();
   const [session, setSession] = useState<RelaySessionDto | null>(null);
   const [username, setUsername] = useState('');
+  const [avatar, setAvatar] = useState<string | null>(null);
+  const [preparingAvatar, setPreparingAvatar] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -57,6 +78,7 @@ export function RelayAccountSettingsPanel({
       const nextSession = await fetchRelaySession();
       setSession(nextSession);
       setUsername(nextSession.user?.username ?? '');
+      setAvatar(nextSession.user?.avatarUrl ?? null);
     } catch (caught) {
       setSession(null);
       setLoadError(errorMessage(caught, translate("auth.accountLoadFailed")));
@@ -75,11 +97,13 @@ export function RelayAccountSettingsPanel({
     setProfileError(null);
     setProfileMessage(null);
     try {
-      const user = await updateRelayAccount({ username: username.trim() });
+      const user = await updateRelayAccount({ username: username.trim(), avatarUrl: avatar });
       setSession((current) =>
         current?.authenticated ? { ...current, user } : current,
       );
       setUsername(user.username);
+      setAvatar(user.avatarUrl ?? null);
+      window.dispatchEvent(new Event('remote-codex-account-updated'));
       setProfileMessage(translate("auth.profileSaved"));
     } catch (caught) {
       setProfileError(errorMessage(caught, translate("auth.profileSaveFailed")));
@@ -182,7 +206,7 @@ export function RelayAccountSettingsPanel({
     );
   }
 
-  const profileDirty = username.trim() !== (session.user?.username ?? '');
+  const profileDirty = username.trim() !== (session.user?.username ?? '') || avatar !== (session.user?.avatarUrl ?? null);
 
   return (
     <div
@@ -203,6 +227,29 @@ export function RelayAccountSettingsPanel({
             </p>
           </div>
           <form className="mt-5 space-y-4" onSubmit={saveProfile}>
+            <div className="flex items-center gap-4">
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] text-xl" aria-label={translate('auth.avatar')}>
+                {avatar ? <img src={avatar} alt={translate('auth.avatar')} className="h-full w-full object-cover" /> : (username.trim().slice(0, 2).toUpperCase() || '??')}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="relay-button-secondary relative inline-flex min-h-11 cursor-pointer items-center px-3 text-sm">
+                  {preparingAvatar ? translate('auth.saving') : translate('auth.uploadAvatar')}
+                  <input type="file" accept="image/png,image/jpeg,image/webp" aria-label={translate('auth.uploadAvatar')}
+                    className="absolute inset-0 w-full cursor-pointer opacity-0" disabled={savingProfile || preparingAvatar}
+                    onChange={async event => {
+                      const file = event.currentTarget.files?.[0]; event.currentTarget.value = '';
+                      if (!file) return;
+                      setPreparingAvatar(true); setProfileError(null); setProfileMessage(null);
+                      try { setAvatar(await resizeAvatar(file)); }
+                      catch { setProfileError(translate('auth.avatarInvalid')); }
+                      finally { setPreparingAvatar(false); }
+                    }} />
+                </label>
+                {avatar && <button type="button" className="relay-button-secondary min-h-11 px-3 text-sm" disabled={savingProfile || preparingAvatar}
+                  onClick={() => { setAvatar(null); setProfileError(null); setProfileMessage(null); }}>{translate('auth.removeAvatar')}</button>}
+                <p className="w-full text-xs text-[var(--theme-fg-muted)]">{translate('auth.avatarHint')}</p>
+              </div>
+            </div>
             <label className="block text-sm text-[var(--theme-fg-soft)]">
               {translate("auth.username")}<input
                 autoComplete="username"
@@ -226,7 +273,7 @@ export function RelayAccountSettingsPanel({
             ) : null}
             <button
               className="relay-button-primary inline-flex h-11 items-center gap-2"
-              disabled={savingProfile || !username.trim() || !profileDirty}
+              disabled={savingProfile || preparingAvatar || !username.trim() || !profileDirty}
               type="submit"
             >
               <Save aria-hidden="true" className="h-4 w-4" />
@@ -349,20 +396,8 @@ export function RelayAccountPage() {
   const { locale: i18nLocale } = useI18n();
   return (
     <div className="product-page !max-w-3xl">
-      <header className="border-b border-[var(--theme-border)] pb-6">
-        <Link
-          className="relay-button-secondary inline-flex h-11 items-center gap-2"
-          to="/relay-devices"
-        >
-          <ArrowLeft aria-hidden="true" className="h-4 w-4" />
-          {translate("auth.devices")}</Link>
-        <p className="mt-6 text-sm font-medium text-[var(--theme-accent-strong)]">
-          {translate("auth.relayAccount")}</p>
-        <h1 className="mt-2 text-2xl font-semibold text-[var(--theme-fg)]">
-          {translate("auth.accountSettings")}</h1>
-        <p className="mt-2 max-w-xl text-sm leading-6 text-[var(--theme-fg-muted)]">
-          {translate("auth.manageTheIdentityAndPasswordUsedTo")}</p>
-      </header>
+      <ProductHeader title={translate('auth.accountSettings')} backHref="/relay-devices" backLabel={translate('auth.devices')} />
+      <p className="my-5 text-sm text-[var(--theme-fg-muted)]">{translate('auth.manageTheIdentityAndPasswordUsedTo')}</p>
       <div className="py-2">
         <RelayAccountSettingsPanel />
       </div>

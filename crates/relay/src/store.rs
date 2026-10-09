@@ -436,6 +436,12 @@ impl RelayStore {
             CREATE INDEX IF NOT EXISTS relay_access_grants_device_scope_idx ON relay_access_grants(device_id, scope);
             ",
         )?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS relay_user_profiles (
+            user_id TEXT PRIMARY KEY REFERENCES relay_users(id) ON DELETE CASCADE,
+            avatar_data_url TEXT
+        );",
+        )?;
         hosted::ensure_schema(&conn)?;
         migrate_legacy_rust_tables(&mut conn)?;
         security::ensure_schema(&conn)?;

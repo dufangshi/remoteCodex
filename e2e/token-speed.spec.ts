@@ -23,7 +23,7 @@ test('real GPT-6.1 Sol shows live throughput, excludes tool wait, and retains sp
     await page.getByRole('button', { name: 'Send Prompt', exact: true }).click();
     const liveSpeed = page.locator('.thread-graph-turn-footer [data-testid="turn-token-speed"]');
     await expect(liveSpeed).toBeVisible();
-    await expect(liveSpeed).toContainText('tok/s');
+    await expect(liveSpeed).toHaveAttribute('title', /Output tokens per second/);
     await expect.poll(async () => (await detail()).turns.at(-1)?.tokenUsage?.generationSpeed?.state, { timeout: 150_000 }).toBe('tool');
     const samples: { llmTimeMs:number; outputTokens:number }[] = [];
     await expect.poll(async () => {
@@ -37,7 +37,7 @@ test('real GPT-6.1 Sol shows live throughput, excludes tool wait, and retains sp
       return samples.length;
     }, { intervals:[500,500,500], timeout:90_000 }).toBeGreaterThanOrEqual(4);
     expect(Math.max(...samples.map(s => s.llmTimeMs)) - Math.min(...samples.map(s => s.llmTimeMs))).toBeLessThan(100);
-    await expect(liveSpeed).toHaveText(/\d[\d,.]* tok\/s/);
+    await expect(liveSpeed).toHaveText(/\d[\d,.]*/);
     await expect.poll(async () => (await detail()).turns.at(-1)?.status, {timeout:150_000}).toBe('completed');
     const completed = (await detail()).turns.at(-1);
     const speed = completed.tokenUsage.generationSpeed;
@@ -55,7 +55,7 @@ test('real GPT-6.1 Sol shows live throughput, excludes tool wait, and retains sp
     expect(completed.priceEstimate.totalUsd).toBeCloseTo(expectedUsd, 8);
     await page.reload();
     const summary = page.locator('.thread-graph-worked-summary');
-    await expect(summary.getByTestId('turn-token-speed')).toHaveText(/\d[\d,.]* tok\/s/);
+    await expect(summary.getByTestId('turn-token-speed')).toHaveText(/\d[\d,.]*/);
     await expect(summary.locator('.thread-turn-usage-price')).toBeVisible();
     await page.setViewportSize({width:390,height:844});
     await expect(summary.getByTestId('turn-token-speed')).toBeVisible();

@@ -6,6 +6,7 @@ import {
   AppShellMenuButton,
   AppShellNavigationMenu,
 } from './AppShellNavigation';
+import { relayModeActive } from '../lib/api';
 import { RelayUserMenu } from './RelayUserMenu';
 
 export function ProductHeader({
@@ -23,10 +24,10 @@ export function ProductHeader({
   return (
     <div className="product-navigation-space">
       <header className="product-topbar product-navigation">
-        <div className="relative shrink-0">
+        {relayModeActive() ? <RelayUserMenu className="[&>button]:!h-11 [&>button]:!w-11" /> : <div className="relative shrink-0">
           <AppShellMenuButton className="!h-11 !w-11" />
           <AppShellNavigationMenu className="absolute left-0 top-[calc(100%+0.5rem)] z-50 w-64" />
-        </div>
+        </div>}
         {backHref && (
           <Link
             to={backHref}
@@ -41,10 +42,7 @@ export function ProductHeader({
           {title}
         </h1>
         {actions}
-        <RelayUserMenu
-          className="[&>button]:!h-11 [&>button]:!w-11"
-          menuAlign="right"
-        />
+
       </header>
     </div>
   );

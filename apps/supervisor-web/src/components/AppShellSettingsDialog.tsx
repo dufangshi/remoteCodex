@@ -28,10 +28,7 @@ import {
 import {
   usePlugins,
   SettingsPanels,
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
+  SettingsDialog,
   type SettingsSection,
 } from '@remote-codex/thread-ui';
 import { useAppShellNav } from './AppShellNavContext';
@@ -157,7 +154,7 @@ export function AppShellSettingsDialog({
     window.requestAnimationFrame(() => {
       document
         .querySelector<HTMLElement>(
-          '[aria-controls="app-shell-navigation-menu"]',
+          '[aria-controls="app-shell-navigation-menu"], [aria-haspopup="menu"]',
         )
         ?.focus();
     });
@@ -1357,30 +1354,13 @@ export function AppShellSettingsDialog({
     );
   }
 
-  return (
-    <Dialog
-      open
-      onOpenChange={(open) => {
-        if (!open) closeSettings();
-      }}
-    >
-      <DialogContent
-        className="thread-graph-dialog thread-graph-settings-dialog"
-        data-theme-effective={effectiveTheme}
-        data-theme-mode={selectedThemeMode}
-        data-testid="settingsDialog"
-        aria-describedby={undefined}
-        onCloseAutoFocus={(event) => {
-          event.preventDefault();
-        }}
-      >
-        <DialogHeader>
-          <DialogTitle>{translate("files.settings")}</DialogTitle>
-        </DialogHeader>
-        <SettingsPanels sections={appSettingsSections()} />
-      </DialogContent>
-    </Dialog>
-  );
+  return <SettingsDialog open
+    onOpenChange={(open) => { if (!open) closeSettings(); }}
+    themeMode={selectedThemeMode} effectiveTheme={effectiveTheme}
+    sections={appSettingsSections()}
+    contentProps={{ 'data-testid': 'settingsDialog', onCloseAutoFocus: (event) => event.preventDefault() }}
+  />;
+
 }
 
 export function appSettingsSections(): SettingsSection[] {
