@@ -2,6 +2,8 @@ node_modules
 dist
 coverage
 pockymoe-thread-ui
+# Checkouts that predate the rename still use the old directory name.
+remote-codex-thread-ui
 /remote-codex-app/
 .DS_Store
 .local

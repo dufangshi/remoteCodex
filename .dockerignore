@@ -8,6 +8,8 @@ dist
 npm/*/bin
 npm/remote-codex/web
 pockymoe-thread-ui
+# Checkouts that predate the rename still use the old directory name.
+remote-codex-thread-ui
 apps/*/dist
 packages/*/dist
 output
