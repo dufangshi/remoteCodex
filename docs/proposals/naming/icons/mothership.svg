@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Mothership"><title>Mothership</title><defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#17201e"/><stop offset="1" stop-color="#0c0f11"/></linearGradient></defs><rect width="512" height="512" rx="116" fill="url(#bg)"/><rect x="3" y="3" width="506" height="506" rx="113" fill="none" stroke="#263038" stroke-width="6"/>
+<path d="M206,232 L162,316 M256,236 L256,336 M306,232 L350,316" stroke="#f4f7f6" stroke-opacity="0.5" stroke-width="8" stroke-linecap="round" stroke-dasharray="1 17"/>
+<path d="M196,184 A60,56 0 0 1 316,184 Z" fill="#00cc76"/>
+<ellipse cx="256" cy="196" rx="150" ry="40" fill="#f4f7f6"/>
+<circle cx="186" cy="204" r="9" fill="#0f1317"/>
+<circle cx="256" cy="214" r="9" fill="#0f1317"/>
+<circle cx="326" cy="204" r="9" fill="#0f1317"/>
+<circle cx="156" cy="340" r="22" fill="#00cc76"/>
+<circle cx="256" cy="362" r="22" fill="#00cc76"/>
+<circle cx="356" cy="340" r="22" fill="#00cc76"/>
+</svg>

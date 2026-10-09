@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Nightjar"><title>Nightjar</title><defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#17201e"/><stop offset="1" stop-color="#0c0f11"/></linearGradient></defs><rect width="512" height="512" rx="116" fill="url(#bg)"/><rect x="3" y="3" width="506" height="506" rx="113" fill="none" stroke="#263038" stroke-width="6"/>
+<mask id="moon"><rect width="512" height="512" fill="#fff"/><circle cx="316" cy="206" r="126" fill="#000"/></mask>
+<circle cx="252" cy="262" r="150" fill="#00cc76" mask="url(#moon)"/>
+<path d="M300,212 L346,248 L300,284" fill="none" stroke="#f4f7f6" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M358,284 L394,284" stroke="#f4f7f6" stroke-width="24" stroke-linecap="round"/>
+<circle cx="404" cy="128" r="9" fill="#f4f7f6" fill-opacity="0.8"/>
+</svg>

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Longhaul"><title>Longhaul</title><defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#17201e"/><stop offset="1" stop-color="#0c0f11"/></linearGradient></defs><rect width="512" height="512" rx="116" fill="url(#bg)"/><rect x="3" y="3" width="506" height="506" rx="113" fill="none" stroke="#263038" stroke-width="6"/>
+<path d="M120,368 L300,368 Q352,368 352,316 Q352,264 300,264 L212,264 Q160,264 160,212 Q160,160 212,160 L344,160" fill="none" stroke="#00cc76" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M340,120 L404,160 L340,200 Z" fill="#f4f7f6" stroke="#f4f7f6" stroke-width="8" stroke-linejoin="round"/>
+<circle cx="120" cy="368" r="24" fill="#0c0f11" stroke="#f4f7f6" stroke-width="12"/>
+</svg>

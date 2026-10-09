@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Afield"><title>Afield</title><defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#17201e"/><stop offset="1" stop-color="#0c0f11"/></linearGradient></defs><rect width="512" height="512" rx="116" fill="url(#bg)"/><rect x="3" y="3" width="506" height="506" rx="113" fill="none" stroke="#263038" stroke-width="6"/>
+<rect x="222" y="148" width="68" height="124" rx="14" fill="#00cc76"/>
+<path d="M96,272 L416,272" stroke="#f4f7f6" stroke-width="22" stroke-linecap="round"/>
+<path d="M140,320 L372,320" stroke="#f4f7f6" stroke-opacity="0.55" stroke-width="18" stroke-linecap="round"/>
+<path d="M188,362 L324,362" stroke="#f4f7f6" stroke-opacity="0.3" stroke-width="16" stroke-linecap="round"/>
+</svg>
