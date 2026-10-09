@@ -7,6 +7,7 @@ export function UpstreamModelPicker({
   connection,
   value,
   onChange,
+  required = true,
 }: {
   apiRoot: string;
   connection: {
@@ -16,7 +17,10 @@ export function UpstreamModelPicker({
     apiKey?: string;
     authType?: string;
     hasApiKey?: boolean;
+    settingsConfig?: Record<string, unknown>;
+    apiType?: string;
   };
+  required?: boolean;
   value: string;
   onChange: (model: string) => void;
 }) {
@@ -27,6 +31,7 @@ export function UpstreamModelPicker({
   const [truncated, setTruncated] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const { id, harness, baseUrl, apiKey, authType, hasApiKey } = connection;
+  const configKey = JSON.stringify(connection.settingsConfig ?? {});
   const ready =
     (baseUrl.startsWith('https://') || baseUrl.startsWith('http://')) &&
     !!(apiKey || (id && hasApiKey));
@@ -49,18 +54,26 @@ export function UpstreamModelPicker({
           baseUrl,
           apiKey: apiKey ?? '',
           authType: authType ?? 'api_key',
+          settingsConfig: connection.settingsConfig ?? {},
+          apiType: connection.apiType ?? 'responses',
         }),
       })
         .then((result) => {
           if (!alive) return;
           if (!Array.isArray(result.models))
-            throw Error(translate("settings.updateThisSupervisorToEnableModelDiscovery"));
+            throw Error(
+              translate('settings.updateThisSupervisorToEnableModelDiscovery'),
+            );
           setModels(result.models);
           setTruncated(result.truncated);
         })
         .catch((e) => {
           if (alive)
-            setError(e instanceof Error ? e.message : translate("settings.unableToLoadModels"));
+            setError(
+              e instanceof Error
+                ? e.message
+                : translate('settings.unableToLoadModels'),
+            );
         })
         .finally(() => {
           if (alive) setLoading(false);
@@ -71,22 +84,38 @@ export function UpstreamModelPicker({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [apiRoot, id, harness, baseUrl, apiKey, authType, ready, refresh]);
+  }, [
+    apiRoot,
+    id,
+    harness,
+    baseUrl,
+    apiKey,
+    authType,
+    ready,
+    refresh,
+    configKey,
+    connection.apiType,
+  ]);
   return (
     <div>
       <label className="block text-sm">
-        {translate("settings.model")}<select
+        {translate('settings.model')}
+        <select
           className="host-input mt-1 w-full min-w-0 rounded-md border border-[var(--theme-border)] bg-[var(--theme-panel)] p-2 text-sm"
-          required
+          required={required}
           value={value}
           disabled={!ready || loading}
           onChange={(e) => onChange(e.target.value)}
         >
           <option value="">
-            {loading ? translate("settings.loadingModels") : translate("settings.selectAModel")}
+            {loading
+              ? translate('settings.loadingModels')
+              : translate('settings.selectAModel')}
           </option>
           {value && !models.some((m) => m.id === value) && (
-            <option value={value}>{value} {translate("settings.configured")}</option>
+            <option value={value}>
+              {value} {translate('settings.configured')}
+            </option>
           )}
           {models.map((m) => (
             <option key={m.id} value={m.id}>
@@ -98,14 +127,19 @@ export function UpstreamModelPicker({
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--theme-fg-muted)]">
         <span>
           {!ready
-            ? translate("settings.enterTheUpstreamURLAndAPIKey")
+            ? translate('settings.enterTheUpstreamURLAndAPIKey')
             : loading
-              ? translate("settings.discoveringModelsFromThisUpstream")
+              ? translate('settings.discoveringModelsFromThisUpstream')
               : error
                 ? ''
                 : models.length
-                  ? translate("settings.modelsFound", { value1: models.length, value2: truncated ? translate("settings.listTruncated") : '' })
-                  : translate("settings.noModelsReturnedByThisUpstream")}
+                  ? translate('settings.modelsFound', {
+                      value1: models.length,
+                      value2: truncated
+                        ? translate('settings.listTruncated')
+                        : '',
+                    })
+                  : translate('settings.noModelsReturnedByThisUpstream')}
         </span>
         <button
           type="button"
@@ -113,7 +147,8 @@ export function UpstreamModelPicker({
           disabled={!ready || loading}
           onClick={() => setRefresh((n) => n + 1)}
         >
-          {translate("settings.refreshModels")}</button>
+          {translate('settings.refreshModels')}
+        </button>
       </div>
       {error && (
         <p

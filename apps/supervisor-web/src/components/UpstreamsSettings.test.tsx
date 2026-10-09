@@ -34,10 +34,10 @@ it('shows only installed base harnesses and keeps existing upstreams on the sele
   vi.mocked(request).mockImplementation(async (path) => {
     if (String(path).endsWith('/harnesses'))
       return [
-        { id: 'codex', name: 'Codex', base: { installed: true } },
+        { id: 'codex', name: 'OpenAI Codex', base: { installed: true } },
         {
           id: 'claude',
-          name: 'Claude Code',
+          name: 'Claude Agent',
           base: { path: '/isolated/claude' },
         },
         {
@@ -55,13 +55,29 @@ it('shows only installed base harnesses and keeps existing upstreams on the sele
       <UpstreamsSettings />
     </MemoryRouter>,
   );
-  expect(await screen.findByRole('button', { name: 'Codex' })).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Claude Code' })).toBeVisible();
+  expect(
+    await screen.findByRole('button', { name: 'OpenAI Codex' }),
+  ).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Claude Agent' })).toBeVisible();
   expect(screen.queryByRole('button', { name: 'DSH' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Gemini CLI' })).toBeNull();
   expect(await screen.findByText('Work API')).toBeVisible();
   expect(screen.queryByText('Hidden Gemini API')).toBeNull();
-  expect(screen.getByRole('button', { name: 'Use upstream' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Using' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Show uninstalled' }));
+  expect(screen.getByRole('button', { name: 'DSH' })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'DSH' }));
+  expect(screen.getByText(/Install this harness/)).toBeVisible();
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Add upstream' })).toBeEnabled(),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Add upstream' }));
+  expect(
+    screen.getByRole('option', { name: 'DeepSeek API' }),
+  ).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Show uninstalled' }));
+  await screen.findByText('Work API');
   fireEvent.change(screen.getByRole('searchbox'), {
     target: { value: 'no-match' },
   });
@@ -84,7 +100,7 @@ it('does not show default harnesses when inventory is empty or unavailable', asy
     </MemoryRouter>,
   );
   expect(await screen.findByText(/No harnesses are installed/)).toBeVisible();
-  expect(screen.queryByRole('button', { name: 'Codex' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'OpenAI Codex' })).toBeNull();
   vi.mocked(request).mockRejectedValue(new Error('offline'));
   fireEvent.click(screen.getByRole('button', { name: 'Refresh harnesses' }));
   expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -101,7 +117,9 @@ it('ignores an old inventory response after switching devices', async () => {
         resolveA = resolve;
       });
     if (String(path).endsWith('/harnesses'))
-      return [{ id: 'claude', name: 'Claude Code', base: { installed: true } }];
+      return [
+        { id: 'claude', name: 'Claude Agent', base: { installed: true } },
+      ];
     return { profiles: [], active: {}, backups: [] };
   });
   function View() {
@@ -122,15 +140,15 @@ it('ignores an old inventory response after switching devices', async () => {
   );
   await waitFor(() => expect(resolveA).toBeTypeOf('function'));
   fireEvent.click(screen.getByRole('button', { name: 'Device B' }));
-  await screen.findByRole('button', { name: 'Claude Code' });
-  resolveA([{ id: 'codex', name: 'Codex', base: { installed: true } }]);
+  await screen.findByRole('button', { name: 'Claude Agent' });
+  resolveA([{ id: 'codex', name: 'OpenAI Codex', base: { installed: true } }]);
   await waitFor(() =>
     expect(request).toHaveBeenCalledWith(
       '/relay/devices/b/api/management/upstreams',
       expect.anything(),
     ),
   );
-  expect(screen.queryByRole('button', { name: 'Codex' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'OpenAI Codex' })).toBeNull();
 });
 it('requires a device selection on relay home', () => {
   vi.mocked(relayModeActive).mockReturnValue(true);

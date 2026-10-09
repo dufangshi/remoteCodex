@@ -108,6 +108,10 @@ pub fn router(state: AppState) -> Router {
             post(crate::upstreams::import_config),
         )
         .route(
+            "/api/management/upstreams/live",
+            post(crate::upstreams::live),
+        )
+        .route(
             "/api/management/upstreams/models",
             post(crate::upstreams::models),
         )

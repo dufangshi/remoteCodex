@@ -3,13 +3,24 @@
 Source: https://github.com/farion1231/cc-switch
 Revision: `889b797d8aa252299221ed6569f992bda0a31a72`
 
-Adapted components: provider cards/actions and name/URL search in
-`apps/supervisor-web/src/components/UpstreamProviderCard.tsx` and
-`UpstreamManagement.tsx`; Claude provider-owned field classification from
-`src-tauri/src/live/floor.rs` in `crates/runtime/src/upstreams/cc_switch.rs`.
-The existing Remote Codex store, backups, atomic private writes and HTTP API
-remain the integration boundary; CC Switch's Tauri state/database/proxy are
-not copied.
+Adapted components and provider preset data:
+- `src/components/providers/ProviderCard.tsx`, `ProviderCardActions.tsx`,
+  `ProviderList.tsx` and provider form sections in the corresponding Web components.
+- Direct API preset settings from `src/config/{claude,codex,gemini}ProviderPresets.ts`
+  in `apps/supervisor-web/src/components/upstreamPresets.ts` (189 presets).
+- Claude, Codex and Gemini field lists from `src-tauri/src/live/floor.rs`
+  in `crates/runtime/src/upstreams/cc_switch.rs`. Tool credentials and helper
+  commands are preserved as global user settings at the integration boundary.
+- Provider fragment capture/projection and outgoing live backfill from
+  `src-tauri/src/live/project` and `src-tauri/src/services/provider/live.rs`
+  in `upstreams/provider_config.rs` and `upstreams.rs`.
+- Plan/stage/reread/rename conflict checks from `src-tauri/src/live/engine.rs`
+  in `upstreams/write_engine.rs` and `upstreams.rs`.
+
+Remote Codex retains its profile store, backups, private atomic writes, harness
+session gates and HTTP API. CC Switch's Tauri database, desktop services, local
+proxy, OAuth accounts and arbitrary supplier usage scripts are not copied.
+DSH YAML projection is an original adapter against the local DSH provider schema.
 
 MIT License
 

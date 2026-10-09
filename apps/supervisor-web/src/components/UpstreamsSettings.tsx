@@ -31,6 +31,12 @@ export function UpstreamsSettings() {
 
 function DeviceUpstreams({ apiRoot }: { apiRoot: string }) {
   const [harnesses, setHarnesses] = useState<InstalledHarness[]>([]);
+  const [showUninstalled, setShowUninstalled] = useState(false);
+  const isInstalled = (h: InstalledHarness) =>
+    !!h.base &&
+    h.base.installed !== false &&
+    (h.base.installed === true || !!h.base.path);
+  const visible = harnesses.filter((h) => showUninstalled || isInstalled(h));
   const [selected, setSelected] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -52,7 +58,7 @@ function DeviceUpstreams({ apiRoot }: { apiRoot: string }) {
             (h.base.installed === true || !!h.base.path),
         );
         if (!alive) return;
-        setHarnesses(installed);
+        setHarnesses(inventory);
         setSelected((current) =>
           installed.some((h) => h.id === current)
             ? current
@@ -81,7 +87,7 @@ function DeviceUpstreams({ apiRoot }: { apiRoot: string }) {
           aria-label={translate('devices.chooseHarness')}
         >
           {!loading &&
-            harnesses.map((h) => (
+            visible.map((h) => (
               <button
                 key={h.id}
                 type="button"
@@ -106,6 +112,29 @@ function DeviceUpstreams({ apiRoot }: { apiRoot: string }) {
           </span>
         </button>
       </div>
+      <label className="mt-3 flex items-center gap-2 text-xs text-[var(--theme-fg-muted)]">
+        <input
+          type="checkbox"
+          checked={showUninstalled}
+          onChange={(e) => {
+            setShowUninstalled(e.target.checked);
+            if (
+              !e.target.checked &&
+              !harnesses.some((h) => h.id === selected && isInstalled(h))
+            )
+              setSelected(harnesses.find(isInstalled)?.id ?? '');
+            else if (e.target.checked && !selected)
+              setSelected(harnesses[0]?.id ?? '');
+          }}
+        />
+        {translate('settings.upstreamsShowUninstalled')}
+      </label>
+      {selected &&
+        harnesses.some((h) => h.id === selected && !isInstalled(h)) && (
+          <p className="mt-3 text-xs text-[var(--theme-fg-muted)]">
+            {translate('settings.upstreamsUninstalled')}
+          </p>
+        )}
       {loading ? (
         <p role="status" className="py-6 text-sm">
           {translate('settings.loading')}
@@ -118,12 +147,16 @@ function DeviceUpstreams({ apiRoot }: { apiRoot: string }) {
         <p className="my-5 rounded-xl border border-dashed border-[var(--theme-border)] p-6 text-sm text-[var(--theme-fg-muted)]">
           {translate('settings.upstreamsNoInstalled')}
         </p>
-      ) : ['codex', 'claude', 'gemini', 'grok'].includes(selected) ? (
+      ) : ['codex', 'claude', 'gemini', 'grok', 'deepseek'].includes(
+          selected,
+        ) ? (
         <UpstreamManagement
           key={apiRoot + selected}
           apiRoot={apiRoot}
           harness={selected}
           appearance="switch"
+          harnessName={harnesses.find((h) => h.id === selected)?.name}
+          installed={harnesses.some((h) => h.id === selected && isInstalled(h))}
         />
       ) : (
         <p className="my-5 rounded-xl border border-dashed border-[var(--theme-border)] p-6 text-sm text-[var(--theme-fg-muted)]">

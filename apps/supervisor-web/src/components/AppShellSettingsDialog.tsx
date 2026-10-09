@@ -1376,7 +1376,7 @@ export function appSettingsSections(): SettingsSection[] {
       id: 'harnesses',
       label: translate("files.harnesses"),
       description:
-        translate("files.manageAgentsAndSwitchTheirUpstreamProviders"),
+        translate('settings.harnessMaintenanceDescription'),
     },
     {
       id: 'upstreams',

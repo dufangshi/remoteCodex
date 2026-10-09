@@ -2,7 +2,8 @@
 // Copyright (c) 2025 Jason Young. Licensed under MIT.
 // Source revision: 889b797d8aa252299221ed6569f992bda0a31a72.
 // See THIRD_PARTY_NOTICES.md for the full license.
-// Provider-owned fields are cleared before applying a direct Claude upstream.
+// Classifiers select provider fragments for capture, backfill and projection.
+// They must never be used to discard uncaptured live values.
 // User-owned hooks, MCP, permissions and feature flags remain untouched.
 /// Claude Code 的协议选择器。
 ///
@@ -40,8 +41,7 @@ pub const CLAUDE_FLOOR_ENV_KEYS: &[&str] = &[
 
 /// Claude Code `settings.json` 的 `env` 里，这个键是否是关键字段。
 ///
-/// 前端的预设扫描（`tests/config/claudeKeyFields.json`）是这里的镜像，由下面的测试
-/// 保证两边一致。
+/// Ported classifier; local preservation/backfill regressions live in upstreams tests.
 pub fn claude_floor_env(key: &str) -> bool {
     CLAUDE_FLOOR_ENV_PREFIXES
         .iter()
@@ -76,4 +76,123 @@ pub const CLAUDE_FLOOR_TOP: &[&str] = &[
 
 pub fn claude_floor_top(key: &str) -> bool {
     CLAUDE_FLOOR_TOP.contains(&key)
+}
+
+/// Claude Code 的供应商独有字段（`env` 里）。
+pub const CLAUDE_EXCLUSIVE_ENV: &[&str] = &[
+    // AtlasCloud、Soshow 等不接受实验性 beta 头。
+    "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS",
+    // DeepSeek 等严格校验工具 schema，带着 Artifact 工具每个请求都 400。
+    "CLAUDE_CODE_DISABLE_ARTIFACT",
+    // 第三方地址下默认关闭，只有上游转发 tool_reference 块时才能打开。
+    "ENABLE_TOOL_SEARCH",
+    // 官方文档写明给代理、网关、第三方用的兼容选项。
+    "CLAUDE_CODE_DISABLE_THINKING",
+    "DISABLE_INTERLEAVED_THINKING",
+    "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT",
+    "CLAUDE_CODE_EXTRA_BODY",
+    "CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING",
+    // auto mode 的服务端分类器只有官方端点支持；网关场景要设 0，否则会话被
+    // 阻断式提示卡住（官方文档给代理、网关的兼容选项）。
+    "CLAUDE_CODE_AUTO_MODE_SERVER",
+    // 窗口类：取值由上游模型的窗口决定。
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+    "CLAUDE_CODE_DISABLE_1M_CONTEXT",
+    "CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT",
+    // 向 ANTHROPIC_BASE_URL 取模型列表：网关（含代理模式下的 Stack 模型）要它，用户也可能
+    // 自己设成全局。
+    "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
+];
+
+pub fn claude_exclusive_env(key: &str) -> bool {
+    CLAUDE_EXCLUSIVE_ENV.contains(&key)
+}
+
+/// Codex `config.toml` 顶层的关键字段。另有 `[model_providers.custom]` 整表。
+pub const CODEX_FLOOR_TOP: &[&str] = &[
+    // 选路：`openai_base_url` 会把内置 openai 路由改道到别的地址。
+    "model_provider",
+    "openai_base_url",
+    "model",
+    "review_model",
+    "model_reasoning_effort",
+    "plan_mode_reasoning_effort",
+    "disable_response_storage",
+    "model_catalog_json",
+    // 兜底写法会把 Key 写在顶层。
+    "experimental_bearer_token",
+    // 旧形态：没有 model_provider 时落在顶层。
+    "base_url",
+    "wire_api",
+];
+
+/// 嵌套在用户自己的表里的模型名：只清这几个键，表里的其他键不动。
+pub const CODEX_FLOOR_NESTED: &[&[&str]] = &[
+    &["agents", "default_subagent_model"],
+    &["agents", "default_subagent_reasoning_effort"],
+    &["memories", "extract_model"],
+    &["memories", "consolidation_model"],
+];
+
+/// Codex 的供应商独有字段（顶层）。
+///
+/// `web_search` 的值不来自行文本，而由 `codex_native_gateway_rejects_web_search`
+/// 按供应商判定（需要时为 `"disabled"`）。其余几个会绕过 CC Switch 生成的模型目录，
+/// 覆盖按模型设好的能力。
+pub const CODEX_EXCLUSIVE_TOP: &[&str] = &[
+    "web_search",
+    "model_context_window",
+    "model_auto_compact_token_limit",
+    "model_supports_reasoning_summaries",
+    "model_verbosity",
+];
+
+/// Gemini CLI `.env` 里，这个键是否是关键字段。
+///
+/// `GOOGLE_*` 整个前缀都是连接和鉴权（Gemini CLI 0.61.0 读取的全部如此）。
+/// `GEMINI_*` 不能按前缀：同一前缀下有 `GEMINI_CLI_HOME`、`GEMINI_SANDBOX`、
+/// `GEMINI_SYSTEM_MD`、遥测开关等与供应商无关的设置。
+pub fn gemini_floor_env(key: &str) -> bool {
+    key.starts_with("GOOGLE_")
+        || matches!(
+            key,
+            "GEMINI_API_KEY"
+                | "GEMINI_MODEL"
+                // Key 放 x-goog-api-key 头还是 Authorization: Bearer。
+                | "GEMINI_API_KEY_AUTH_MECHANISM"
+                | "GEMINI_CLI_CUSTOM_HEADERS"
+                | "GEMINI_DEFAULT_AUTH_TYPE"
+                | "GEMINI_CLI_USE_COMPUTE_ADC"
+                // Google 登录走的服务地址。
+                | "CODE_ASSIST_ENDPOINT"
+                | "CODE_ASSIST_API_VERSION"
+        )
+}
+
+// Tool credentials are global: Claude passes these to Bash, hooks and MCP.
+// CC Switch's broad floor classifier is narrowed at this integration boundary.
+pub fn claude_provider_env(key: &str) -> bool {
+    (claude_floor_env(key) || claude_exclusive_env(key))
+        && !key.starts_with("AWS_")
+        && !key.starts_with("VERTEX_REGION_")
+        && !matches!(key, "GOOGLE_APPLICATION_CREDENTIALS" | "CLOUD_ML_REGION")
+}
+pub fn claude_provider_top(key: &str) -> bool {
+    claude_floor_top(key)
+        && !matches!(
+            key,
+            "apiKeyHelper" | "awsAuthRefresh" | "awsCredentialExport" | "gcpAuthRefresh"
+        )
+}
+pub fn codex_provider_top(key: &str) -> bool {
+    CODEX_FLOOR_TOP.contains(&key) || CODEX_EXCLUSIVE_TOP.contains(&key)
+}
+pub fn gemini_provider_env(key: &str) -> bool {
+    gemini_floor_env(key)
+        && !matches!(
+            key,
+            "GOOGLE_APPLICATION_CREDENTIALS" | "GOOGLE_CLOUD_PROJECT"
+        )
 }
