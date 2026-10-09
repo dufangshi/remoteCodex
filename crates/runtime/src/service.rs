@@ -318,6 +318,10 @@ pub struct Supervisor {
     pub device_monitor: crate::device_metrics::DeviceMonitor,
 }
 
+fn harness_context_key(thread_id: &str) -> String {
+    format!("harness-context:{thread_id}")
+}
+
 impl Supervisor {
     pub async fn invalidate_models(&self, id: &str) {
         for runtime in self.runtimes.values() {
@@ -411,6 +415,12 @@ impl Supervisor {
                     )
                 }
                 "runtime.usage.updated" => supervisor.persist_usage_event(event),
+                "thread.context.delivered" => match event.payload["providerSessionId"].as_str() {
+                    Some(session) => supervisor
+                        .db
+                        .set_kv(&harness_context_key(&event.thread_id), session),
+                    None => Ok(()),
+                },
                 // The harness itself left plan mode (an approved plan review);
                 // the next turn must not switch it back on.
                 "thread.collaboration.updated" => supervisor.db.with(|conn| {
@@ -2408,6 +2418,7 @@ impl Supervisor {
             Some(notice) => format!("{notice}\n\n{prompt}"),
             None => prompt,
         };
+        let context_delivered = self.harness_context_delivered(&thread.id, &session_id);
         let bus = self.bus.for_turn(&thread.id, &turn_id);
         let result = runtime
             .start_turn(
@@ -2425,6 +2436,7 @@ impl Supervisor {
                     hidden: false,
                     images,
                     title: Some(title.clone().unwrap_or_else(|| thread.title.clone())),
+                    context_delivered,
                 },
                 bus.clone(),
                 cancel.clone(),
@@ -3217,7 +3229,20 @@ impl Supervisor {
         self.runtime(thread.provider)?
             .compact_session(&session, id, self.bus.clone())
             .await?;
+        // Compaction can drop the context; the next turn delivers it again.
+        self.db.set_kv(&harness_context_key(id), "")?;
         self.get_thread(id)
+    }
+
+    /// Whether this harness session already holds the Remote Codex context.
+    /// A restarted or resumed process replays its history, so this survives
+    /// processes; a new session ID (new thread session, fork) starts over.
+    fn harness_context_delivered(&self, thread_id: &str, session_id: &str) -> bool {
+        self.db
+            .get_kv(&harness_context_key(thread_id))
+            .ok()
+            .flatten()
+            .is_some_and(|delivered| delivered == session_id)
     }
 
     pub async fn resume_thread(self: &Arc<Self>, id: &str) -> Result<ThreadDetailDto> {

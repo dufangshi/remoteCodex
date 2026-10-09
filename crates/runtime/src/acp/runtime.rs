@@ -1920,7 +1920,8 @@ impl AgentRuntime for AcpRuntime {
                 live.negotiated.image,
                 live.adapter_id.clone(),
                 live.harness_state.clone(),
-                live.context_thread_id.as_deref() != Some(input.thread_id.as_str()),
+                live.context_thread_id.as_deref() != Some(input.thread_id.as_str())
+                    && !input.context_delivered,
                 live.dsh.clone(),
                 live.dsh_projections
                     .get("goal")
@@ -1975,7 +1976,7 @@ impl AgentRuntime for AcpRuntime {
             && !process.cli_env.is_empty()
             && dsh_goal_command.is_none();
         let prompt = if include_context {
-            format!("[remoteCodex: use `remote-codex thread self` or REMOTE_CODEX_THREAD_ID for this device's thread identity. Read `remote-codex skill` before collaborating or preparing a user-facing web preview. For previews, reserve the address with `remote-codex preview create --port PORT` before starting the service, use only its exact hostname in any required allowlist, and give the user openUrl. First classify the message: stop/replace/reprioritize active work with steer (or direct if state is uncertain), kind task/question and a concrete --interrupt-reason; do not queue active-task corrections. Queue only distinct work that can wait until the entire current turn ends, not just a tool or compute batch. Results, ready inputs, progress, adoption notices and routine questions must use passive inbox; do not relabel reports as tasks. Inspect the full delivery receipt; queued is acceptance, not execution. Batch notifications to actual dependents, and do not send acknowledgement replies. Check inbox at natural checkpoints and ack after handling. To collect results, block with `remote-codex thread wait NAME...` or `remote-codex inbox wait --kind result --kind question` instead of polling or asking peers to wake you. Threads you create group under you: 3 levels deep, 20 open per root; close finished ones with `remote-codex thread close NAME`. Connection credentials are in the environment.]\n\n{prompt}")
+            format!("[remoteCodex: this conversation is a Remote Codex thread; `remote-codex thread self` shows its identity. Before you create or message threads, or show the user a local web app, read `remote-codex skill` (short: rules and an index); every command's `--help` has its flags and rules. Never put credentials in prompts or output.]\n\n{prompt}")
         } else {
             prompt
         };
@@ -2355,6 +2356,13 @@ impl AgentRuntime for AcpRuntime {
             live.active_subagents.clear();
             if include_context && prompt_done {
                 live.context_thread_id = Some(input.thread_id.clone());
+                // Persisted by the service, so a resumed session keeps knowing.
+                bus.emit(ThreadEventEnvelope {
+                    event_type: "thread.context.delivered".into(),
+                    thread_id: input.thread_id.clone(),
+                    timestamp: now_rfc3339(),
+                    payload: json!({"providerSessionId": input.provider_session_id}),
+                });
             }
         }
         if discard_session {
@@ -2567,6 +2575,7 @@ impl AgentRuntime for AcpRuntime {
                     hidden: true,
                     images: Vec::new(),
                     title: None,
+                    context_delivered: true,
                 },
                 bus,
                 cancel,

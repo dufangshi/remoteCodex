@@ -513,7 +513,10 @@ mod tests {
         let route = &pi["config"]["providers"]["remote-codex"];
         // Responses routes send no output cap (the model's own limit applies)
         // and retry unclassified gateway failures with backoff.
-        assert_eq!(route["compat"]["supportsMaxOutputTokens"].as_bool(), Some(false));
+        assert_eq!(
+            route["compat"]["supportsMaxOutputTokens"].as_bool(),
+            Some(false)
+        );
         assert_eq!(route["retryPolicy"]["mode"].as_str(), Some("normal"));
         assert!(route["models"][0].get("maxTokens").is_none());
         let acp = rows

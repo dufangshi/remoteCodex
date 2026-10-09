@@ -1,0 +1,47 @@
+# remote-codex guide devices
+
+Threads, files and mail on your other devices.
+
+## Other devices
+
+Devices must belong to the same relay owner, with peer access enabled on both. The
+CLI still connects to your local Supervisor; it routes encrypted requests through
+the relay. Use a relay device ID or a unique device name (case insensitive).
+`device list` works before opting in and reports this device's `peerAccess`.
+
+```bash
+remote-codex device list
+remote-codex device access                    # inspect; managed threads can view
+remote-codex device access on                 # local machine credential required
+remote-codex device workspaces DEVICE
+remote-codex thread list --device DEVICE --workspace WORKSPACE_ID
+remote-codex thread backends --device DEVICE
+remote-codex thread models --device DEVICE --workspace WORKSPACE_ID
+remote-codex thread create --device DEVICE --workspace WORKSPACE_ID --title helper
+remote-codex thread status DEVICE/THREAD_UUID
+remote-codex transcript DEVICE/THREAD_UUID --limit 1
+remote-codex thread send DEVICE/THREAD_UUID --text 'Please inspect these files' \
+  --attach ./report.txt --attach ./sources
+remote-codex fs ls DEVICE --workspace WORKSPACE_ID
+remote-codex fs get DEVICE --workspace WORKSPACE_ID path/to/file --out ./copy
+remote-codex outbox
+```
+
+The delivery policy is the same across devices: queue needs `--kind task`, and
+direct/steer need `--interrupt-reason`. Remote creation requires an existing target workspace and creates no local lineage;
+it does not inherit your approval mode. Remote send supports inbox/direct/queue/steer
+and `--notify-on-complete`; results return to your local passive inbox. Reply to
+cross-device mail using its `replyTo` (`DEVICE/THREAD_UUID`). Remote wait, wake, tree,
+task, close, delete and inbox operations are unavailable; inspect status/transcript
+or wait for local inbox results instead.
+
+Attachments copy up to 20 local paths; directories become zip files. The receipt's
+`attachments` and the delivered message both name where each file landed on the target. `fs` reads only within a target
+workspace. Downloads default to the caller's `.temp/threads/THREAD/downloads/`
+directory (or workspace `.temp/downloads/` without a caller).
+
+Retryable relay/offline/timeout failures save only inbox/queue sends in this device's
+outbox (`delivery: "outboxed"`); direct/steer and create fail immediately. Outboxed
+mail retries for seven days, then reports failure to the local sender's inbox.
+Identity changes stop delivery. Verify the peer's `remote-codex relay-fingerprint`
+before `remote-codex device trust DEVICE --reset` with a local machine credential.

@@ -3,6 +3,56 @@ use serde::{Deserialize, Serialize};
 pub const THREAD_INTERACTION_SKILL: &str =
     include_str!("../../../skills/thread-interaction/SKILL.md");
 
+/// Topic guides behind the short skill: `remote-codex guide TOPIC`.
+/// (name, one-line summary, text)
+pub const THREAD_INTERACTION_GUIDES: &[(&str, &str, &str)] = &[
+    (
+        "preview",
+        "Show a local web app to the user through a private preview",
+        include_str!("../../../skills/thread-interaction/guides/preview.md"),
+    ),
+    (
+        "delegate",
+        "Create, wait for, close and clean up delegates; lineage, roles, worktrees",
+        include_str!("../../../skills/thread-interaction/guides/delegate.md"),
+    ),
+    (
+        "messaging",
+        "Labels, delivery choice, batches, receipts for thread send",
+        include_str!("../../../skills/thread-interaction/guides/messaging.md"),
+    ),
+    (
+        "inbox",
+        "When and how to read, wait for and acknowledge mail",
+        include_str!("../../../skills/thread-interaction/guides/inbox.md"),
+    ),
+    (
+        "tasks",
+        "The lineage task board and harness-native timers",
+        include_str!("../../../skills/thread-interaction/guides/tasks.md"),
+    ),
+    (
+        "devices",
+        "Threads, files and mail on your other devices",
+        include_str!("../../../skills/thread-interaction/guides/devices.md"),
+    ),
+    (
+        "transcript",
+        "Retrying sends safely and reading peer history",
+        include_str!("../../../skills/thread-interaction/guides/transcript.md"),
+    ),
+    (
+        "connection",
+        "Credentials, connection discovery and failure handling",
+        include_str!("../../../skills/thread-interaction/guides/connection.md"),
+    ),
+    (
+        "automation",
+        "Durable hooks: schedules, completion triggers, scripts",
+        include_str!("../../../skills/thread-interaction/guides/automation.md"),
+    ),
+];
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadSendInput {

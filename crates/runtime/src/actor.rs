@@ -134,6 +134,9 @@ pub struct StartTurnInput {
     pub images: Vec<PromptImage>,
     /// The thread's title, for harnesses that list their own sessions (DSH).
     pub title: Option<String>,
+    /// This harness session already received the Remote Codex context (it is
+    /// in its history), so a resumed or restarted process must not add it again.
+    pub context_delivered: bool,
 }
 
 #[derive(Debug, Clone, Default)]
