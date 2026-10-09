@@ -108,8 +108,8 @@ a handful of concurrent delegates (3-5) over a large burst.
   it, and not while it is running or has queued work. The command exits nonzero if any
   target fails; `failed` lists which and why. After a name is reused, refer to the old,
   closed thread by its UUID.
-- `--role ROLE` starts from `.remote-codex/agents/ROLE.md` (workspace, then
-  `~/.remote-codex/agents/`). Front matter `model`, `effort`, `agent` become defaults
+- `--role ROLE` starts from `.pockymoe/agents/ROLE.md` (workspace, then
+  `~/.pockymoe/agents/`; `.remote-codex/agents/` still works). Front matter `model`, `effort`, `agent` become defaults
   you can still override; the body is prepended to the delegate's first prompt.
   `pockymoe thread roles` lists them.
 - `--worktree` runs the delegate in its own git worktree, `../REPO.worktrees/NAME` on

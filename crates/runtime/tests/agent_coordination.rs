@@ -669,7 +669,7 @@ async fn a_wake_queues_one_turn_on_the_parent_once_delegates_settle() {
 #[tokio::test]
 async fn roles_supply_defaults_and_prefix_only_the_first_turn() {
     let (dir, s) = setup();
-    let agents = dir.path().join(".remote-codex/agents");
+    let agents = dir.path().join(".pockymoe/agents");
     std::fs::create_dir_all(&agents).unwrap();
     std::fs::write(
         agents.join("reviewer.md"),

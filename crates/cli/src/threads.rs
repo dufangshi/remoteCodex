@@ -180,7 +180,7 @@ More: pockymoe guide delegate"#)]
         /// (`reviewer`). Every command that takes a thread id accepts it.
         #[arg(long)]
         name: Option<String>,
-        /// Start from `.remote-codex/agents/ROLE.md` (workspace, then home): its
+        /// Start from `.pockymoe/agents/ROLE.md` (workspace, then home): its
         /// model/effort/agent become defaults and its body prefixes the first prompt.
         #[arg(long)]
         role: Option<String>,

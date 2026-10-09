@@ -57,15 +57,26 @@ pub fn validate_name(name: &str) -> Result<()> {
     Ok(())
 }
 
+/// `.pockymoe/agents`, then `.remote-codex/agents` from before the rename, in
+/// the workspace and then the home directory; the first definition of a name wins.
 fn role_dirs(workspace: &Path) -> Vec<PathBuf> {
-    let mut dirs = vec![workspace.join(".remote-codex/agents")];
+    let mut roots = vec![workspace.to_path_buf()];
     if let Some(home) = std::env::var_os("HOME") {
-        dirs.push(PathBuf::from(home).join(".remote-codex/agents"));
+        roots.push(PathBuf::from(home));
     }
-    dirs
+    roots
+        .iter()
+        .flat_map(|root| {
+            [
+                root.join(".pockymoe/agents"),
+                root.join(".remote-codex/agents"),
+            ]
+        })
+        .collect()
 }
 
-/// `.remote-codex/agents/NAME.md` in the workspace, then in the home directory.
+/// `.pockymoe/agents/NAME.md` (or the pre-rename `.remote-codex/agents`) in the
+/// workspace, then in the home directory.
 /// Optional front matter sets `description`, `model`, `effort` and `agent`; the body
 /// is prepended to the first prompt the thread runs.
 pub fn load_role(workspace: &Path, name: &str) -> Result<RoleTemplate> {
@@ -74,7 +85,7 @@ pub fn load_role(workspace: &Path, name: &str) -> Result<RoleTemplate> {
         .iter()
         .find_map(|dir| std::fs::read_to_string(dir.join(format!("{name}.md"))).ok())
         .ok_or_else(|| {
-            anyhow!("role `{name}` not found; define .remote-codex/agents/{name}.md in the workspace or home directory, or list roles with `pockymoe thread roles`")
+            anyhow!("role `{name}` not found; define .pockymoe/agents/{name}.md in the workspace or home directory, or list roles with `pockymoe thread roles`")
         })?;
     Ok(parse_role(name, &text))
 }
