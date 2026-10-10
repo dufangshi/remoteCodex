@@ -158,7 +158,7 @@ pub async fn setup(options: SetupOptions) -> Result<()> {
     let origin = url.origin().ascii_serialization();
     let file = config_path();
     let mut saved: Value = if file.exists() {
-        read(&file)?
+        read_device_config(&file)?
     } else {
         json!({})
     };
@@ -248,7 +248,7 @@ pub async fn setup(options: SetupOptions) -> Result<()> {
         ));
         saved["POCKYMOE_DATABASE_PATH"] =
             json!(home().join(".remote-codex/relay-supervisor.sqlite"));
-        write(&file, &saved)?;
+        write_device_config(&file, &saved)?;
         write(
             &receipt_file,
             &json!({"identity":identity(&origin, &options),"configHash":digest(&std::fs::read(&file)?)}),
@@ -263,7 +263,7 @@ pub async fn setup(options: SetupOptions) -> Result<()> {
     online(options.port, version).await
 }
 pub fn load_environment(config: &Path) -> Result<BTreeMap<String, String>> {
-    let saved: Value = read(config)?;
+    let saved: Value = read_device_config(config)?;
     let mut env = BTreeMap::new();
     for (key, value) in saved.as_object().context("Invalid device configuration")? {
         if key.starts_with("POCKYMOE_") {

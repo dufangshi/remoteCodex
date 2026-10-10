@@ -278,9 +278,12 @@ pub fn activate(installed: &Installed) -> Result<()> {
         std::fs::rename(staged, &current)?;
         let bin = home().join(".local/bin");
         std::fs::create_dir_all(&bin)?;
-        let cli = bin.join("remote-codex");
-        if std::fs::symlink_metadata(&cli).is_err() {
-            std::os::unix::fs::symlink(current.join(binary_name()), cli)?;
+        // `remote-codex` is the pre-rename command that scripts and hooks use.
+        for command in ["pockymoe", "remote-codex"] {
+            let cli = bin.join(command);
+            if std::fs::symlink_metadata(&cli).is_err() {
+                std::os::unix::fs::symlink(current.join(binary_name()), cli)?;
+            }
         }
     }
     Ok(())
