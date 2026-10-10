@@ -221,3 +221,49 @@ test('phone terminal keeps the prompt and newest reply visible, resizes by touch
   await expect.poll(async () => (await panel.boundingBox())!.height).toBeGreaterThan(before + 60);
   await assertUsable();
 });
+
+test('phone terminal reserves space for a visual-only keyboard without relying on browser panning', async ({ page, request }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile-chromium', 'Mobile keyboard layout');
+  await page.addInitScript(() => localStorage.setItem('remote-codex.locale', 'en'));
+  const [id] = await workspaceThreads(request, ['Keyboard avoidance']);
+  await page.goto(`/threads/${id}`);
+  await page.locator('.matter-topbar').getByRole('button', { name: 'Terminal', exact: true }).tap();
+  const panel = page.getByTestId('workbench-bottom-panel');
+  await expect(visibleRows(page)).toContainText('$');
+  await panel.locator('.shell-pane-host:visible').tap({ position: { x: 50, y: 35 } });
+  const before = (await panel.boundingBox())!;
+  await page.evaluate(() => {
+    // Model the actual failure: keyboard overlays a fixed layout viewport,
+    // and the browser never pans the page to rescue the terminal cursor.
+    const viewport = Object.assign(new EventTarget(), {
+      height: window.innerHeight - 300, offsetTop: 0, scale: 1,
+    });
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+    window.dispatchEvent(new Event('resize'));
+  });
+  const assertAboveKeyboard = async () => {
+    const bounds = await page.evaluate(() => {
+      const panel = document.querySelector('[data-testid="workbench-bottom-panel"]')!.getBoundingClientRect();
+      const toolbar = document.querySelector('.shell-touch-controls')!.getBoundingClientRect();
+      const cursor = document.querySelector('.terminal-pane:not([hidden]) .xterm-cursor')!.getBoundingClientRect();
+      return { panelBottom: panel.bottom, toolbarTop: toolbar.top, toolbarBottom: toolbar.bottom, cursorBottom: cursor.bottom, visibleBottom: window.visualViewport!.height };
+    });
+    expect(bounds.panelBottom).toBeLessThanOrEqual(bounds.visibleBottom + 1);
+    expect(bounds.toolbarBottom).toBeLessThanOrEqual(bounds.visibleBottom + 1);
+    expect(bounds.cursorBottom).toBeLessThanOrEqual(bounds.toolbarTop + 1);
+  };
+  await expect(async () => { await assertAboveKeyboard(); }).toPass({ timeout: 5000 });
+  await page.keyboard.type('seq 1 40');
+  await page.keyboard.press('Enter');
+  await expect(visibleRows(page)).toContainText('40');
+  await expect(async () => { await assertAboveKeyboard(); }).toPass({ timeout: 5000 });
+  await panel.getByTestId('terminal-maximize').tap();
+  await expect(async () => { await assertAboveKeyboard(); }).toPass({ timeout: 5000 });
+  await panel.getByTestId('terminal-maximize').tap();
+  await page.evaluate(() => {
+    Object.assign(window.visualViewport!, { height: window.innerHeight });
+    window.dispatchEvent(new Event('resize'));
+  });
+  await expect.poll(async () => (await panel.boundingBox())!.height).toBeCloseTo(before.height, 0);
+  await expect.poll(async () => (await panel.boundingBox())!.y).toBeCloseTo(before.y, 0);
+});
