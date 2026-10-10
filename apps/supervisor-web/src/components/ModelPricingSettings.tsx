@@ -14,6 +14,7 @@ const pricingFields = () => [
   ['cachedInputUsdPerMillion', translate("settings.cached")],
   ['outputUsdPerMillion', translate("settings.out_220e06")],
   ['cacheWriteInputUsdPerMillion', translate("settings.cacheWrite")],
+  ['cacheWriteOneHourInputUsdPerMillion', translate("settings.cacheWriteOneHour")],
 ] as const;
 const inputClass =
   'min-w-0 w-full rounded-md border border-[var(--theme-border)] bg-[var(--theme-surface-strong)] px-2 py-1.5 text-sm text-[var(--theme-fg)]';
@@ -209,7 +210,7 @@ export function ModelPricingSettings() {
                     min="0"
                     max="1000000"
                     step="any"
-                    required={key !== 'cacheWriteInputUsdPerMillion'}
+                    required={!['cacheWriteInputUsdPerMillion','cacheWriteOneHourInputUsdPerMillion'].includes(key)}
                     disabled={busy}
                     value={draft.rates[key] ?? ''}
                     onChange={(e) =>

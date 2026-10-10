@@ -143,7 +143,7 @@ with sqlite3.connect(sys.argv[1]) as conn:
   await cost.tap();
   const popover = page.locator('[data-slot="tooltip-content"]');
   await expect(
-    popover.getByLabel('Cached input: 80,000 tokens', { exact: true }).first(),
+    popover.getByLabel('Cache read: 80,000 tokens', { exact: true }).first(),
   ).toBeVisible();
   await expect(
     popover.getByLabel('Cache write: 20,000 tokens', { exact: true }).first(),

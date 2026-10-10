@@ -115,6 +115,7 @@ impl Supervisor {
             }
             for field in [
                 "cacheWriteInputUsdPerMillion",
+                "cacheWriteOneHourInputUsdPerMillion",
                 "longContextInputMultiplier",
                 "longContextOutputMultiplier",
                 "fastMultiplier",

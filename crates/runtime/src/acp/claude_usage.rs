@@ -237,7 +237,7 @@ mod tests {
         let record = |id: &str, output: u64| {
             json!({"type":"assistant","sessionId":session,"timestamp":"2099-01-01T00:00:00Z",
             "message":{"id":id,"model":"claude-sonnet-4-5","content":[{"type":"tool_use","name":"Bash"}],
-                "usage":{"input_tokens":100,"output_tokens":output,"cache_read_input_tokens":200,"cache_creation_input_tokens":50}}})
+                "usage":{"input_tokens":100,"output_tokens":output,"cache_read_input_tokens":200,"cache_creation_input_tokens":50,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":50}}}})
         };
         std::fs::write(&file, format!("{}\n", record("old", 900))).unwrap();
         let mut reader = ClaudeUsageReader::with_home(home.path().into(), &session);
@@ -251,6 +251,7 @@ mod tests {
         assert_eq!(reports[0]["total"]["outputTokens"], 40);
         assert_eq!(reports[0]["total"]["inputTokens"], 350);
         assert_eq!(reports[0]["total"]["cacheWriteInputTokens"], 50);
+        assert_eq!(reports[0]["total"]["cacheWriteOneHourInputTokens"], 50);
         writeln!(out, "{}", record("first", 40)).unwrap();
         assert!(reader.poll().is_empty());
         writeln!(out, "{}", record("first", 60)).unwrap();

@@ -166,7 +166,8 @@
       "aliases": [
         "claude-fable-5",
         "fable 5"
-      ]
+      ],
+      "cacheWriteOneHourInputUsdPerMillion": 20
     },
     "claude-mythos-5": {
       "inputUsdPerMillion": 10,
@@ -174,7 +175,8 @@
       "outputUsdPerMillion": 50,
       "supportsFastMode": false,
       "contextWindowTokens": 1000000,
-      "cacheWriteInputUsdPerMillion": 12.5
+      "cacheWriteInputUsdPerMillion": 12.5,
+      "cacheWriteOneHourInputUsdPerMillion": 20
     },
     "claude-sonnet-5": {
       "inputUsdPerMillion": 2,
@@ -186,7 +188,8 @@
       "aliases": [
         "claude-sonnet-5",
         "sonnet 5"
-      ]
+      ],
+      "cacheWriteOneHourInputUsdPerMillion": 4
     },
     "claude-sonnet-4-5": {
       "inputUsdPerMillion": 3,
@@ -194,7 +197,8 @@
       "outputUsdPerMillion": 15,
       "supportsFastMode": false,
       "contextWindowTokens": 200000,
-      "cacheWriteInputUsdPerMillion": 3.75
+      "cacheWriteInputUsdPerMillion": 3.75,
+      "cacheWriteOneHourInputUsdPerMillion": 6
     },
     "claude-sonnet-4-6": {
       "inputUsdPerMillion": 3,
@@ -202,7 +206,8 @@
       "outputUsdPerMillion": 15,
       "supportsFastMode": false,
       "contextWindowTokens": 1000000,
-      "cacheWriteInputUsdPerMillion": 3.75
+      "cacheWriteInputUsdPerMillion": 3.75,
+      "cacheWriteOneHourInputUsdPerMillion": 6
     },
     "claude-opus-4-8": {
       "inputUsdPerMillion": 5,
@@ -211,7 +216,8 @@
       "supportsFastMode": true,
       "fastMultiplier": 2,
       "contextWindowTokens": 1000000,
-      "cacheWriteInputUsdPerMillion": 6.25
+      "cacheWriteInputUsdPerMillion": 6.25,
+      "cacheWriteOneHourInputUsdPerMillion": 10
     },
     "claude-opus-4-5": {
       "inputUsdPerMillion": 5,
@@ -219,7 +225,8 @@
       "outputUsdPerMillion": 25,
       "supportsFastMode": false,
       "contextWindowTokens": 200000,
-      "cacheWriteInputUsdPerMillion": 6.25
+      "cacheWriteInputUsdPerMillion": 6.25,
+      "cacheWriteOneHourInputUsdPerMillion": 10
     },
     "claude-opus-4-6": {
       "inputUsdPerMillion": 5,
@@ -227,7 +234,8 @@
       "outputUsdPerMillion": 25,
       "supportsFastMode": false,
       "contextWindowTokens": 1000000,
-      "cacheWriteInputUsdPerMillion": 6.25
+      "cacheWriteInputUsdPerMillion": 6.25,
+      "cacheWriteOneHourInputUsdPerMillion": 10
     },
     "claude-opus-4-7": {
       "inputUsdPerMillion": 5,
@@ -236,7 +244,8 @@
       "supportsFastMode": true,
       "fastMultiplier": 6,
       "contextWindowTokens": 1000000,
-      "cacheWriteInputUsdPerMillion": 6.25
+      "cacheWriteInputUsdPerMillion": 6.25,
+      "cacheWriteOneHourInputUsdPerMillion": 10
     },
     "claude-opus-4-1": {
       "inputUsdPerMillion": 15,
@@ -244,7 +253,8 @@
       "outputUsdPerMillion": 75,
       "supportsFastMode": false,
       "contextWindowTokens": 200000,
-      "cacheWriteInputUsdPerMillion": 18.75
+      "cacheWriteInputUsdPerMillion": 18.75,
+      "cacheWriteOneHourInputUsdPerMillion": 30
     },
     "claude-opus-4": {
       "inputUsdPerMillion": 15,
@@ -252,7 +262,8 @@
       "outputUsdPerMillion": 75,
       "supportsFastMode": false,
       "contextWindowTokens": 200000,
-      "cacheWriteInputUsdPerMillion": 18.75
+      "cacheWriteInputUsdPerMillion": 18.75,
+      "cacheWriteOneHourInputUsdPerMillion": 30
     },
     "claude-haiku-4-5": {
       "inputUsdPerMillion": 1,
@@ -264,7 +275,8 @@
       "aliases": [
         "claude-haiku-4-5",
         "haiku 4 5"
-      ]
+      ],
+      "cacheWriteOneHourInputUsdPerMillion": 2
     },
     "claude-haiku-3-5": {
       "inputUsdPerMillion": 0.8,
@@ -272,7 +284,8 @@
       "outputUsdPerMillion": 4,
       "supportsFastMode": false,
       "contextWindowTokens": 200000,
-      "cacheWriteInputUsdPerMillion": 1.0
+      "cacheWriteInputUsdPerMillion": 1.0,
+      "cacheWriteOneHourInputUsdPerMillion": 1.6
     },
     "gpt-6-astra": {
       "inputUsdPerMillion": 10,
@@ -296,7 +309,8 @@
         "claude-fable-5.1",
         "fable[1m]",
         "fable 5 1"
-      ]
+      ],
+      "cacheWriteOneHourInputUsdPerMillion": 20
     },
     "claude-opus-5": {
       "inputUsdPerMillion": 5,
@@ -310,7 +324,8 @@
         "opus 5"
       ],
       "supportsFastMode": true,
-      "fastMultiplier": 2
+      "fastMultiplier": 2,
+      "cacheWriteOneHourInputUsdPerMillion": 10
     },
     "claude-opus-5-5": {
       "inputUsdPerMillion": 4,
@@ -322,7 +337,13 @@
       "fastMultiplier": 2,
       "sourceUrl": "https://platform.claude.com/docs/en/about-claude/pricing",
       "verifiedAt": "2026-10-04",
-      "aliases": ["claude-opus-5.5", "opus-5.5", "opus 5.5", "opus[1m]"]
+      "aliases": [
+        "claude-opus-5.5",
+        "opus-5.5",
+        "opus 5.5",
+        "opus[1m]"
+      ],
+      "cacheWriteOneHourInputUsdPerMillion": 8
     },
     "claude-sonnet-5-5": {
       "inputUsdPerMillion": 2,
@@ -333,7 +354,12 @@
       "supportsFastMode": false,
       "sourceUrl": "https://platform.claude.com/docs/en/about-claude/pricing",
       "verifiedAt": "2026-10-04",
-      "aliases": ["claude-sonnet-5.5", "sonnet-5.5", "sonnet 5.5"]
+      "aliases": [
+        "claude-sonnet-5.5",
+        "sonnet-5.5",
+        "sonnet 5.5"
+      ],
+      "cacheWriteOneHourInputUsdPerMillion": 4
     },
     "claude-mythos-5-1": {
       "inputUsdPerMillion": 10,
@@ -344,7 +370,11 @@
       "supportsFastMode": false,
       "sourceUrl": "https://platform.claude.com/docs/en/about-claude/pricing",
       "verifiedAt": "2026-10-04",
-      "aliases": ["claude-mythos-5.1", "mythos 5.1"]
+      "aliases": [
+        "claude-mythos-5.1",
+        "mythos 5.1"
+      ],
+      "cacheWriteOneHourInputUsdPerMillion": 20
     },
     "grok-4.6": {
       "inputUsdPerMillion": 2,

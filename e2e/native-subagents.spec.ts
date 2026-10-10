@@ -195,7 +195,7 @@ for (const backend of ['codex', 'claude'])
     await panel.locator('.thread-turn-usage-price').click();
     const tooltip = page.locator('[data-slot="tooltip-content"] > div').first();
     await expect(
-      tooltip.getByLabel('Input: 4,000 tokens', { exact: true }),
+      tooltip.getByLabel('Uncached input: 4,000 tokens', { exact: true }),
     ).toBeVisible();
     await panel.locator('.thread-turn-usage-price').click();
     await expect(tooltip).toBeHidden();

@@ -11,8 +11,15 @@ pub(crate) struct Tokens {
     pub input_tokens: u64,
     pub cached_input_tokens: u64,
     pub cache_write_input_tokens: u64,
+    /// Subset of cache_write_input_tokens, not additional input tokens.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub cache_write_one_hour_input_tokens: u64,
     pub output_tokens: u64,
     pub reasoning_output_tokens: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 fn number(value: &Value, names: &[&str]) -> Option<u64> {
@@ -86,6 +93,9 @@ impl Tokens {
         .or_else(|| number(value.get("prompt_tokens_details")?, &["cached_tokens"]))
         .or_else(|| number(value.get("cache")?, &["read"]))
         .unwrap_or_default();
+        let one_hour_written = number(value, &["cacheWriteOneHourInputTokens"])
+            .or_else(|| number(value.get("cache_creation")?, &["ephemeral_1h_input_tokens"]))
+            .unwrap_or_default();
         let written = number(
             value,
             &[
@@ -97,7 +107,11 @@ impl Tokens {
             ],
         )
         .or_else(|| number(value.get("cache")?, &["write"]))
-        .unwrap_or_default();
+        .or_else(|| {
+            number(value.get("cache_creation")?, &["ephemeral_5m_input_tokens"])
+                .map(|five_minute| five_minute.saturating_add(one_hour_written))
+        })
+        .unwrap_or(one_hour_written);
         // ACP Usage counts uncached input separately; our existing DTO includes caches.
         if value.get("cachedReadTokens").is_some()
             || value.get("cachedWriteTokens").is_some()
@@ -105,6 +119,7 @@ impl Tokens {
             || value.get("cached_write_tokens").is_some()
             || value.get("cache_read_input_tokens").is_some()
             || value.get("cache_creation_input_tokens").is_some()
+            || value.get("cache_creation").is_some()
         {
             input = input.saturating_add(cached).saturating_add(written);
         }
@@ -114,6 +129,7 @@ impl Tokens {
             input_tokens: input,
             cached_input_tokens: cached,
             cache_write_input_tokens: written,
+            cache_write_one_hour_input_tokens: one_hour_written.min(written),
             output_tokens: output,
             reasoning_output_tokens: reasoning,
         })
@@ -147,6 +163,9 @@ impl Tokens {
             cache_write_input_tokens: self
                 .cache_write_input_tokens
                 .saturating_add(other.cache_write_input_tokens),
+            cache_write_one_hour_input_tokens: self
+                .cache_write_one_hour_input_tokens
+                .saturating_add(other.cache_write_one_hour_input_tokens),
             output_tokens: self.output_tokens.saturating_add(other.output_tokens),
             reasoning_output_tokens: self
                 .reasoning_output_tokens
@@ -164,6 +183,9 @@ impl Tokens {
             cache_write_input_tokens: self
                 .cache_write_input_tokens
                 .saturating_sub(baseline.cache_write_input_tokens),
+            cache_write_one_hour_input_tokens: self
+                .cache_write_one_hour_input_tokens
+                .saturating_sub(baseline.cache_write_one_hour_input_tokens),
             output_tokens: self.output_tokens.saturating_sub(baseline.output_tokens),
             reasoning_output_tokens: self
                 .reasoning_output_tokens
@@ -336,11 +358,25 @@ pub(crate) fn estimate_price_with_catalog(
     let cached_usd =
         tokens.cached_input_tokens as f64 * rate("cachedInputUsdPerMillion") * input_multiplier
             / 1e6;
-    let written_usd = tokens.cache_write_input_tokens as f64
-        * rates
-            .get("cacheWriteInputUsdPerMillion")
-            .and_then(Value::as_f64)
-            .unwrap_or(rate("inputUsdPerMillion"))
+    let write_rate = rates
+        .get("cacheWriteInputUsdPerMillion")
+        .and_then(Value::as_f64)
+        .unwrap_or(rate("inputUsdPerMillion"));
+    let one_hour_rate = rates
+        .get("cacheWriteOneHourInputUsdPerMillion")
+        .and_then(Value::as_f64)
+        .unwrap_or_else(|| {
+            // Legacy custom Claude prices did not have a separate one-hour field.
+            if model.starts_with("claude-") {
+                rate("inputUsdPerMillion") * 2.0
+            } else {
+                write_rate
+            }
+        });
+    let written_usd = ((tokens.cache_write_input_tokens - tokens.cache_write_one_hour_input_tokens)
+        as f64
+        * write_rate
+        + tokens.cache_write_one_hour_input_tokens as f64 * one_hour_rate)
         * input_multiplier
         / 1e6;
     let output_usd =
@@ -361,6 +397,65 @@ pub(crate) fn public_usage(value: &Value) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn claude_audited_image_turn_prices_one_hour_writes_without_losing_input() {
+        let native = json!({"input_tokens":138,"cache_read_input_tokens":14045452,
+            "cache_creation_input_tokens":1076364,"output_tokens":56095,
+            "cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":1076364}});
+        let tokens = Tokens::parse(&native).unwrap();
+        assert_eq!(tokens.input_tokens, 15121954);
+        assert_eq!(tokens.total_tokens, 15178049);
+        assert_eq!(tokens.cache_write_one_hour_input_tokens, 1076364);
+        // Normalization, persistence/public DTOs and arithmetic must not add the
+        // one-hour subset to input a second time or drop its more expensive rate.
+        assert_eq!(Tokens::parse(&json!(tokens)), Some(tokens.clone()));
+        assert_eq!(tokens.add(&tokens).subtract(&tokens), tokens);
+        let usage = json!({"total":tokens,"last":tokens});
+        assert_eq!(
+            public_usage(&usage).unwrap()["total"]["cacheWriteOneHourInputTokens"],
+            1076364
+        );
+        let price = estimate_price(&usage, Some("claude-opus-5-5"), None).unwrap();
+        assert!((price["inputUsd"].as_f64().unwrap() - 0.000552).abs() < 1e-10);
+        assert!((price["cacheWriteInputUsd"].as_f64().unwrap() - 8.610912).abs() < 1e-10);
+        assert!((price["totalUsd"].as_f64().unwrap() - 12.5424544).abs() < 1e-10);
+    }
+
+    #[test]
+    fn mixed_cache_durations_support_custom_rates_fast_mode_and_legacy_usage() {
+        let raw = json!({"input_tokens":100,"cache_read_input_tokens":200,"output_tokens":10,
+            "cache_creation_input_tokens":100,"cache_creation":{"ephemeral_5m_input_tokens":40,"ephemeral_1h_input_tokens":60}});
+        let tokens = Tokens::parse(&raw).unwrap();
+        let usage = json!({"total":tokens,"last":tokens});
+        let standard = estimate_price(&usage, Some("opus 5.5"), None).unwrap();
+        assert!((standard["cacheWriteInputUsd"].as_f64().unwrap() - 0.00068).abs() < 1e-12);
+        let fast = estimate_price(&usage, Some("opus 5.5"), Some("fast")).unwrap();
+        assert!(
+            (fast["totalUsd"].as_f64().unwrap() - 2.0 * standard["totalUsd"].as_f64().unwrap())
+                .abs()
+                < 1e-12
+        );
+        let mut catalog = pricing().clone();
+        catalog["models"]["claude-opus-5-5"]["cacheWriteOneHourInputUsdPerMillion"] = json!(12.0);
+        let custom =
+            estimate_price_with_catalog(&usage, Some("opus 5.5"), None, &catalog, None).unwrap();
+        assert!((custom["cacheWriteInputUsd"].as_f64().unwrap() - 0.00092).abs() < 1e-12);
+        catalog["models"]["claude-opus-5-5"]
+            .as_object_mut()
+            .unwrap()
+            .remove("cacheWriteOneHourInputUsdPerMillion");
+        let fallback =
+            estimate_price_with_catalog(&usage, Some("opus 5.5"), None, &catalog, None).unwrap();
+        assert_eq!(
+            fallback["cacheWriteInputUsd"],
+            standard["cacheWriteInputUsd"]
+        );
+        let legacy=Tokens::parse(&json!({"inputTokens":400,"cachedInputTokens":200,"cacheWriteInputTokens":100,"outputTokens":10})).unwrap();
+        assert_eq!(legacy.cache_write_one_hour_input_tokens, 0);
+        assert!(json!(legacy).get("cacheWriteOneHourInputTokens").is_none());
+        assert_eq!(Tokens::parse(&json!({"inputTokens":400,"outputTokens":10,"cacheWriteInputTokens":100,"cacheWriteOneHourInputTokens":999})).unwrap().cache_write_one_hour_input_tokens,100);
+    }
 
     #[test]
     fn gpt_61_sol_prices_caches_output_and_long_context() {

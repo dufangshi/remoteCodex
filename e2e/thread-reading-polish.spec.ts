@@ -4,6 +4,51 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
 const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
+
+test('cached Claude billing separates total input from the uncached tail on touch screens', async ({ page, request }, testInfo) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('remote-codex.locale','zh-CN');
+    localStorage.setItem('remote-codex-theme-mode','dark');
+    localStorage.setItem(`pockymoe.onboarding.v1:${JSON.stringify([location.origin,'local:owner'])}`,JSON.stringify({welcomeDismissed:true,completed:[]}));
+  });
+  const id = await createThread(request);
+  const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
+  const completedAt = new Date().toISOString();
+  const total = { inputTokens:15121954,cachedInputTokens:14045452,cacheWriteInputTokens:1076364,cacheWriteOneHourInputTokens:1076364,outputTokens:56095,reasoningOutputTokens:24378,totalTokens:15178049 };
+  await page.routeWebSocket(/\/ws(?:\?.*)?$/, socket => {
+    socket.send(JSON.stringify({type:'supervisor.connected'}));
+    socket.onMessage(() => socket.send(JSON.stringify({type:'supervisor.pong'})));
+  });
+  await page.route(`**/api/threads/${id}?**`, route => route.fulfill({json:{
+    ...detail,totalTurnCount:1,activeSubagents:[],thread:{...detail.thread,status:'idle',activeTurnId:null},
+    turns:[{id:'cached-claude',status:'completed',startedAt:new Date(Date.now()-1200000).toISOString(),completedAt,model:'claude-opus-5-5',reasoningEffort:'high',
+      tokenUsage:{total,last:total},priceEstimate:{inputUsd:0.000552,cachedInputUsd:2.8090904,cacheWriteInputUsd:8.610912,outputUsd:1.1219,totalUsd:12.5424544,currency:'USD',pricingModelKey:'claude-opus-5-5',pricingTierKey:'standard'},
+      items:[{id:'prompt',kind:'userMessage',text:'核对含图片的调用计费'},{id:'reply',kind:'agentMessage',text:'输入合计包含未缓存输入、缓存读取和缓存写入。'}]}],
+  }}));
+  await page.goto(`/threads/${id}`);
+  const price = page.locator('.thread-graph-worked-summary .thread-turn-usage-price');
+  await expect(price).toHaveText('$12.5');
+  await price.tap();
+  const popup = page.locator('[data-slot="tooltip-content"]');
+  await expect(popup).toBeVisible();
+  for (const name of ['输入合计','未缓存输入','缓存读取','缓存写入','输出','推理']) await expect(popup.getByText(name,{exact:name!=='缓存写入'}).first()).toBeVisible();
+  await expect(popup.getByLabel('输入合计：15,121,954 个 token',{exact:true}).first()).toBeVisible();
+  await expect(popup.getByLabel('未缓存输入：138 个 token',{exact:true}).first()).toBeVisible();
+  await expect(popup.getByLabel('缓存写入：1,076,364 个 token',{exact:true}).first()).toBeVisible();
+  await expect(popup.getByLabel('缓存读取：14,045,452 个 token',{exact:true}).first()).toBeVisible();
+  const box = (await popup.boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x+box.width).toBeLessThanOrEqual(page.viewportSize()!.width+1);
+  expect(await popup.evaluate(el => el.scrollWidth-el.clientWidth)).toBeLessThanOrEqual(1);
+  await page.screenshot({path:testInfo.outputPath('claude-input-breakdown.png'),scale:'css'});
+  await price.tap();
+  await expect(popup).not.toBeVisible();
+  await price.tap();
+  await expect(popup).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(popup).not.toBeVisible();
+});
+
 async function createThread(request: APIRequestContext) {
   const absPath = path.resolve(process.env.E2E_WORKSPACE_ROOT!, randomUUID());
   await mkdir(absPath, { recursive: true });
@@ -316,7 +361,7 @@ test('completed work agrees with the composer and the price tooltip has a matchi
   await summary.locator('.thread-turn-usage-price').hover();
   const tooltip = page.locator('[data-slot="tooltip-content"]');
   await expect(tooltip).toBeVisible();
-  await expect(tooltip.locator(':scope > div [aria-label="Input: 3,158 tokens"]')).toBeVisible();
+  await expect(tooltip.locator(':scope > div [aria-label="Uncached input: 3,158 tokens"]')).toBeVisible();
   const arrow = tooltip.locator('[data-slot="tooltip-arrow"]');
   expect(await arrow.evaluate(element => {
     const css = getComputedStyle(element);

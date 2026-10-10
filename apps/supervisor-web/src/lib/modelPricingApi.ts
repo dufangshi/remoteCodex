@@ -4,6 +4,7 @@ export interface ModelPriceRates {
   cachedInputUsdPerMillion: number;
   outputUsdPerMillion: number;
   cacheWriteInputUsdPerMillion?: number;
+  cacheWriteOneHourInputUsdPerMillion?: number;
   aliases?: string[];
   sourceUrl?: string;
   verifiedAt?: string;

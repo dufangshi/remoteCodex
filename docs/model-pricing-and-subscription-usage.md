@@ -19,7 +19,7 @@ dates per added model. Sources checked on 2026-09-05:
 
 - [Claude pricing](https://platform.claude.com/docs/en/about-claude/pricing):
   Opus 5, Fable 5/5.1, Sonnet 5 and Haiku 4.5. Cache-write estimates use the default
-  five-minute rate; reports without cache TTL do not distinguish one-hour writes.
+  five-minute rate for writes without a reported TTL. Native Claude reports preserve the one-hour write subset and price it at the separate one-hour rate; mixed-duration writes are charged once at their respective rates. Existing records without TTL information retain the five-minute fallback.
 - [xAI pricing](https://docs.x.ai/developers/pricing): Grok 4.5/4.6, including the
   long-context multiplier.
 - [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing): text rates for

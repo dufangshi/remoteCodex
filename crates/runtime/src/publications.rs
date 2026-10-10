@@ -192,7 +192,7 @@ fn project_turn(turn: &ThreadTurnDto) -> Value {
     };
     let messages: Vec<_> = turn.items.iter().filter(|i| i.kind == "userMessage" || final_message.is_some_and(|last| std::ptr::eq(*i, last))).map(|i| json!({"role":if i.kind == "userMessage" {"user"} else {"assistant"},"text":i.text,"createdAt":i.created_at})).collect();
     let usage = turn.token_usage.as_ref().map(|value| {
-        let fields = ["totalTokens", "inputTokens", "cachedInputTokens", "cacheWriteInputTokens", "outputTokens", "reasoningOutputTokens"];
+        let fields = ["totalTokens", "inputTokens", "cachedInputTokens", "cacheWriteInputTokens", "cacheWriteOneHourInputTokens", "outputTokens", "reasoningOutputTokens"];
         json!({"total":public_numbers(&value["total"], &fields),"last":public_numbers(&value["last"], &fields),"modelContextWindow":value["modelContextWindow"].as_u64()})
     });
     let price = turn.price_estimate.as_ref().map(|value| {

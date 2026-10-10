@@ -1015,6 +1015,8 @@ export interface ThreadTurnTokenBreakdownDto {
   inputTokens: number;
   cachedInputTokens: number;
   cacheWriteInputTokens?: number;
+  /** One-hour subset of cacheWriteInputTokens. */
+  cacheWriteOneHourInputTokens?: number;
   outputTokens: number;
   reasoningOutputTokens: number;
 }
