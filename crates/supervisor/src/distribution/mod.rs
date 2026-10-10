@@ -87,7 +87,15 @@ fn login_shell_path() -> Option<String> {
         .ok()
         .filter(|s| !s.is_empty())
         .or_else(passwd_shell)
-        .unwrap_or_else(|| "/bin/sh".into());
+        // macOS keeps users in Directory Services, not /etc/passwd.
+        .unwrap_or_else(|| {
+            if cfg!(target_os = "macos") {
+                "/bin/zsh"
+            } else {
+                "/bin/sh"
+            }
+            .into()
+        });
     let mut child = std::process::Command::new(shell)
         .args(["-ilc", &format!("printf '{MARK}%s{MARK}' \"$PATH\"")])
         .stdin(std::process::Stdio::null())
