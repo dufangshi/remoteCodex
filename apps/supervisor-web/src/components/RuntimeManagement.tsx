@@ -33,10 +33,49 @@ type Harness = {
   id: string;
   name: string;
   transport?: string;
+  /** Command names; absent on devices before 0.12.81. */
+  baseCommand?: string;
+  adapterCommand?: string | null;
   base: Installation | null;
   adapter: Installation | null;
   job?: Job;
 };
+type HarnessStatus = 'ready' | 'adapter' | 'missing';
+function harnessStatus(h: Harness): HarnessStatus {
+  if (!h.base || h.base.installed === false) return 'missing';
+  if (h.transport === 'adapter' && (!h.adapter || h.adapter.installed === false))
+    return 'adapter';
+  return 'ready';
+}
+const statusDot: Record<HarnessStatus, string> = {
+  ready: 'bg-[var(--status-success-fg)]',
+  adapter: 'bg-[var(--status-warning-fg)]',
+  missing: 'bg-[var(--theme-fg-muted)] opacity-50',
+};
+const statusText = (status: HarnessStatus) =>
+  status === 'ready'
+    ? translate("devices.harnessReady")
+    : status === 'adapter'
+      ? translate("devices.harnessNeedsAdapter")
+      : translate("devices.notInstalled");
+function managerLabel(manager?: string) {
+  switch (manager) {
+    case 'pockymoe':
+      return translate("devices.managedByPockymoe");
+    case 'npm':
+      return translate("devices.npmGlobalPackage");
+    case 'homebrew':
+      return 'Homebrew';
+    case 'native':
+      return translate("devices.selfUpdating");
+    case 'app':
+      return translate("devices.desktopApp");
+    case 'manual':
+      return translate("devices.installedManually");
+    default:
+      return manager;
+  }
+}
 type Supervisor = {
   runningVersion?: string;
   installedVersion?: string;
@@ -293,111 +332,150 @@ function DeviceRuntimeManagement({
       setBusy(false);
     }
   }
-  function installation(row: Harness, data: Installation, component: string) {
+  function installation(row: Harness, data: Installation, component: 'base' | 'adapter') {
+    const missing = data.installed === false;
+    const blocked = component === 'adapter' && harnessStatus(row) === 'missing';
+    const command = component === 'base' ? row.baseCommand : row.adapterCommand;
+    const source = managerLabel(data.manager);
+    const hint = blocked
+      ? translate("devices.installTheCommandLineToolFirst")
+      : missing && component === 'base'
+        ? [
+            translate("devices.commandNotFoundOnPath", { value1: row.baseCommand ?? row.name }),
+            data.reason,
+          ]
+            .filter(Boolean)
+            .join(' ')
+        : data.legacyInstall
+          ? data.reason
+          : !missing && !data.canUpdate
+            ? data.manager === 'app'
+              ? translate("devices.updateTheDesktopApp")
+              : data.manager === 'manual'
+                ? translate("devices.updateWithItsOwnInstaller")
+                : data.reason
+            : undefined;
     return (
-      <div className="mt-2 min-w-0 text-xs text-[var(--theme-fg-muted)]">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span>
-            {component === 'adapter' ? translate("devices.aCPAdapter") : ''}
-            {data.installed === false
-              ? translate("devices.notInstalled")
-              : `${data.version ?? translate("devices.versionUnavailable")} · ${data.manager ?? 'managed'}`}
-          </span>
-          {(data.canUpdate || data.canInstall) && (
-            <button
-              className={button}
-              disabled={busy || active(jobs[row.id])}
-              aria-label={`${data.installed === false ? translate("devices.install") : translate("devices.update")} ${row.name}${component === 'adapter' ? ' adapter' : ''}`}
-              onClick={() =>
-                setConfirm({
-                  id: row.id,
-                  name: row.name,
-                  component,
-                  installing: data.installed === false,
-                  legacyInstall: data.legacyInstall ?? false,
-                  command: data.updateCommand,
-                })
-              }
-            >
-              <Download size={13} />
-              {data.installed === false ? translate("devices.install") : translate("devices.update")}
-            </button>
-          )}
-        </div>
-        <details className="mt-2">
-          <summary className="cursor-pointer text-[11px]">
-            {translate("devices.installationDetails")}</summary>
-          <p
-            className="mt-1 break-all font-mono text-[11px]"
-            title={data.resolvedPath}
-          >
-            {data.path}
+      <li className="flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-2 py-3">
+        <div className="min-w-0 flex-1 text-xs text-[var(--theme-fg-muted)]">
+          <p className="font-medium text-[var(--theme-fg)]">
+            {component === 'base'
+              ? translate("devices.commandLineTool")
+              : translate("devices.aCPAdapter_7d3feb")}
+            {command && (
+              <code className="ml-1.5 font-mono text-[11px] font-normal text-[var(--theme-fg-muted)]">
+                {command}
+              </code>
+            )}
           </p>
-        </details>
-        {data.reason && <p className="mt-1 leading-5">{data.reason}</p>}
-      </div>
+          <p className="mt-0.5">
+            {missing
+              ? translate("devices.notInstalled")
+              : [data.version ?? translate("devices.versionUnavailable"), source]
+                  .filter(Boolean)
+                  .join(' · ')}
+          </p>
+          {!missing && data.path && (
+            <p
+              className="mt-0.5 break-all font-mono text-[11px]"
+              title={data.resolvedPath}
+            >
+              {data.path}
+            </p>
+          )}
+          {hint && <p className="mt-1 leading-5">{hint}</p>}
+        </div>
+        {(data.canUpdate || data.canInstall) && (
+          <button
+            className={button}
+            disabled={busy || active(jobs[row.id]) || blocked}
+            aria-label={`${missing ? translate("devices.install") : translate("devices.update")} ${row.name}${component === 'adapter' ? ' adapter' : ''}`}
+            onClick={() =>
+              setConfirm({
+                id: row.id,
+                name: row.name,
+                component,
+                installing: missing,
+                legacyInstall: data.legacyInstall ?? false,
+                command: data.updateCommand,
+              })
+            }
+          >
+            <Download size={13} />
+            {missing ? translate("devices.install") : translate("devices.update")}
+          </button>
+        )}
+      </li>
     );
   }
   function row(h: Harness) {
     const job = jobs[h.id];
+    const status = harnessStatus(h);
     return (
       <div
         key={h.id}
         className="min-w-0 border-t border-[var(--theme-border)] py-3"
       >
         <div className="flex items-center justify-between gap-2">
-          <h4 className="text-sm font-medium">{h.name}</h4>
-          <button
-            className={button}
-            disabled={
-              busy || !h.base || h.base.installed === false || active(job)
-            }
-            title={translate("devices.reloadThisHarnessSConfigurationOtherHarnesses")}
-            aria-label={translate("devices.restart", { value1: h.name })}
-            onClick={() => void act(h.id, 'restart')}
-          >
-            <RotateCw size={13} />
-            {translate("devices.restart_b134bd")}</button>
+          <div className="min-w-0">
+            <h4 className="text-sm font-medium">{h.name}</h4>
+            <p className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--theme-fg-muted)]">
+              <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${statusDot[status]}`} />
+              {statusText(status)}
+            </p>
+          </div>
+          {status !== 'missing' && (
+            <button
+              className={button}
+              disabled={busy || active(job)}
+              title={translate("devices.reloadThisHarnessSConfigurationOtherHarnesses")}
+              aria-label={translate("devices.restart", { value1: h.name })}
+              onClick={() => void act(h.id, 'restart')}
+            >
+              <RotateCw size={13} />
+              {translate("devices.restart_b134bd")}</button>
+          )}
         </div>
-        {h.base ? (
-          installation(h, h.base, 'base')
-        ) : (
-          <p className="mt-1 text-xs text-[var(--theme-fg-muted)]">
-            {translate("devices.notInstalled")}</p>
-        )}
-        {(h.adapter || h.transport === 'adapter') && (
-          <details className="settings-detail">
-            <summary className="cursor-pointer text-xs text-[var(--theme-fg-muted)]">
-              {translate("devices.aCPAdapter_7d3feb")}{!h.adapter || h.adapter.installed === false
-                ? translate("devices.installationRequired")
-                : translate("devices.installed")}
-            </summary>
-            <div>
-              {installation(
-                h,
-                h.adapter ?? {
-                  installed: false,
-                  canInstall: true,
-                  legacyInstall: true,
-                  path: '',
-                  resolvedPath: '',
-                  manager: '',
-                  canUpdate: false,
-                  reason:
-                    translate("devices.adapterNotDetectedThisOlderSupervisorUses"),
-                },
-                'adapter',
-              )}
-            </div>
-          </details>
-        )}
+        <ul
+          aria-label={translate("devices.harnessComponents", { value1: h.name })}
+          className="mt-3 divide-y divide-[var(--theme-border)] rounded-lg border border-[var(--theme-border)] px-3"
+        >
+          {installation(
+            h,
+            h.base ?? {
+              installed: false,
+              path: '',
+              resolvedPath: '',
+              manager: '',
+              canUpdate: false,
+            },
+            'base',
+          )}
+          {(h.adapter || h.transport === 'adapter') &&
+            installation(
+              h,
+              h.adapter ?? {
+                installed: false,
+                canInstall: true,
+                legacyInstall: true,
+                path: '',
+                resolvedPath: '',
+                manager: '',
+                canUpdate: false,
+                reason:
+                  translate("devices.adapterNotDetectedThisOlderSupervisorUses"),
+              },
+              'adapter',
+            )}
+        </ul>
         {job && (
           <p
             role={job.error ? 'alert' : 'status'}
             className={`mt-2 text-xs ${job.error ? 'text-[var(--status-danger-fg)]' : 'text-[var(--theme-fg-muted)]'}`}
           >
-            {job.error ??
-              (active(job)
+            {job.error
+              ? translate("devices.lastOperationFailed", { value1: job.error })
+              : (active(job)
                 ? `${job.action === 'install' ? translate("devices.installing") : job.action === 'update' ? translate("devices.updating") : translate("devices.restarting")}…`
                 : job.connectionVerified
                   ? translate("devices.aCPConnectionVerified")
@@ -542,17 +620,24 @@ function DeviceRuntimeManagement({
                   ...harnesses,
                 ].map((h) => [h.id, h]),
               ).values(),
-            ].map((h) => (
-              <button
-                key={h.id}
-                type="button"
-                aria-pressed={selectedHarness === h.id}
-                className={`min-h-10 rounded-xl border px-3 text-xs transition ${selectedHarness === h.id ? 'border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] text-[var(--theme-accent-strong)]' : 'border-[var(--theme-border)] hover:bg-[var(--theme-hover)]'}`}
-                onClick={() => setSelectedHarness(h.id)}
-              >
-                {h.name}
-              </button>
-            ))}
+            ].map((h) => {
+              const status = 'base' in h ? harnessStatus(h) : null;
+              return (
+                <button
+                  key={h.id}
+                  type="button"
+                  aria-pressed={selectedHarness === h.id}
+                  title={status ? statusText(status) : undefined}
+                  className={`inline-flex min-h-10 items-center gap-1.5 rounded-xl border px-3 text-xs transition ${selectedHarness === h.id ? 'border-[var(--theme-accent-border)] bg-[var(--theme-accent-soft)] text-[var(--theme-accent-strong)]' : 'border-[var(--theme-border)] hover:bg-[var(--theme-hover)]'}`}
+                  onClick={() => setSelectedHarness(h.id)}
+                >
+                  {status && (
+                    <span aria-hidden className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDot[status]}`} />
+                  )}
+                  {h.name}
+                </button>
+              );
+            })}
           </div>
           {harnesses.filter((h) => h.id === selectedHarness).map(row)}
         </>

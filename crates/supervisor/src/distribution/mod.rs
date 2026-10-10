@@ -65,6 +65,91 @@ fn write_device_config(path: &Path, saved: &serde_json::Value) -> Result<()> {
 }
 const LEGACY_PREFIX: &str = "REMOTE_CODEX_";
 const CURRENT_PREFIX: &str = "POCKYMOE_";
+/// Agent CLIs live in directories that shell startup files add (nvm,
+/// ~/.local/bin, ~/.grok/bin, ...). Service managers start the Supervisor with
+/// a minimal PATH, so merge in the PATH of the user's login shell; without it
+/// harness detection and launches miss installed agents.
+pub fn user_path() -> String {
+    let current = std::env::var("PATH").unwrap_or_default();
+    #[cfg(unix)]
+    {
+        merge_paths(login_shell_path().as_deref(), &current, &home())
+    }
+    #[cfg(not(unix))]
+    {
+        current
+    }
+}
+#[cfg(unix)]
+fn login_shell_path() -> Option<String> {
+    const MARK: &str = "__POCKYMOE_PATH__";
+    let shell = std::env::var("SHELL")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(passwd_shell)
+        // macOS keeps users in Directory Services, not /etc/passwd.
+        .unwrap_or_else(|| {
+            if cfg!(target_os = "macos") {
+                "/bin/zsh"
+            } else {
+                "/bin/sh"
+            }
+            .into()
+        });
+    let mut child = std::process::Command::new(shell)
+        .args(["-ilc", &format!("printf '{MARK}%s{MARK}' \"$PATH\"")])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let started = std::time::Instant::now();
+    while child.try_wait().ok()?.is_none() {
+        if started.elapsed() > std::time::Duration::from_secs(10) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let mut out = String::new();
+    std::io::Read::read_to_string(&mut child.stdout.take()?, &mut out).ok()?;
+    let start = out.find(MARK)? + MARK.len();
+    let end = start + out[start..].find(MARK)?;
+    Some(out[start..end].to_string())
+}
+#[cfg(unix)]
+fn passwd_shell() -> Option<String> {
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("LOGNAME"))
+        .ok()?;
+    std::fs::read_to_string("/etc/passwd")
+        .ok()?
+        .lines()
+        .find(|line| line.split(':').next() == Some(user.as_str()))
+        .and_then(|line| line.split(':').nth(6))
+        .map(str::to_string)
+        .filter(|shell| !shell.is_empty())
+}
+/// Shell entries first, in the user's order, then the rest of the current
+/// PATH; common user bin directories are added when the shell gave nothing.
+fn merge_paths(shell: Option<&str>, current: &str, home: &Path) -> String {
+    let fallback = [".local/bin", "bin", ".cargo/bin", ".bun/bin"]
+        .map(|dir| home.join(dir))
+        .into_iter()
+        .filter(|dir| dir.is_dir())
+        .map(|dir| dir.to_string_lossy().into_owned());
+    let mut seen = std::collections::BTreeSet::new();
+    shell
+        .unwrap_or_default()
+        .split(':')
+        .map(str::to_string)
+        .chain(current.split(':').map(str::to_string))
+        .chain(fallback.filter(|_| shell.is_none()))
+        .filter(|entry| !entry.is_empty() && seen.insert(entry.clone()))
+        .collect::<Vec<_>>()
+        .join(":")
+}
 fn private_dir(path: &Path) -> Result<()> {
     std::fs::create_dir_all(path)?;
     #[cfg(unix)]
@@ -134,6 +219,26 @@ mod device_config_tests {
         assert_eq!(
             written,
             serde_json::json!({"REMOTE_CODEX_RELAY_AGENT_TOKEN":"old","REMOTE_CODEX_RELAY_SERVER_URL":"wss://new","other":1})
+        );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod path_tests {
+    use super::*;
+
+    #[test]
+    fn shell_path_comes_first_and_duplicates_are_dropped() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".local/bin")).unwrap();
+        assert_eq!(
+            merge_paths(Some("/nvm/bin:/usr/bin:"), "/usr/bin:/bin", home.path()),
+            "/nvm/bin:/usr/bin:/bin"
+        );
+        let local = home.path().join(".local/bin");
+        assert_eq!(
+            merge_paths(None, "/usr/bin", home.path()),
+            format!("/usr/bin:{}", local.display())
         );
     }
 }

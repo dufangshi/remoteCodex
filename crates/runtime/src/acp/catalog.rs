@@ -177,7 +177,14 @@ pub fn extra_bin_dirs() -> Vec<PathBuf> {
         home.join(".local/share/fnm/aliases/default/bin"),
         home.join(".fnm/aliases/default/bin"),
         home.join(".npm-global/bin"),
+        home.join(".volta/bin"),
+        home.join(".bun/bin"),
     ]);
+    dirs.extend(nvm_default_bin(
+        &std::env::var_os("NVM_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(".nvm")),
+    ));
     if let Ok(app_data) = std::env::var("APPDATA") {
         dirs.push(PathBuf::from(app_data).join("npm"));
     }
@@ -186,6 +193,29 @@ pub fn extra_bin_dirs() -> Vec<PathBuf> {
         PathBuf::from("/usr/local/bin"),
     ]);
     dirs
+}
+
+/// nvm only adds its default Node to PATH from shell startup files. Resolve
+/// `alias/default` (`24`, `v24.20.0`, `node`) to the newest installed match.
+fn nvm_default_bin(nvm: &std::path::Path) -> Option<PathBuf> {
+    let alias = std::fs::read_to_string(nvm.join("alias/default")).ok()?;
+    let wanted = alias.trim().trim_start_matches('v');
+    let any = matches!(wanted, "node" | "stable");
+    let versions = nvm.join("versions/node");
+    std::fs::read_dir(&versions)
+        .ok()?
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .filter(|name| {
+            let version = name.trim_start_matches('v');
+            any || version == wanted || version.starts_with(&format!("{wanted}."))
+        })
+        .max_by_key(|name| {
+            name.trim_start_matches('v')
+                .split('.')
+                .map(|part| part.parse::<u64>().unwrap_or(0))
+                .collect::<Vec<_>>()
+        })
+        .map(|name| versions.join(name).join("bin"))
 }
 
 pub fn augment_path() {
@@ -304,4 +334,29 @@ pub fn parse_command_models(output: &str) -> Vec<(String, bool)> {
         }
     }
     models
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nvm_default_alias_resolves_to_the_newest_matching_version() {
+        let nvm = tempfile::tempdir().unwrap();
+        for version in ["v22.9.0", "v24.2.0", "v24.20.0"] {
+            std::fs::create_dir_all(nvm.path().join("versions/node").join(version)).unwrap();
+        }
+        std::fs::create_dir_all(nvm.path().join("alias")).unwrap();
+        let bin = |version: &str| Some(nvm.path().join("versions/node").join(version).join("bin"));
+        for (alias, expected) in [
+            ("24\n", "v24.20.0"),
+            ("v22.9.0", "v22.9.0"),
+            ("node", "v24.20.0"),
+        ] {
+            std::fs::write(nvm.path().join("alias/default"), alias).unwrap();
+            assert_eq!(nvm_default_bin(nvm.path()), bin(expected), "{alias}");
+        }
+        std::fs::write(nvm.path().join("alias/default"), "lts/*").unwrap();
+        assert_eq!(nvm_default_bin(nvm.path()), None);
+    }
 }

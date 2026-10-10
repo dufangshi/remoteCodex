@@ -336,6 +336,7 @@ pub async fn run_device(config: PathBuf) -> Result<()> {
     }
     std::env::remove_var("TMUX");
     std::env::remove_var("TMUX_PANE");
+    std::env::set_var("PATH", user_path());
     if let Ok(installed) = releases::current() {
         if let Ok(manager) = std::env::var("POCKYMOE_MANAGED_SERVICE") {
             if std::env::current_exe().ok().as_deref() == Some(installed.executable.as_path()) {

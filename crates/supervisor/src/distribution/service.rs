@@ -27,6 +27,17 @@ fn xml(value: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
 }
+/// Environment= values expand specifiers (%) but not variables ($).
+fn environment_value(value: &str) -> String {
+    format!(
+        "\"{}\"",
+        value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('%', "%%")
+            .replace('\n', "\\n")
+    )
+}
 fn unit(value: &str) -> String {
     format!(
         "\"{}\"",
@@ -46,13 +57,16 @@ pub fn definition(manager: &str, installed: &Installed, config: &Path) -> String
         "--config".into(),
         config.to_string_lossy().into_owned(),
     ];
+    // The PATH the Supervisor runs with, already merged with the user's shell
+    // PATH, so agent CLIs stay discoverable under the service manager.
+    let path = std::env::var("PATH").unwrap_or_default();
     if manager == "launchd" {
-        format!("<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>Label</key><string>com.remote-codex.supervisor</string><key>ProgramArguments</key><array>{}</array><key>EnvironmentVariables</key><dict><key>POCKYMOE_MANAGED_SERVICE</key><string>launchd</string></dict><key>WorkingDirectory</key><string>{}</string><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>StandardOutPath</key><string>{}</string><key>StandardErrorPath</key><string>{}</string></dict></plist>", args.iter().map(|a| format!("<string>{}</string>", xml(a))).collect::<String>(), xml(&home().to_string_lossy()), xml(&log_path().to_string_lossy()), xml(&log_path().to_string_lossy()))
+        format!("<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>Label</key><string>com.remote-codex.supervisor</string><key>ProgramArguments</key><array>{}</array><key>EnvironmentVariables</key><dict><key>PATH</key><string>{}</string><key>POCKYMOE_MANAGED_SERVICE</key><string>launchd</string></dict><key>WorkingDirectory</key><string>{}</string><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>StandardOutPath</key><string>{}</string><key>StandardErrorPath</key><string>{}</string></dict></plist>", args.iter().map(|a| format!("<string>{}</string>", xml(a))).collect::<String>(), xml(&path), xml(&home().to_string_lossy()), xml(&log_path().to_string_lossy()), xml(&log_path().to_string_lossy()))
     } else {
         // Interactive shells from Web terminals ignore SIGTERM; without a short
         // stop timeout systemd waits 90s before killing them, and the device
         // stays offline for the whole update restart.
-        format!("[Unit]\nDescription=Pockymoe Supervisor\nAfter=network-online.target\n[Service]\nType=simple\nExecStart={}\nWorkingDirectory=%h\nEnvironment=POCKYMOE_MANAGED_SERVICE=systemd-user\nRestart=always\nRestartSec=5\nTimeoutStopSec=15\n[Install]\nWantedBy=default.target\n", args.iter().map(|a| unit(a)).collect::<Vec<_>>().join(" "))
+        format!("[Unit]\nDescription=Pockymoe Supervisor\nAfter=network-online.target\n[Service]\nType=simple\nExecStart={}\nWorkingDirectory=%h\nEnvironment={}\nEnvironment=POCKYMOE_MANAGED_SERVICE=systemd-user\nRestart=always\nRestartSec=5\nTimeoutStopSec=15\n[Install]\nWantedBy=default.target\n", args.iter().map(|a| unit(a)).collect::<Vec<_>>().join(" "), environment_value(&format!("PATH={path}")))
     }
 }
 pub fn log_path() -> PathBuf {
@@ -454,7 +468,9 @@ mod tests {
         assert!(!linux.contains("--token"));
         assert!(linux.contains("device-run"));
         assert!(linux.contains("TimeoutStopSec=15\n"));
+        assert!(linux.contains("\nEnvironment=\"PATH="));
         let mac = definition("launchd", &installed, Path::new("/cfg"));
         assert!(mac.contains("a&quot;b"));
+        assert!(mac.contains("<key>PATH</key>"));
     }
 }

@@ -44,7 +44,7 @@ it('distinguishes a prolonged restart disconnect and recovers without another cl
     offline = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(35_000); });
     expect(screen.getByText(/Waiting for the device to reconnect/)).toBeVisible();
-    expect(screen.getByText(/restart has not been verified/)).toBeVisible();
+    expect(screen.getByText(/has not returned yet/)).toBeVisible();
     completed = true; offline = false;
     await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
     expect(screen.getByText(/Update completed/)).toBeVisible();
@@ -113,7 +113,8 @@ it('shows a missing adapter and its install action after a successful base updat
     job:{state:'completed',action:'update'},
   }] : {}));
   mount('/devices/a/threads/thread-a');
-  fireEvent.click(await screen.findByText('ACP adapter · Installation required'));
+  expect(await screen.findByText('ACP adapter required')).toBeVisible();
+  expect(screen.getByText('0.154.0 · npm global package')).toBeVisible();
   expect(screen.getByText(/Not installed/)).toBeVisible();
   expect(screen.queryByText(/^Ready/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button',{name:'Install OpenAI Codex adapter'}));
@@ -122,12 +123,32 @@ it('shows a missing adapter and its install action after a successful base updat
 });
 
 it('keeps the repair entry visible for an older device returning adapter null', async () => {
-  api.request.mockImplementation((path: string) => Promise.resolve(path.endsWith('/harnesses') ? [{id:'codex',name:'OpenAI Codex',transport:'adapter',base:null,adapter:null}] : {}));
+  api.request.mockImplementation((path: string) => Promise.resolve(path.endsWith('/harnesses') ? [{id:'codex',name:'OpenAI Codex',transport:'adapter',base:{path:'/usr/bin/codex',resolvedPath:'/usr/bin/codex',version:'0.150.0',manager:'npm',canUpdate:true},adapter:null}] : {}));
   mount('/devices/a/threads/thread-a');
-  fireEvent.click(await screen.findByText('ACP adapter · Installation required'));
+  expect(await screen.findByText(/Adapter not detected/)).toBeVisible();
   const install=await screen.findByRole('button',{name:'Install OpenAI Codex adapter'});
   expect(install).toBeVisible();
   fireEvent.click(install);
   fireEvent.click(screen.getByRole('button',{name:/^Install$/}));
   await waitFor(()=>expect(api.request).toHaveBeenCalledWith('/relay/devices/a/api/agent-runtimes/acp/install?agentId=codex',expect.objectContaining({method:'POST'})));
+});
+
+it('explains a command missing from PATH and blocks the adapter until it is installed', async () => {
+  api.request.mockImplementation((path: string) => Promise.resolve(path.endsWith('/harnesses') ? [{
+    id:'codex', name:'OpenAI Codex', transport:'adapter', baseCommand:'codex', adapterCommand:'codex-acp',
+    base:{installed:false,canInstall:true,canUpdate:false,path:'',resolvedPath:'',manager:'pockymoe',reason:''},
+    adapter:{installed:true,canInstall:true,canUpdate:true,version:'2.1.1',manager:'pockymoe',path:'/home/u/.local/share/remote-codex/adapters/bin/codex-acp',resolvedPath:'/x'},
+    job:{state:'failed',action:'update',component:'adapter',error:'Install the base agent first: codex'},
+  }] : {}));
+  mount('/devices/a/threads/thread-a');
+  const components = await screen.findByRole('list', {name:'OpenAI Codex components'});
+  expect(components).toHaveTextContent('Command-line toolcodex');
+  expect(components).toHaveTextContent('2.1.1 · Managed by Pockymoe');
+  expect(screen.getByText(/cannot find codex on its PATH/)).toBeVisible();
+  expect(screen.getByText('Install the command-line tool first.')).toBeVisible();
+  expect(screen.getByRole('button',{name:'Update OpenAI Codex adapter'})).toBeDisabled();
+  expect(screen.getByRole('button',{name:'Install OpenAI Codex'})).toBeEnabled();
+  expect(screen.queryByRole('button',{name:'Restart OpenAI Codex'})).not.toBeInTheDocument();
+  expect(screen.getByText('Last operation failed: Install the base agent first: codex')).toHaveAttribute('role','alert');
+  expect(screen.getByRole('button',{name:'OpenAI Codex'})).toHaveAttribute('title','Not installed');
 });

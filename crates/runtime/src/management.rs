@@ -379,7 +379,8 @@ pub async fn inventory(state: &Supervisor) -> Value {
         });
         let job = state.management_jobs.lock().unwrap().get(&def.id).cloned();
         let base=base.map(dto).unwrap_or_else(|_|json!({"installed":false,"canInstall":can_install(&def.id),"canUpdate":false,"path":"","resolvedPath":"","manager":"pockymoe","reason":if can_install(&def.id){""}else{"No managed installer available for this platform."}}));
-        json!({"id":def.id,"name":def.display_name,"transport":def.transport,"base":base,"adapter":adapter,"job":job})
+        let adapter_command = (def.transport == "adapter").then_some(&def.server_command);
+        json!({"id":def.id,"name":def.display_name,"transport":def.transport,"baseCommand":def.base_command,"adapterCommand":adapter_command,"base":base,"adapter":adapter,"job":job})
     })).await;
     json!(rows)
 }
