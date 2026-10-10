@@ -142,7 +142,8 @@ async fn supervisor_action(state: Arc<Supervisor>, restart: bool) -> Response {
     if (restart && value["canRestart"] != true)
         || (!restart
             && (value["canUpdate"] != true
-                || (value["latestVersion"] == value["runningVersion"]
+                || (value["nativeMigration"] != true
+                    && value["latestVersion"] == value["runningVersion"]
                     && value["latestVersion"] == value["installedVersion"])))
     {
         return Json(value).into_response();
