@@ -183,6 +183,16 @@ test('phone terminal keeps the prompt and newest reply visible, resizes by touch
   await assertUsable();
   await expect(page.getByRole('toolbar', { name: 'Terminal controls' })).toBeVisible();
 
+  // A phone opens one terminal, with direct xterm input and no extra input form.
+  await expect(panel.locator('[data-testid="terminal-pane"]:visible')).toHaveCount(1);
+  await panel.locator('.shell-pane-host:visible').tap({ position: { x: 50, y: 35 } });
+  await expect(panel.locator('.xterm-helper-textarea:visible')).toBeFocused();
+  await page.keyboard.type('echo phone-direct-input');
+  await page.keyboard.press('Enter');
+  await expect(visibleRows(page)).toContainText('phone-direct-input');
+  await expect(panel.locator('input, textarea:not(.xterm-helper-textarea)')).toHaveCount(0);
+  await snapshot(page, `mobile-terminal-direct-${theme}.png`);
+
   await panel.getByTestId('terminal-new').tap();
   await panel.getByRole('button', { name: /^Switch terminal/ }).tap();
   const menu = page.getByRole('menu', { name: 'Switch terminal', exact: true });
