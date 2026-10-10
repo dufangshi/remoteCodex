@@ -20,14 +20,23 @@ configuration. Reusing an enrollment code requires the saved enrollment receipt.
 Legacy database URLs only recover to the original SQLite file when its database and
 transport identity both exist; ambiguous or relative paths require repair.
 
-Rerun the same setup command once for an existing npm device. The verified native
+Devices still on npm (0.12.74 or older) only check the npm registry. Version 0.12.77
+is also published as the final `remote-codex` npm package (`npm-final-release.yml`,
+`scripts/prepare-npm-bridge.py`): its retired launcher runs the GitHub executable of
+the same version. After the device installs it through Settings → Update, Settings
+shows Update once more; that schedules the native worker, which installs the GitHub
+release and moves the service to it. Windows Device Manager devices keep their
+bootstrap and are told to run the Windows setup command instead. No later npm
+releases are published.
+
+Alternatively, rerun the same setup command once for an existing npm device. The verified native
 runtime stages itself, installs a small compatibility bridge beside the old writable
 npm launcher, and invokes the existing management Update API. That API journals and
 pauses active turns before the independent native worker restarts the service. The
 old helper is backed up. Read-only/unrecognized legacy helpers fail before shutdown;
 those require explicit service recovery instead of silently stopping the device.
 The old npm package is not removed automatically. On Unix the native CLI is available
-at `~/.local/bin/pockymoe` when that path is free; restart your shell or use its
+at `~/.local/bin/pockymoe` and `~/.local/bin/remote-codex` when those paths are free; restart your shell or use its
 absolute path if an older npm CLI still wins PATH. Managed agents always receive the
 running native executable's directory on PATH.
 

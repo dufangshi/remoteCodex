@@ -1,0 +1,72 @@
+name: Final npm release
+
+# Devices installed from npm only check the npm registry, so they never see
+# GitHub runtime releases. Publish one GitHub runtime as the final
+# `remote-codex` npm package; its Supervisor Update then moves each device to
+# the native GitHub runtime. See scripts/prepare-npm-bridge.py.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published GitHub runtime version, for example 0.12.77
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish remote-codex ${{ inputs.version }} to npm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: npm-release
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Install OIDC-capable npm
+        run: npm install --global npm@11.19.1
+
+      - name: Download the GitHub runtime release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh release download "v${VERSION}" -R "${GITHUB_REPOSITORY}" -D release
+
+      - name: Stage and verify the npm package
+        run: |
+          set -euo pipefail
+          python3 scripts/prepare-npm-bridge.py --release-dir release --out package --version "${VERSION}"
+          mkdir dist
+          (cd package && npm pack --pack-destination ../dist)
+          npm install --global --prefix verify "./dist/remote-codex-${VERSION}.tgz" --no-audit --no-fund
+          # The retired launcher downloads and verifies this release's executable.
+          actual="$(HOME="${RUNNER_TEMP}/home" node verify/lib/node_modules/remote-codex/bin/remote-codex.mjs version)"
+          test "${actual}" = "${VERSION}"
+
+      - name: Publish as npm latest
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if npm view "remote-codex@${VERSION}" version >/dev/null 2>&1; then
+            echo "remote-codex@${VERSION} is already published; verifying only."
+          else
+            npm publish "./dist/remote-codex-${VERSION}.tgz" --tag latest --access public
+          fi
+          for attempt in $(seq 1 30); do
+            [ "$(npm view remote-codex dist-tags.latest)" = "${VERSION}" ] && exit 0
+            sleep 10
+          done
+          echo "::error::npm latest did not become ${VERSION}"
+          exit 1

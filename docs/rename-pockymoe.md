@@ -80,8 +80,10 @@ For other branches after the rename lands:
 
 1. Merge the thread UI and runtime branches together. CI on `main` clones the thread UI `main`.
 2. Publish a runtime release with `runtime-release.yml` and the merged thread UI SHA.
-   - Assets keep their names, so installed devices update through Web Settings as usual.
-3. Deploy the relay with the same `thread_ui_sha`.
+   - Assets keep their names, so native devices update through Web Settings as usual.
+3. Publish the same version as the final `remote-codex` npm package with `npm-final-release.yml`.
+   - npm devices install it through their existing Update, then press Update again to move to the native runtime.
+4. Deploy the relay with the same `thread_ui_sha`.
 
 ## Repository rename (last)
 
