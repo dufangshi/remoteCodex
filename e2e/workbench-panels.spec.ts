@@ -8,10 +8,21 @@ test.use({ actionTimeout: 15_000 });
 
 const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
 const screenshotRoot = process.env.WORKBENCH_SCREENSHOT_DIR;
+// A lit split trigger closes the split; reopening it chooses another conversation.
+async function openSplitPicker(page: Page) {
+  const trigger = page.getByTestId('workbench-split-trigger');
+  if ((await trigger.getAttribute('aria-pressed')) === 'true') await trigger.click();
+  await trigger.click();
+}
+
 async function selectSplit(page: Page, id: string) {
-  await page.getByTestId('workbench-split-trigger').click();
+  await openSplitPicker(page);
   await page.getByTestId('workbench-thread-picker').locator(`[data-thread-id="${id}"]`).click();
 }
+
+// Phone splits switch the two conversations beside the composer's timeline capsule.
+const paneSwitch = (page: Page, side: 'primary' | 'reference') =>
+  page.locator(`.thread-pane-switch[data-side="${side}"]:visible`);
 
 
 // Only the isolated fake Supervisor database is edited. All UI data is then read
@@ -155,9 +166,8 @@ test('dual conversations send concurrently to real thread IDs with independent d
   const reference = page.getByTestId('reference-pane');
   const left = primary.getByRole('textbox', { name: '提示词', exact: true });
   const right = reference.getByRole('textbox', { name: '提示词', exact: true });
-  const views = page.getByRole('navigation', { name: '工作台视图' });
-  const showLeft = async () => { if (mobile) await views.getByRole('button', { name: a.title, exact: true }).click(); };
-  const showRight = async () => { if (mobile) await views.getByRole('button', { name: b.title, exact: true }).click(); };
+  const showLeft = async () => { if (mobile) await paneSwitch(page, 'primary').click(); };
+  const showRight = async () => { if (mobile) await paneSwitch(page, 'reference').click(); };
   await expect(left).toBeVisible();
   await expect(primary.locator('.workbench-pane-heading')).toHaveCount(0);
   await expect(page.getByText('发送目标 · 主会话', { exact: true })).toHaveCount(0);
@@ -229,19 +239,28 @@ test('dual conversations send concurrently to real thread IDs with independent d
   await left.fill('切换后仍属于左侧');
   await showRight();
   await right.fill('切换后仍属于右侧');
-  await page.getByTestId('make-primary').click();
-  await expect(page).toHaveURL(new RegExp(`/threads/${b.id}$`));
-  await expect(primary.getByRole('textbox', { name: '提示词', exact: true })).toHaveText('切换后仍属于右侧');
-  if (mobile) await views.getByRole('button', { name: a.title, exact: true }).click();
-  await expect(reference.getByRole('textbox', { name: '提示词', exact: true })).toHaveText('切换后仍属于左侧');
-  await page.getByTestId('make-primary').click();
-  await expect(page).toHaveURL(new RegExp(`/threads/${a.id}$`));
+  if (mobile) {
+    // Phones have no pane header: the pane switch shows each side, the lit trigger closes the split.
+    await expect(page.getByTestId('make-primary')).toHaveCount(0);
+    await expect(page.locator('.workbench-mobile-views')).toHaveCount(0);
+    await expect(paneSwitch(page, 'reference')).toHaveAttribute('aria-pressed', 'true');
+  } else {
+    await page.getByTestId('make-primary').click();
+    await expect(page).toHaveURL(new RegExp(`/threads/${b.id}$`));
+    await expect(primary.getByRole('textbox', { name: '提示词', exact: true })).toHaveText('切换后仍属于右侧');
+    await expect(reference.getByRole('textbox', { name: '提示词', exact: true })).toHaveText('切换后仍属于左侧');
+    await page.getByTestId('make-primary').click();
+    await expect(page).toHaveURL(new RegExp(`/threads/${a.id}$`));
+  }
   await showRight();
-  await reference.getByRole('button', { name: '关闭分屏', exact: true }).click();
+  const trigger = page.getByTestId('workbench-split-trigger');
+  await expect(trigger).toHaveAttribute('aria-pressed', 'true');
+  await trigger.click();
   await expect(reference).not.toBeVisible();
+  await expect(trigger).toHaveAttribute('aria-pressed', 'false');
   await selectSplit(page, b.id);
   await expect(right).toHaveText('切换后仍属于右侧');
-  await page.getByTestId('workbench-split-trigger').click();
+  await openSplitPicker(page);
   await page.getByRole('button', { name: '协作进度', exact: true }).click();
   await expect(page.getByTestId('managed-summary')).toHaveCount(2);
   await expect(page.getByTestId('native-summary')).toHaveCount(2);

@@ -210,14 +210,14 @@ test('cross-device split keeps both chats writable and tools follow the last foc
     await picker.locator(`[data-thread-id="${b.id}"]`).click();
     const left = primary.getByRole('textbox', { name: '提示词', exact: true }),
       right = secondary.getByRole('textbox', { name: '提示词', exact: true });
-    const views = page.getByRole('navigation', { name: '工作台视图' });
+    // Phone splits switch the conversations beside the composer's timeline capsule.
     const showLeft = async () => {
       if (mobile)
-        await views.getByRole('button', { name: a.title, exact: true }).click();
+        await page.locator('.thread-pane-switch[data-side="primary"]:visible').click();
     };
     const showRight = async () => {
       if (mobile)
-        await views.getByRole('button', { name: b.title, exact: true }).click();
+        await page.locator('.thread-pane-switch[data-side="reference"]:visible').click();
     };
     await showRight();
     await expect(right).toBeVisible();

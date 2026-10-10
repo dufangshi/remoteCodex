@@ -394,7 +394,7 @@ test('phone guided tour keeps cards on screen and teaches touch controls', async
   await showStep(page, 'picker', shot('split-picker'), picker);
   await picker.locator('button.workbench-thread-picker-row', { hasText: '补充单元测试' }).tap();
   await next(page);
-  await showStep(page, 'panes', shot('split-mobile-views'), page.locator('nav.workbench-mobile-views'));
+  await showStep(page, 'panes', shot('split-mobile-views'), page.locator('.thread-jump-latest-cluster.has-pane-switch:visible'));
   await tourCard(page).getByRole('button', { name: '目录' }).tap();
 
   await openChapter(page, '文件浏览器');

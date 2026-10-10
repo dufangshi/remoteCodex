@@ -287,13 +287,20 @@ export function WorkbenchThreadPicker(props: WorkbenchThreadPickerProps) {
         type="button"
         ref={trigger}
         className={`workbench-thread-picker-trigger ${splitActive ? 'is-active' : ''}`}
-        title={t('workbench.splitSession')}
-        aria-label={t('workbench.splitSession')}
-        aria-haspopup="dialog"
-        aria-expanded={open}
+        // While split, the lit trigger closes the split; otherwise it picks a conversation.
+        title={splitActive && props.onClose ? t('workbench.closeSplit') : t('workbench.splitSession')}
+        aria-label={splitActive && props.onClose ? t('workbench.closeSplit') : t('workbench.splitSession')}
+        aria-pressed={splitActive}
+        aria-haspopup={splitActive && props.onClose ? undefined : 'dialog'}
+        aria-expanded={splitActive && props.onClose ? undefined : open}
         aria-controls={open ? titleId + '-panel' : undefined}
         disabled={props.disabled}
         onClick={() => {
+          if (splitActive && props.onClose) {
+            setOpen(false);
+            props.onClose();
+            return;
+          }
           setLocation(null);
           setOpen((value) => !value);
         }}
@@ -310,17 +317,6 @@ export function WorkbenchThreadPicker(props: WorkbenchThreadPickerProps) {
           onClick={props.onRestore}
         >
           <RotateCcw size={14} />
-        </button>
-      )}
-      {splitActive && props.onClose && (
-        <button
-          type="button"
-          className="workbench-thread-picker-trigger"
-          aria-label={t('workbench.closeSplit')}
-          title={t('workbench.closeSplit')}
-          onClick={props.onClose}
-        >
-          <X size={15} />
         </button>
       )}
       {open &&

@@ -331,7 +331,8 @@ const splitSteps: TourStep[] = [
     body: 'tour.split.panes.body',
     targets: [
       { selector: '[data-testid="workbench-panels"]:not(.is-compact) [data-testid="reference-pane"]' },
-      { selector: labelled('nav.workbench-mobile-views', 'workbench.panelViews'), body: 'tour.split.mobile.body' },
+      // Phones switch the two conversations beside the composer's timeline capsule.
+      { selector: '.thread-jump-latest-cluster.has-pane-switch', body: 'tour.split.mobile.body' },
     ],
     prerequisite: 'tour.split.panes.prereq',
     prerequisiteTarget: splitTrigger,
@@ -342,6 +343,8 @@ const splitSteps: TourStep[] = [
     title: 'tour.split.focus.title',
     body: 'tour.split.focus.body',
     targets: [{ selector: '[data-testid="make-primary"]' }],
+    // Phones have no pane header; the split trigger closes the split.
+    only: { layout: 'desktop' },
     prerequisite: 'tour.split.panes.prereq',
     prerequisiteTarget: splitTrigger,
   },
