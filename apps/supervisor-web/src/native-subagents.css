@@ -20,6 +20,7 @@
   display: flex;
   flex-direction: column;
   width: min(720px, 100%);
+  min-width: 0;
   max-height: min(800px, 85dvh);
   border: 1px solid var(--theme-border);
   border-radius: 18px;
@@ -43,6 +44,11 @@
   font-size: 16px;
   font-weight: 600;
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.5;
 }
 .native-agents-heading > span {
   display: block;
@@ -67,19 +73,21 @@
   color: var(--theme-fg);
 }
 .native-agents-body {
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 0;
   overscroll-behavior: contain;
   padding: 16px 20px 20px;
   min-height: 0;
 }
 .native-agents-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 8px;
 }
 .native-agents-row {
-  display: flex;
-  gap: 14px;
-  align-items: center;
+  min-width: 0;
   width: 100%;
   padding: 14px;
   border: 1px solid var(--theme-border);
@@ -87,7 +95,6 @@
   background: transparent;
   color: inherit;
   text-align: left;
-  cursor: pointer;
 }
 .native-agents-row:hover {
   background: var(--theme-hover);
@@ -298,3 +305,26 @@
 .native-agents-operation-group > .native-agents-record-toggle { color: var(--theme-fg-muted); }
 .native-agents-operation-group > .native-agents-record-toggle > svg:first-child { color: #20bc87; }
 .native-agents-operation-group .native-agents-record { border: 0; border-top: 1px solid var(--theme-border); margin: 0; border-radius: 0; }
+
+/* Every flex/grid ancestor must allow long native task text to shrink. */
+.native-agents-section { min-width: 0; }
+.native-agents-section h3 { display: flex; align-items: center; gap: 8px; margin: 6px 10px; color: var(--theme-fg-muted); font-size: 11px; font-weight: 500; }
+.native-agents-section h3 span, .native-agents-history-toggle span { font-size: 10px; opacity: .7; font-variant-numeric: tabular-nums; }
+.native-agents-row-open { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; min-height: 44px; border: 0; padding: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.native-agents-row-open > svg { flex: none; color: var(--theme-fg-muted); }
+.native-agents-row-title { min-width: 0; gap: 8px; }
+.native-agents-row-title strong { flex: 1; }
+.native-agents-row-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; font-size: 11px; color: var(--theme-fg-muted); }
+.native-agents-row-summary .thread-usage-cost, .native-agents-cost-missing { margin-left: auto; }
+.native-agents-runtime { display: inline-flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
+.native-agents-runtime svg { flex: none; }
+.native-agents-row-meta { font-size: 10px; gap: 4px 12px; }
+.native-agents-row-meta > span { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.native-agents-history-toggle { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 8px 10px; border: 0; background: transparent; color: var(--theme-fg-muted); font-size: 12px; text-align: left; cursor: pointer; }
+.native-agents-history-toggle svg { flex: none; transition: transform 140ms ease; }
+.native-agents-history-toggle svg.is-expanded { transform: rotate(90deg); }
+.native-agents-running-count { display: inline-flex; align-items: center; gap: 4px; color: #20bc87; font-size: 11px; font-variant-numeric: tabular-nums; }
+.native-agents-running-count svg { animation: native-agent-running 1.4s linear infinite; }
+.native-agents-heading > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+@keyframes native-agent-running { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .native-agents-running-count svg { animation: none; } .native-agents-history-toggle svg { transition: none; } }

@@ -31,7 +31,7 @@ for (const backend of ['codex', 'claude'])
     const id = thread.id ?? thread.thread.id;
     const agent = {
       id: 'native-child',
-      name: 'Review runtime changes',
+      name: 'Review runtime changes — ' + 'Check the installation and runtime compatibility '.repeat(8),
       provider: backend,
       nativeSessionId: 'native-child',
       model: backend === 'codex' ? 'gpt-6.1-sol' : 'claude-sonnet-4-5',
@@ -39,7 +39,7 @@ for (const backend of ['codex', 'claude'])
       isBackground: true,
       startedAt: '2026-10-09T06:00:00Z',
       updatedAt: '2026-10-09T06:01:12Z',
-      latestActivity: 'cargo test — 16 checks passed',
+      latestActivity: 'cargo test — 16 checks passed. ' + 'Reviewing_long_native_task_output_without_spaces'.repeat(12),
       activityCount: 3,
       detailsAvailable: true,
       prompt:
@@ -67,6 +67,7 @@ for (const backend of ['codex', 'claude'])
     const summary = () => ({
       ...agent,
       status: complete ? 'completed' : 'running',
+      completedAt: complete ? '2026-10-09T06:02:30Z' : null,
       updatedAt: complete ? '2026-10-09T06:02:30Z' : agent.updatedAt,
     });
     await page.addInitScript(() =>
@@ -145,7 +146,7 @@ for (const backend of ['codex', 'claude'])
     );
     await page.goto(`/threads/${id}`);
     await page
-      .getByRole('button', { name: 'Subagents (1)', exact: true })
+      .getByRole('button', { name: 'Subagents · 1 running', exact: true })
       .click();
     const panel = page.getByRole('dialog', {
       name: 'Native subagents',
@@ -156,6 +157,16 @@ for (const backend of ['codex', 'claude'])
     expect(itemLoads).toBe(0);
     await expect(panel.locator('.native-agents-row-meta').first()).toContainText('Created');
     await expect(panel.locator('.native-agents-row-meta').first()).toContainText(/Updated .* ago/);
+    for (const selector of ['.native-agents-body','.native-agents-list','.native-agents-row']) {
+      for (const element of await panel.locator(selector).all()) expect(await element.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    }
+    const cardCost = panel.locator('.native-agents-row-summary .thread-turn-usage-price').first();
+    await cardCost.click();
+    await expect(page.getByRole('tooltip')).toBeVisible();
+    expect(detailLoads).toBe(0);
+    await cardCost.click();
+    await expect(page.getByRole('tooltip')).toHaveCount(0);
+    await expect(page.locator('.native-agents-running-count')).toHaveText('1');
     const screenshotDir = path.resolve('.temp/native-subagents/screenshots');
     await mkdir(screenshotDir, { recursive: true });
     await page.screenshot({
@@ -226,7 +237,19 @@ for (const backend of ['codex', 'claude'])
       .getByRole('button', { name: 'Close subagents dialog', exact: true })
       .click();
     await expect(panel).toHaveCount(0);
+    const closedTrigger = page.getByRole('button', { name: 'Native subagents', exact: true });
+    await expect(closedTrigger.locator('.native-agents-running-count')).toHaveCount(0);
+    await closedTrigger.click();
+    await expect(panel.locator('.native-agents-row')).toHaveCount(0);
+    await expect(panel.getByRole('button', { name: 'Read history 2', exact: true })).toHaveAttribute('aria-expanded', 'false');
+    await page.screenshot({path:path.join(screenshotDir, `${testInfo.project.name}-${backend}-read-history.png`),scale:'css'});
+    await panel.getByRole('button', { name: 'Read history 2', exact: true }).click();
+    await expect(panel.locator('.native-agents-row')).toHaveCount(2);
+    await expect(panel.locator('.native-agents-runtime').first()).toContainText('Worked for 2m 30s');
+    await page.reload();
+    await page.getByRole('button', { name: 'Native subagents', exact: true }).click();
+    await expect(page.locator('.native-agents-history-toggle')).toHaveAttribute('aria-expanded', 'false');
     await expect(
-      page.getByRole('button', { name: 'Subagents (0)', exact: true }),
+      page.getByRole('button', { name: 'Native subagents', exact: true }),
     ).toBeVisible();
   });

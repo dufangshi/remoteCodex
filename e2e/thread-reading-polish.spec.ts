@@ -235,7 +235,7 @@ test('background agents remain visible after the main reply, survive reload, and
   await expect(page.getByText(turn.items[2]!.text, { exact: true })).toBeVisible();
   await expect(label).toHaveText('1 background agent running');
   await expect(page.getByRole('button', { name: 'Stop Current Turn', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Subagents (1)', exact: true }).click();
+  await page.getByRole('button', { name: 'Subagents · 1 running', exact: true }).click();
   const panel = page.getByRole('dialog', { name: 'Native subagents', exact: true });
   await expect(panel).toContainText('Independent review');
   await expect(panel).toContainText('Running in background');
@@ -256,7 +256,7 @@ test('background agents remain visible after the main reply, survive reload, and
   socket!.send(JSON.stringify({ type: 'thread.subagents.updated', threadId: id,
     timestamp: new Date().toISOString(), payload: { turnId: turn.id, activeSubagents: [] } }));
   await expect(label).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Subagents (1)', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Subagents · 1 running', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Stop Current Turn', exact: true })).toBeVisible();
   completed = true;
   socket!.send(JSON.stringify({ type: 'thread.turn.completed', threadId: id,

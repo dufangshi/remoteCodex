@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Clock3,
   Layers3,
+  LoaderCircle,
   RefreshCw,
   X,
 } from 'lucide-react';
@@ -45,6 +46,31 @@ function relativeDate(date: string | null | undefined, now: number) {
     : seconds < 86400 ? [Math.floor(seconds / 3600), 'hour'] as const
     : [Math.floor(seconds / 86400), 'day'] as const;
   return new Intl.RelativeTimeFormat(getLocale(), { numeric: 'always' }).format(-value, unit);
+}
+
+function isFinished(agent: NativeSubagentDto) {
+  return ['completed', 'failed', 'interrupted', 'cancelled', 'stopped'].includes(agent.status);
+}
+function resultKey(agent: NativeSubagentDto) {
+  return `${agent.status}:${agent.completedAt ?? agent.startedAt ?? ''}`;
+}
+function readSeenAgents(threadId: string): Record<string, string> {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(`pockymoe.subagents.seen.v1:${threadId}`) ?? '{}');
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? Object.fromEntries(Object.entries(value).filter(([, key]) => typeof key === 'string')) : {};
+  } catch { return {}; }
+}
+function runtimeLabel(agent: NativeSubagentDto, now: number) {
+  const start = Date.parse(agent.startedAt ?? '');
+  const end = agent.status === 'running' ? now : Date.parse(agent.completedAt ?? agent.updatedAt ?? '');
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return '—';
+  const total = Math.max(0, Math.floor((end - start) / 1000));
+  return total >= 3600
+    ? translate('chat.workedForHours', { hours: Math.floor(total / 3600), minutes: Math.floor(total % 3600 / 60) })
+    : total >= 60
+      ? translate('chat.workedForMinutes', { minutes: Math.floor(total / 60), seconds: total % 60 })
+      : translate('chat.workedForSeconds', { seconds: total });
 }
 
 function SubagentActivityRow({ item, endpoint, lazy }: { item: ThreadHistoryItemDto; endpoint: string; lazy: boolean }) {
@@ -120,11 +146,18 @@ export function ThreadSubagentsControl({
 }: {
   detail: ThreadDetailDto;
 }) {
+  return <NativeSubagentsControl key={detail.thread.id} detail={detail} />;
+}
+
+function NativeSubagentsControl({ detail }: { detail: ThreadDetailDto }) {
   useI18n();
   const provider =
     detail.thread.provider === 'acp'
       ? (detail.thread.agentId ?? '')
       : detail.thread.provider;
+  const threadId = detail.thread.id;
+  const [seenBeforeVisit, setSeenBeforeVisit] = useState(() => readSeenAgents(threadId));
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   const [agents, setAgents] = useState<NativeSubagentDto[] | null>(null);
   const [discovering, setDiscovering] = useState(false);
   const [open, setOpen] = useState(false);
@@ -150,10 +183,32 @@ export function ThreadSubagentsControl({
       rows.push(fallbackAgent(active, provider));
   }
   const running = rows.filter((agent) => agent.status === 'running').length;
-  const threadId = detail.thread.id;
+  const activeRows = rows.filter(agent => !isFinished(agent));
+  const unreadRows = rows.filter(agent => isFinished(agent) && seenBeforeVisit[agent.id] !== resultKey(agent));
+  const readRows = rows.filter(agent => isFinished(agent) && seenBeforeVisit[agent.id] === resultKey(agent));
+
+  // Mark results only while their list is being viewed. Keep this visit's layout
+  // stable; the newly seen cards move into history on the next opening.
+  useEffect(() => {
+    if (!open || selected) return;
+    const seen = readSeenAgents(threadId);
+    let changed = false;
+    for (const agent of rows) {
+      if (isFinished(agent) && seen[agent.id] !== resultKey(agent)) {
+        seen[agent.id] = resultKey(agent);
+        changed = true;
+      }
+    }
+    if (changed) {
+      try { localStorage.setItem(`pockymoe.subagents.seen.v1:${threadId}`, JSON.stringify(seen)); }
+      catch { /* A denied browser store must not block inspection. */ }
+    }
+  }, [open, selected, rows, threadId]);
 
   useEffect(() => {
     setOpen(false);
+    setSeenBeforeVisit(readSeenAgents(threadId));
+    setHistoryExpanded(false);
     setSelected(null);
     setInspect(null);
     setAgents(null);
@@ -327,6 +382,40 @@ export function ThreadSubagentsControl({
     setInspect(null);
     setError(null);
   }
+  function renderAgent(agent: NativeSubagentDto) {
+    return <article key={agent.id} className="native-agents-row">
+      <button
+        type="button"
+        ref={button => {
+          if (button) listButtons.current.set(agent.id, button);
+          else listButtons.current.delete(agent.id);
+        }}
+        className="native-agents-row-open"
+        onClick={() => select(agent.id)}
+      >
+        <div className="native-agents-row-main">
+          <div className="native-agents-row-title">
+            <strong title={agent.name ?? undefined}>{agent.name || translate('workbench.subagentDetails')}</strong>
+            <span className="native-agents-status" data-status={agent.status}>
+              {agent.isBackground && agent.status === 'running' ? translate('workbench.runningInBackground') : statusLabel(agent.status)}
+            </span>
+          </div>
+          {agent.latestActivity && <p>{agent.latestActivity}</p>}
+        </div>
+        <ChevronRight size={14} aria-hidden="true" />
+      </button>
+      <div className="native-agents-row-summary">
+        <span className="native-agents-runtime"><Clock3 size={12} aria-hidden="true" />{runtimeLabel(agent, now)}</span>
+        {agent.tokenUsage || agent.priceEstimate
+          ? <TokenUsageCost usage={agent.tokenUsage?.total ?? null} price={agent.priceEstimate} tooltipZIndex={110} />
+          : <span className="native-agents-cost-missing" title={translate('workbench.subagentCostUnknown')}>—</span>}
+      </div>
+      <div className="native-agents-row-meta">
+        <span title={dateLabel(agent.startedAt)}>{translate('workbench.subagentCreated')} {agent.startedAt ? new Date(agent.startedAt).toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
+        <span title={dateLabel(agent.updatedAt)}>{translate('workbench.subagentUpdated')} {relativeDate(agent.updatedAt, now)}</span>
+      </div>
+    </article>;
+  }
   if (!rows.length && !open && !discovering) return null;
 
   return (
@@ -335,13 +424,22 @@ export function ThreadSubagentsControl({
         ref={trigger}
         type="button"
         className="matter-watches-toggle"
-        aria-label={translate('workbench.subagents', { value1: running })}
+        aria-label={running ? translate('workbench.subagentsRunning', { count: running }) : translate('workbench.nativeSubagents')}
         aria-expanded={open}
         title={translate('workbench.nativeSubagents')}
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => {
+          if (!open) {
+            setSelected(null);
+            setInspect(null);
+            setError(null);
+            setSeenBeforeVisit(readSeenAgents(threadId));
+            setHistoryExpanded(false);
+          }
+          setOpen(value => !value);
+        }}
       >
         <Bot size={14} />
-        {rows.length > 0 && <span>{running || rows.length}</span>}
+        {running > 0 && <span className="native-agents-running-count"><LoaderCircle size={11} aria-hidden="true" />{running}</span>}
       </button>
       {open && (
         <div className="native-agents-overlay">
@@ -414,43 +512,27 @@ export function ThreadSubagentsControl({
                       {translate('workbench.noNativeAgents')}
                     </p>
                   )}
-                  {rows.map((agent) => (
-                    <button
-                      key={agent.id}
-                      type="button"
-                      ref={(button) => {
-                        if (button) listButtons.current.set(agent.id, button);
-                        else listButtons.current.delete(agent.id);
-                      }}
-                      className="native-agents-row"
-                      onClick={() => select(agent.id)}
-                    >
-                      <div className="native-agents-row-main">
-                        <div className="native-agents-row-title">
-                          <strong>{agent.name || translate('workbench.subagentDetails')}</strong>
-                          <span
-                            className="native-agents-status"
-                            data-status={agent.status}
-                          >
-                            {agent.isBackground && agent.status === 'running'
-                              ? translate('workbench.runningInBackground')
-                              : statusLabel(agent.status)}
-                          </span>
-                        </div>
-                        {agent.latestActivity && <p>{agent.latestActivity}</p>}
-                        <div className="native-agents-row-meta">
-                          <span title={dateLabel(agent.startedAt)}>{translate('workbench.subagentCreated')} {agent.startedAt ? new Date(agent.startedAt).toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
-                          <span title={dateLabel(agent.updatedAt)}><Clock3 size={11} />{translate('workbench.subagentUpdated')} {relativeDate(agent.updatedAt, now)}</span>
-                        </div>
-                      </div>
-                      <ChevronRight size={16} />
+                  {activeRows.length > 0 && <div className="native-agents-section">
+                    <h3>{translate('workbench.subagentCurrent')}</h3>
+                    {activeRows.map(renderAgent)}
+                  </div>}
+                  {unreadRows.length > 0 && <div className="native-agents-section native-agents-unread">
+                    <h3>{translate('workbench.subagentUnread')} <span>{unreadRows.length}</span></h3>
+                    {unreadRows.map(renderAgent)}
+                  </div>}
+                  {readRows.length > 0 && <div className="native-agents-section native-agents-history">
+                    <button type="button" className="native-agents-history-toggle" aria-expanded={historyExpanded} onClick={() => setHistoryExpanded(value => !value)}>
+                      <ChevronRight size={14} className={historyExpanded ? 'is-expanded' : ''} aria-hidden="true" />
+                      {translate('workbench.subagentRead')} <span>{readRows.length}</span>
                     </button>
-                  ))}
+                    {historyExpanded && readRows.map(renderAgent)}
+                  </div>}
                 </div>
               ) : (
                 agent && (
                   <>
                     <div className="native-agents-overview">
+                      <span className="native-agents-runtime"><Clock3 size={12} aria-hidden="true" />{runtimeLabel(agent, now)}</span>
                       <span
                         className="native-agents-status"
                         data-status={agent.status}

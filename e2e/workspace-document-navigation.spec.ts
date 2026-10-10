@@ -1,0 +1,56 @@
+import { test, expect } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
+test.use({ actionTimeout: 15_000 });
+const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
+test('Markdown illustration back restores the document and reading position, with forward and file-list navigation', async ({ page, request, isMobile }, testInfo) => {
+  const absPath = path.resolve(process.env.E2E_WORKSPACE_ROOT!, randomUUID());
+  await mkdir(path.join(absPath, 'docs/images'), { recursive: true });
+  await writeFile(path.join(absPath, 'docs/index.md'), '# Screenshot guide\n\n' + Array.from({length:35}, (_,i) => `## Step ${i+1}\n\nRead this instruction and try the highlighted control.\n\n`).join('') + '[Open illustration](images/plot.png)\n\n[Read details](details.md)\n');
+  await writeFile(path.join(absPath, 'docs/details.md'), '# Detailed instructions\n\nUse Back to continue reading the screenshot guide.');
+  await writeFile(path.join(absPath, 'docs/images/plot.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aOCcAAAAASUVORK5CYII=', 'base64'));
+  const workspace = await (await request.post(`${base}/api/workspaces`, {data:{absPath,label:'Document navigation'}})).json();
+  const response = await request.post(`${base}/api/threads/start`, {data:{workspaceId:workspace.id,title:'Read tutorial screenshots',provider:'acp',agentId:'codex',model:'ios-e2e-stream',approvalMode:'yolo'}});
+  expect(response.ok()).toBeTruthy();
+  const value = await response.json();
+  const id = value.id ?? value.thread.id;
+  await page.addInitScript(() => localStorage.setItem('remote-codex-theme-mode','dark'));
+  await page.goto(`/threads/${id}`);
+  await page.locator(isMobile ? '.matter-topbar' : '.matter-rail').getByRole('button',{name:'Toggle Explorer',exact:true}).click();
+  const files = page.getByTestId('workspace-panel');
+  const folder = files.getByRole('treeitem',{name:'docs',exact:true}).getByRole('button',{name:'docs',exact:true});
+  if (isMobile) await folder.tap(); else await folder.dblclick();
+  await files.getByRole('treeitem',{name:'index.md',exact:true}).getByRole('button',{name:'index.md',exact:true}).click();
+  const markdown = files.locator('.thread-graph-markdown-preview');
+  await expect(markdown.getByRole('heading',{name:'Screenshot guide',exact:true})).toBeVisible();
+  await markdown.getByRole('link',{name:'Open illustration',exact:true}).scrollIntoViewIfNeeded();
+  const before = await markdown.evaluate(el => el.scrollTop);
+  expect(before).toBeGreaterThan(100);
+  await markdown.getByRole('link',{name:'Open illustration',exact:true}).click();
+  await expect(files.locator('.thread-graph-viewer img')).toBeVisible();
+  await files.getByRole('button',{name:'Back to index.md',exact:true}).click();
+  await expect(markdown).toBeVisible();
+  await expect.poll(async () => Math.abs(await markdown.evaluate(el => el.scrollTop) - before)).toBeLessThan(3);
+  await expect(markdown.getByRole('link',{name:'Open illustration',exact:true})).toBeInViewport();
+  await page.screenshot({path:testInfo.outputPath('markdown-position-restored.png'),scale:'css'});
+  await files.getByRole('button',{name:'Forward',exact:true}).click();
+  await expect(files.locator('.thread-graph-viewer img')).toBeVisible();
+  await files.getByRole('button',{name:'Back to index.md',exact:true}).click();
+  await markdown.getByRole('link',{name:'Read details',exact:true}).click();
+  await expect(markdown.getByRole('heading',{name:'Detailed instructions',exact:true})).toBeVisible();
+  await expect(files.getByRole('button',{name:'Forward',exact:true})).toHaveCount(0);
+  await files.getByRole('button',{name:'Back to index.md',exact:true}).click();
+  await expect(markdown.getByRole('link',{name:'Open illustration',exact:true})).toBeInViewport();
+  if (isMobile) await files.getByRole('button',{name:'Back to files',exact:true}).click();
+  await expect(files.getByRole('tree',{name:'Workspace files'})).toBeVisible();
+  await expect(files.getByRole('treeitem',{name:'docs',exact:true})).toHaveAttribute('aria-expanded','true');
+  if (isMobile) {
+    await files.getByRole('treeitem',{name:'index.md',exact:true}).getByRole('button',{name:'index.md',exact:true}).click();
+    await markdown.getByRole('link',{name:'Open illustration',exact:true}).click();
+    await expect(files.locator('.thread-graph-viewer img')).toBeVisible();
+    await files.getByRole('button',{name:'Back to index.md',exact:true}).click();
+    await expect(markdown.getByRole('link',{name:'Open illustration',exact:true})).toBeInViewport();
+  }
+});

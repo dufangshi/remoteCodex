@@ -66,6 +66,8 @@ const detail = {
 } as unknown as ThreadDetailDto;
 let inspected: NativeSubagentDetailDto;
 beforeEach(() => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+  localStorage.clear();
   setLocale('en');
   inspected = {
     agent: { ...agent },
@@ -86,11 +88,11 @@ beforeEach(() => {
       String(url).endsWith('/subagents') ? { agents: [agent] } : inspected,
     );
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 it('opens native Codex details with tool progress, timestamp and its own usage', async () => {
   render(<ThreadSubagentsControl detail={detail} />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Subagents (1)' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Subagents · 1 running' }));
   const panel = screen.getByRole('dialog', { name: 'Native subagents' });
   fireEvent.click(
     within(panel).getByRole('button', { name: /Review runtime/ }),
@@ -119,7 +121,7 @@ it('opens native Codex details with tool progress, timestamp and its own usage',
 
 it('keeps completed native details open and reports missing costs as unavailable', async () => {
   render(<ThreadSubagentsControl detail={detail} />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Subagents (1)' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Subagents · 1 running' }));
   const panel = screen.getByRole('dialog', { name: 'Native subagents' });
   fireEvent.click(
     within(panel).getByRole('button', { name: /Review runtime/ }),
@@ -147,7 +149,7 @@ it('retains legacy Claude discovery when an older Supervisor lacks native inspec
     activeSubagents: [{ ...agent, id: 'toolu-1', name: 'Claude review' }],
   } as ThreadDetailDto;
   render(<ThreadSubagentsControl detail={legacy} />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Subagents (1)' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Subagents · 1 running' }));
   const panel = screen.getByRole('dialog', { name: 'Native subagents' });
   fireEvent.click(within(panel).getByRole('button', { name: /Claude review/ }));
   await expect(screen.findByRole('alert')).resolves.toHaveTextContent(
@@ -173,9 +175,9 @@ it('drops late native responses when the parent thread changes', async () => {
   );
   oldResolve({ agents: [agent] });
   await waitFor(() =>
-    expect(screen.queryByRole('button', { name: 'Subagents (1)' })).toBeNull(),
+    expect(screen.queryByRole('button', { name: 'Subagents · 1 running' })).toBeNull(),
   );
-  expect(screen.queryByRole('button', { name: 'Subagents (1)' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Subagents · 1 running' })).toBeNull();
 });
 
 it('continues history discovery and child updates even when the parent is idle', async () => {
@@ -201,11 +203,11 @@ it('continues history discovery and child updates even when the parent is idle',
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
-    expect(screen.getByRole('button', { name: 'Subagents (1)' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Subagents · 1 running' })).toBeVisible();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
-    expect(screen.getByRole('button', { name: 'Subagents (0)' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Native subagents' })).toBeVisible();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(9000);
     });
@@ -242,7 +244,7 @@ it.each([
       />,
     );
     fireEvent.click(
-      await screen.findByRole('button', { name: 'Subagents (0)' }),
+      await screen.findByRole('button', { name: 'Native subagents' }),
     );
     const panel = screen.getByRole('dialog', { name: 'Native subagents' });
     fireEvent.click(
@@ -272,7 +274,7 @@ it('keeps record bodies lazy through grouped operations and loads older metadata
     return { historyMode: 'lazy-v1', agent, items: rows, hasEarlierItems: true };
   });
   render(<ThreadSubagentsControl detail={detail} />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Subagents (1)' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Subagents · 1 running' }));
   const panel = screen.getByRole('dialog', { name: 'Native subagents' });
   expect(within(panel).getByText(/Created/)).toBeVisible();
   expect(within(panel).getByText(/Updated.*ago/)).toBeVisible();
@@ -290,4 +292,47 @@ it('keeps record bodies lazy through grouped operations and loads older metadata
   await expect(within(panel).findByText('Earlier checkpoint')).resolves.toBeVisible();
   expect(bodyCalls).toEqual(['command-a']);
   expect(within(panel).queryByRole('button', { name: 'Load earlier activity' })).toBeNull();
+});
+
+it('keeps unseen completions visible for this visit, then folds them into persistent read history', async () => {
+  const completed = { ...agent, status: 'completed', completedAt: '2026-10-09T05:01:30Z' };
+  vi.mocked(request).mockImplementation(async () => ({ agents: [completed] }));
+  const view = render(<ThreadSubagentsControl detail={detail} />);
+  const trigger = await screen.findByRole('button', { name: 'Native subagents' });
+  expect(trigger.textContent).toBe('');
+  expect(localStorage.getItem('pockymoe.subagents.seen.v1:parent')).toBeNull();
+  fireEvent.click(trigger);
+  const panel = screen.getByRole('dialog', { name: 'Native subagents' });
+  expect(within(panel).getByText('Unread')).toBeVisible();
+  expect(panel.querySelector('.native-agents-runtime')).toHaveTextContent('Worked for 1m 30s');
+  const cost = panel.querySelector<HTMLButtonElement>('.thread-turn-usage-price')!;
+  expect(cost).toHaveTextContent('$0.12');
+  fireEvent.click(cost);
+  expect(cost).toHaveAttribute('aria-expanded', 'true');
+  expect(vi.mocked(request).mock.calls.every(([url]) => String(url).endsWith('/subagents'))).toBe(true);
+  expect(within(panel).getByRole('button', { name: /Review runtime/ })).toBeVisible();
+  fireEvent.click(within(panel).getByRole('button', { name: 'Close subagents dialog' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Native subagents' }));
+  expect(screen.queryByRole('button', { name: /Review runtime/ })).toBeNull();
+  const history = screen.getByRole('button', { name: 'Read history 1' });
+  expect(history).toHaveAttribute('aria-expanded', 'false');
+  fireEvent.click(history);
+  expect(screen.getByRole('button', { name: /Review runtime/ })).toBeVisible();
+  view.unmount();
+  render(<ThreadSubagentsControl detail={detail} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Native subagents' }));
+  expect(screen.queryByRole('button', { name: /Review runtime/ })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Read history 1' })).toHaveAttribute('aria-expanded', 'false');
+});
+
+it('marks completion unread if a previously seen child runs again, and never mixes parent histories', async () => {
+  localStorage.setItem('pockymoe.subagents.seen.v1:parent', JSON.stringify({ 'child-1': 'completed:2026-10-09T05:01:00Z' }));
+  vi.mocked(request).mockImplementation(async () => ({ agents: [{ ...agent, status:'failed', completedAt:'2026-10-09T05:02:00Z' }] }));
+  const view = render(<ThreadSubagentsControl detail={detail} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Native subagents' }));
+  expect(screen.getByText('Unread')).toBeVisible();
+  expect(screen.getByRole('button', { name: /Review runtime/ })).toHaveTextContent('Failed');
+  view.rerender(<ThreadSubagentsControl detail={{...detail,thread:{...detail.thread,id:'other-parent'}}} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Native subagents' }));
+  expect(screen.getByText('Unread')).toBeVisible();
 });
