@@ -92,6 +92,33 @@ pub fn install(manager: &str, installed: &Installed, config: &Path) -> Result<()
     }
     Ok(())
 }
+/// Updates are run by the previous runtime's worker, which writes its own unit
+/// definition. Bring a systemd user unit up to this runtime's definition at
+/// startup so changes such as the stop timeout apply from the next stop
+/// instead of one update later.
+pub fn refresh(manager: &str, installed: &Installed, config: &Path) -> Result<bool> {
+    if manager != "systemd-user" {
+        return Ok(false);
+    }
+    let changed = rewrite_if_changed(
+        &service_path(manager),
+        &definition(manager, installed, config),
+    )?;
+    if changed {
+        ensure!(
+            command("systemctl", &["--user", "daemon-reload"]),
+            "Unable to reload systemd user service"
+        );
+    }
+    Ok(changed)
+}
+fn rewrite_if_changed(file: &Path, wanted: &str) -> Result<bool> {
+    if !file.is_file() || std::fs::read_to_string(file)? == wanted {
+        return Ok(false);
+    }
+    write_bytes(file, wanted.as_bytes())?;
+    Ok(true)
+}
 pub fn manage(manager: &str, action: &str) -> Result<()> {
     let ok = match manager {
         "systemd-user" => {
@@ -399,6 +426,17 @@ pub fn retire_tmux(owner: &Option<TmuxOwner>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unit_refresh_rewrites_only_a_changed_existing_unit() {
+        let dir = tempfile::tempdir().unwrap();
+        let unit = dir.path().join("remote-codex-supervisor.service");
+        assert!(!rewrite_if_changed(&unit, "new").unwrap());
+        assert!(!unit.exists());
+        std::fs::write(&unit, "old").unwrap();
+        assert!(rewrite_if_changed(&unit, "new").unwrap());
+        assert_eq!(std::fs::read_to_string(&unit).unwrap(), "new");
+        assert!(!rewrite_if_changed(&unit, "new").unwrap());
+    }
     #[test]
     fn native_service_quotes_paths_and_omits_device_credentials() {
         let installed = Installed {

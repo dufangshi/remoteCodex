@@ -337,6 +337,13 @@ pub async fn run_device(config: PathBuf) -> Result<()> {
     std::env::remove_var("TMUX");
     std::env::remove_var("TMUX_PANE");
     if let Ok(installed) = releases::current() {
+        if let Ok(manager) = std::env::var("POCKYMOE_MANAGED_SERVICE") {
+            if std::env::current_exe().ok().as_deref() == Some(installed.executable.as_path()) {
+                if let Err(error) = service::refresh(&manager, &installed, &config) {
+                    tracing::warn!(%error, "could not refresh the service definition");
+                }
+            }
+        }
         std::env::set_var("POCKYMOE_WEB_DIST_DIR", installed.web_dist);
     }
     let state = pockymoe_runtime::boot().await?;
