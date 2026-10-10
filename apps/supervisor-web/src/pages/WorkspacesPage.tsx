@@ -1,6 +1,7 @@
 import { getLocale } from '@pockymoe/thread-ui/i18n';
 import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { DeviceEncryptionStatus } from '../components/DeviceEncryptionStatus';
+import { TourLauncherButton } from '../components/onboarding/TourProvider';
 import { ProductHeader } from '../components/ProductHeader';
 import {
   useEffect,
@@ -193,6 +194,7 @@ export function WorkspacesPage() {
   return (
     <div className="product-page space-y-4">
       <ProductHeader title={translate("files.workspaces")} {...(relayDeviceId ? {backHref: '/relay-devices', backLabel: translate("files.backToDevices")} : {})} actions={<>
+        {!relayDeviceId && <TourLauncherButton showLabel />}
         <Link to={currentRelayScopedPath('/threads/import')} aria-label={translate("files.importSession")} title={translate("files.importSession")} className="product-icon-button"><FileInput size={19} /></Link>
         <Link to={currentRelayScopedPath('/workspaces/new')} aria-label={translate("files.addWorkspace")} title={translate("files.addWorkspace")} className="product-icon-button"><Plus size={20} /></Link>
       </>} />

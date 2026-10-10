@@ -3868,6 +3868,7 @@ export function ThreadDetailPage() {
         onFocusPane: focusPane,
         toolsOpen: terminalOpen || dshPanelOpen,
         toolsTargetLabel,
+        inlineFilesHeader: true,
         toolTitle: `${translate(dshPanelOpen ? 'workbench.deepseekHarness' : 'workbench.terminal')} · ${toolsDetail?.workspace.label ?? ''} · ${toolsDetail?.thread.title ?? ''}`,
         toolContent: controls => <>
           <WorkbenchTerminal deviceId={toolsDevice} detail={toolsDetail} canControl={toolsCanControl} open={terminalOpen} controls={controls} onClose={closeTerminal} effectiveTheme={shellNav?.effectiveTheme ?? 'dark'} targetLabel={toolsTargetLabel} openRequest={terminalOpenRequest} />

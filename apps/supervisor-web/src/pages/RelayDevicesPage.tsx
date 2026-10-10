@@ -5,6 +5,7 @@ import { SecurityVerification } from '../components/RelaySecurity';
 import { securityRequest, type SecurityStatus } from '../lib/relaySecurity';
 import { request } from '../lib/api';
 import { DeviceEncryptionStatus } from '../components/DeviceEncryptionStatus';
+import { TourLauncherButton } from '../components/onboarding/TourProvider';
 import { ProductHeader } from '../components/ProductHeader';
 import {
   Copy,
@@ -676,7 +677,7 @@ export function RelayDevicesPage() {
   return (
     <div>
       <div className="product-page space-y-6">
-        <ProductHeader title={translate("devices.devices")} backHref="/" backLabel={translate("devices.relayHome")} />
+        <ProductHeader title={translate("devices.devices")} backHref="/" backLabel={translate("devices.relayHome")} actions={<TourLauncherButton showLabel />} />
 
         <section className="product-page-header">
           <div>

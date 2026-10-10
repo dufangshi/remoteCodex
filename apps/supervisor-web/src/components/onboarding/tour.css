@@ -286,3 +286,5 @@
     transition: none;
   }
 }
+
+.pm-tour-launcher-labeled { width: auto; min-height: 44px; gap: 6px; padding: 0 10px; font-size: 12px; white-space: nowrap; }

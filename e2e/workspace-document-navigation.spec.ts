@@ -16,7 +16,10 @@ test('Markdown illustration back restores the document and reading position, wit
   expect(response.ok()).toBeTruthy();
   const value = await response.json();
   const id = value.id ?? value.thread.id;
-  await page.addInitScript(() => localStorage.setItem('remote-codex-theme-mode','dark'));
+  await page.addInitScript(() => {
+    localStorage.setItem('remote-codex-theme-mode','dark');
+    localStorage.setItem('pockymoe.onboarding.v1:'+JSON.stringify([location.origin,'local:owner']), JSON.stringify({welcomeDismissed:true,completed:[],resume:{}}));
+  });
   await page.goto(`/threads/${id}`);
   await page.locator(isMobile ? '.matter-topbar' : '.matter-rail').getByRole('button',{name:'Toggle Explorer',exact:true}).click();
   const files = page.getByTestId('workspace-panel');
@@ -25,6 +28,20 @@ test('Markdown illustration back restores the document and reading position, wit
   await files.getByRole('treeitem',{name:'index.md',exact:true}).getByRole('button',{name:'index.md',exact:true}).click();
   const markdown = files.locator('.thread-graph-markdown-preview');
   await expect(markdown.getByRole('heading',{name:'Screenshot guide',exact:true})).toBeVisible();
+  await expect(page.locator('.workbench-tool-drawer > header')).toHaveCount(0);
+  await expect(files.locator('.thread-graph-editor-breadcrumbs')).toHaveCount(0);
+  await expect(page.locator('.thread-graph-right-tabs')).toHaveCount(0);
+  await expect(files.getByRole('button',{name:'Check disk',exact:true})).toHaveCount(0);
+  const toolbar = files.locator('.workspace-file-toolbar');
+  expect((await toolbar.boundingBox())!.height).toBeLessThanOrEqual(48);
+  expect((await markdown.boundingBox())!.height).toBeGreaterThan(page.viewportSize()!.height * .6);
+  await files.getByRole('button',{name:'File actions',exact:true}).click();
+  const actions = page.getByRole('menu',{name:'File actions',exact:true});
+  await actions.getByRole('menuitem',{name:'Reload from disk',exact:true}).click();
+  await expect(actions.getByRole('status')).toHaveText('Already up to date');
+  await page.keyboard.press('Escape');
+  await expect(actions).toHaveCount(0);
+  await expect(markdown).toBeVisible();
   await markdown.getByRole('link',{name:'Open illustration',exact:true}).scrollIntoViewIfNeeded();
   const before = await markdown.evaluate(el => el.scrollTop);
   expect(before).toBeGreaterThan(100);

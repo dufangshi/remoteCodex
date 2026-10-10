@@ -25,6 +25,7 @@ const agentVersion = original.replace(
 async function setup(page: Page, request: APIRequestContext, mobile = false) {
   await page.addInitScript(() => {
     localStorage.setItem('remote-codex.locale', 'zh-CN');
+    localStorage.setItem('pockymoe.onboarding.v1:'+JSON.stringify([location.origin,'local:owner']),JSON.stringify({welcomeDismissed:true,completed:[],resume:{}}));
     localStorage.setItem('remote-codex-theme-mode', 'dark');
     localStorage.setItem('remote-codex.explorer-width', '800');
   });

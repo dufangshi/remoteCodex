@@ -1,5 +1,5 @@
 import { translate, useI18n, type TranslationKey } from '@pockymoe/thread-ui/i18n';
-import { Check, CircleHelp, X } from 'lucide-react';
+import { Check, CircleHelp, Compass, X } from 'lucide-react';
 import {
   createContext,
   useCallback,
@@ -155,13 +155,14 @@ function useTourRoot() {
 }
 
 function useAccount(mode: TourContext['mode']) {
+  const location = useLocation();
   const [account, setAccount] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     const load =
       mode === 'relay'
         ? fetchRelaySession().then((session) => (session.user?.id ? `relay:${session.user.id}` : null))
-        : fetchAuthSession().then((session) => `local:${session.username ?? 'owner'}`);
+        : fetchAuthSession().then((session) => session.authenticated ? `local:${session.username ?? 'owner'}` : null);
     load
       .then((value) => {
         if (!cancelled) setAccount(value);
@@ -172,7 +173,7 @@ function useAccount(mode: TourContext['mode']) {
     return () => {
       cancelled = true;
     };
-  }, [mode]);
+  }, [mode, location.pathname]);
   return account;
 }
 
@@ -655,13 +656,14 @@ function TourWelcome({ onStart, onLater }: { onStart: () => void; onLater: () =>
 }
 
 /** Icon entry for the workbench rail. */
-export function TourLauncherButton() {
+export function TourLauncherButton({ showLabel = false }: { showLabel?: boolean }) {
   useI18n();
   const tour = useTour();
   if (!tour) return null;
   return (
-    <button type="button" className="pm-tour-launcher" aria-label={translate('tour.entry')} title={translate('tour.entry')} onClick={tour.openHub}>
-      <CircleHelp aria-hidden="true" />
+    <button type="button" className={`pm-tour-launcher ${showLabel ? 'pm-tour-launcher-labeled' : ''}`} aria-label={translate('tour.entry')} title={translate('tour.entry')} onClick={tour.openHub}>
+      {showLabel ? <Compass aria-hidden="true"/> : <CircleHelp aria-hidden="true" />}
+      {showLabel && <span>{translate('tour.entry')}</span>}
     </button>
   );
 }

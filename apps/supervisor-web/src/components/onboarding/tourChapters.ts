@@ -404,7 +404,7 @@ function fileSteps(layout: TourLayout): TourStep[] {
       body: 'tour.files.save.body',
       targets: [
         { selector: `${FILES} [data-testid="workspace-document-conflict"]` },
-        { selector: `${FILES} [data-testid="workspace-document-status"]` },
+        { selector: `${FILES} .workspace-file-state` },
       ],
       prerequisite: 'tour.files.edit.prereq',
       prerequisiteTarget: `${FILES} [role="tree"]`,

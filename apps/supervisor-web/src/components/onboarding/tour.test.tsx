@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { setLocale } from '@pockymoe/thread-ui/i18n';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { fetchAuthSession } from '../../lib/api';
@@ -64,6 +64,18 @@ describe('tour provider', () => {
       </MemoryRouter>,
     );
   }
+
+  it('offers onboarding after logging in on the same mounted app, with a compact labelled entry', async () => {
+    vi.mocked(fetchAuthSession).mockResolvedValueOnce({username:null,mode:'local',authRequired:true,authenticated:false,expiresAt:null})
+      .mockResolvedValue({username:'new-user',mode:'local',authRequired:true,authenticated:true,expiresAt:null});
+    function Login() { const navigate = useNavigate(); return <button onClick={() => navigate('/workspaces')}>Log in</button>; }
+    render(<MemoryRouter initialEntries={['/login']}><TourProvider><Login/><TourLauncherButton showLabel/></TourProvider></MemoryRouter>);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByRole('dialog', {name:'New to Pockymoe?'})).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'Log in'}));
+    expect(await screen.findByRole('dialog',{name:'New to Pockymoe?'})).toBeVisible();
+    expect(screen.getByRole('button',{name:'Tutorial'})).toHaveTextContent('Tutorial');
+  });
 
   it('offers the tour once per account and remembers "Later" without leaking to another user', async () => {
     vi.mocked(fetchAuthSession).mockResolvedValue({ username: 'alice', mode: 'local', authRequired: true, authenticated: true, expiresAt: null });

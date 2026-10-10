@@ -278,7 +278,7 @@ test('desktop guided tour walks every chapter on the real controls', async ({ pa
   // Escape closes; the rail and Settings entries reopen it at any time.
   await page.keyboard.press('Escape');
   await expect(hub).toHaveCount(0);
-  await rail.getByRole('button', { name: '使用教程' }).click();
+  await rail.getByRole('button', { name: '引导教程' }).click();
   await expect(hub).toBeVisible();
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: '打开设置' }).first().click();
@@ -322,7 +322,7 @@ test('phone guided tour keeps cards on screen and teaches touch controls', async
   await page.goto('/workspaces');
   await page.getByRole('button', { name: '打开导航' }).tap();
   await snapshot(page, shot('menu-entry'));
-  await page.getByRole('navigation', { name: 'Supervisor 导航' }).getByRole('button', { name: '使用教程' }).tap();
+  await page.getByRole('navigation', { name: 'Supervisor 导航' }).getByRole('button', { name: '引导教程' }).tap();
   await expect(page.locator('#pockymoe-tour-root .pm-tour-hub')).toBeVisible();
   await snapshot(page, shot('hub'));
 
@@ -442,10 +442,12 @@ test('relay guided tour adds devices through the real device page (mocked Relay 
   const welcome = page.locator('#pockymoe-tour-root .pm-tour-welcome');
   await expect(welcome).toBeVisible();
   await welcome.getByRole('button', { name: '稍后' }).click();
-  await page.getByRole('button', { name: /demo/ }).click();
-  await expect(page.getByRole('menuitem', { name: '使用教程' })).toBeVisible();
-  await snapshot(page, shot('account-menu-entry'));
-  await page.getByRole('menuitem', { name: '使用教程' }).click();
+  const launcher = page.locator('header.product-topbar').getByRole('button', {name:'引导教程',exact:true});
+  await expect(launcher).toBeVisible();
+  await expect(launcher.locator('svg')).toBeVisible();
+  await expect(launcher).toHaveText('引导教程');
+  await snapshot(page, shot('topbar-tutorial-entry'));
+  await launcher.click();
   await openChapter(page, '设备与工作区');
   const add = page.locator('button[aria-controls="add-device-form"]');
   await showStep(page, 'relay-add-device', shot('devices-add-device'), add);
