@@ -897,6 +897,12 @@ export interface ThreadHistoryItemDto {
   sequence?: number | null;
   transcriptOrder?: number | null;
   sourceTurnId?: string | null;
+  origin?: string | null;
+  taskStatus?: string | null;
+  taskId?: string | null;
+  waitingStartedAt?: string | null;
+  awakenedAt?: string | null;
+  backgroundTaskCount?: number | null;
   status?: string | null;
   assetPath?: string | null;
   changedFiles?: number | null;
