@@ -320,6 +320,29 @@ enum Commands {
         #[arg(long, env = "REMOTE_CODEX_DATABASE_PATH")]
         database: Option<std::path::PathBuf>,
     },
+    /// Install this device from the official GitHub runtime release.
+    Setup {
+        #[arg(long)]
+        relay: String,
+        #[arg(long, conflicts_with = "code", required_unless_present = "code")]
+        token: Option<String>,
+        #[arg(long, conflicts_with = "token")]
+        code: Option<String>,
+        #[arg(long, default_value_t = 8787, value_parser = clap::value_parser!(u16).range(1..))]
+        port: u16,
+    },
+    /// Run a native device using its saved private configuration.
+    DeviceRun {
+        #[arg(long)]
+        config: std::path::PathBuf,
+    },
+    #[command(hide = true)]
+    RuntimeMaintenance { action: String },
+    #[command(hide = true)]
+    InternalUpdate {
+        #[arg(long)]
+        plan: std::path::PathBuf,
+    },
     /// Print version.
     Version,
 }
@@ -466,6 +489,34 @@ async fn main() -> Result<()> {
                 "SHA-256 {}",
                 remote_codex_supervisor::relay_device_fingerprint(&database)?
             );
+        }
+        Commands::Setup {
+            relay,
+            token,
+            code,
+            port,
+        } => {
+            remote_codex_supervisor::distribution::setup(
+                remote_codex_supervisor::distribution::SetupOptions {
+                    relay,
+                    token,
+                    code,
+                    port,
+                },
+            )
+            .await?;
+        }
+        Commands::DeviceRun { config } => {
+            remote_codex_supervisor::distribution::run_device(config).await?
+        }
+        Commands::RuntimeMaintenance { action } => println!(
+            "{}",
+            serde_json::to_string(
+                &remote_codex_supervisor::distribution::maintenance_cli(&action).await?
+            )?
+        ),
+        Commands::InternalUpdate { plan } => {
+            remote_codex_supervisor::distribution::run_worker(plan).await?
         }
         Commands::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));

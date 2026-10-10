@@ -58,6 +58,7 @@ jobs:
               - 'npm/**'
               - 'scripts/*.mjs'
               - 'scripts/setup.sh'
+              - 'scripts/*.py'
               - 'package.json'
             workflows:
               - '.github/workflows/**'
@@ -164,7 +165,9 @@ jobs:
       - name: Check setup and real systemd unit parsing without starting services
         env:
           REMOTE_CODEX_TEST_SYSTEMD: '1'
-        run: node --test scripts/setup.test.mjs
+        run: |
+          node --test scripts/setup.test.mjs scripts/native-setup.test.mjs
+          python3 scripts/prepare-runtime-release.test.py
 
   result:
     name: PR checks complete

@@ -46,7 +46,7 @@ fn cli_bin_dir(database: &std::path::Path) -> Option<std::path::PathBuf> {
         "remote-codex"
     };
     if exe.file_name()? == name {
-        return None;
+        return exe.parent().map(std::path::Path::to_path_buf);
     }
     let dir = database.with_extension("cli-bin");
     let linked = (|| -> std::io::Result<()> {

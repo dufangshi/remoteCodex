@@ -15,34 +15,9 @@ const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '..',
 );
-const platformDirs = [
-  'darwin-arm64',
-  'linux-arm64-gnu',
-  'linux-x64-gnu',
-  'win32-x64-msvc',
-];
-
 updateJson(path.join(repoRoot, 'package.json'), (manifest) => {
   manifest.version = version;
 });
-updateJson(
-  path.join(repoRoot, 'npm', 'remote-codex', 'package.json'),
-  (manifest) => {
-    manifest.version = version;
-    for (const dependency of Object.keys(manifest.optionalDependencies ?? {})) {
-      manifest.optionalDependencies[dependency] = version;
-    }
-  },
-);
-for (const directory of platformDirs) {
-  updateJson(
-    path.join(repoRoot, 'npm', directory, 'package.json'),
-    (manifest) => {
-      manifest.version = version;
-    },
-  );
-}
-
 const cargoPath = path.join(repoRoot, 'Cargo.toml');
 const cargo = fs.readFileSync(cargoPath, 'utf8');
 const cargoVersionPattern =
@@ -52,7 +27,7 @@ if (!cargoVersionPattern.test(cargo))
 const updatedCargo = cargo.replace(cargoVersionPattern, `$1"${version}"`);
 fs.writeFileSync(cargoPath, updatedCargo);
 console.log(
-  `Set Remote Codex workspace and npm package versions to ${version}.`,
+  `Set Remote Codex workspace runtime version to ${version}.`,
 );
 
 function updateJson(filePath, update) {

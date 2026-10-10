@@ -1,4 +1,4 @@
-name: Native npm release
+name: GitHub native runtime release
 
 on:
   workflow_dispatch:
@@ -8,21 +8,19 @@ on:
         required: true
         type: string
       channel:
-        description: Package only, publish to next, or promote a stable release
+        description: Verify artifacts only, or publish a stable GitHub Release
         required: true
         default: dry-run
         type: choice
         options:
           - dry-run
-          - next
           - latest
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
-  group: native-npm-release-${{ github.ref }}
+  group: native-runtime-release-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -39,17 +37,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 0.12.55/0.12.56 were cut from a branch missing 0.12.53's migration, so
-      # devices that had updated refused to start. A release must contain
-      # whatever npm currently serves as latest.
+      # A version with database migrations may not drop already-published code.
       - name: Refuse releases that drop already-published commits
         if: inputs.channel != 'dry-run'
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          latest="$(npm view remote-codex dist-tags.latest)"
-          git fetch --force origin "refs/tags/v${latest}:refs/tags/v${latest}"
-          if ! git merge-base --is-ancestor "v${latest}" HEAD; then
-            echo "::error::HEAD does not contain v${latest}, the current npm latest. Merge it before releasing."
+          set -euo pipefail
+          latest="$(gh release list --limit 100 --exclude-drafts --exclude-pre-releases --json tagName --jq '[.[] | .tagName | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))][0]')"
+          test -n "${latest}"
+          git fetch --force origin "refs/tags/${latest}:refs/tags/${latest}"
+          if ! git merge-base --is-ancestor "${latest}" HEAD; then
+            echo "::error::HEAD does not contain ${latest}, the current GitHub runtime release. Merge it before releasing."
             exit 1
           fi
 
@@ -125,6 +125,14 @@ jobs:
         shell: bash
         run: python -m pip install 'cargo-zigbuild==0.23.4'
 
+      - name: Validate native PowerShell setup syntax
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'scripts/setup.ps1'), [ref]$null, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
+
       - name: Select native Perl for vendored OpenSSL on Windows
         if: runner.os == 'Windows'
         shell: pwsh
@@ -151,6 +159,11 @@ jobs:
         if: matrix.runnable
         shell: bash
         run: target/'${{ matrix.cargo_target }}'/release/'${{ matrix.binary }}' version
+
+      - name: Verify independent native restart without npm or model requests
+        if: matrix.key == 'linux-x64-gnu'
+        shell: bash
+        run: python3 scripts/test-native-update.py --binary target/${{ matrix.cargo_target }}/release/${{ matrix.binary }}
 
       - name: Stage artifact
         shell: bash
@@ -199,7 +212,7 @@ jobs:
           test "$(git -C ./remote-codex-thread-ui rev-parse HEAD)" = "${THREAD_UI_SHA}"
           echo "Thread UI: ${THREAD_UI_SHA}" >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Build Web assets for the npm launcher
+      - name: Build pinned Web assets for the native runtime
         shell: bash
         run: |
           set -euo pipefail
@@ -216,46 +229,37 @@ jobs:
           retention-days: 7
 
   package:
-    name: Assemble and verify npm packages
+    name: Assemble complete native release
     needs: [verify, native, web]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          package-manager-cache: false
-
       - uses: actions/download-artifact@v4
         with:
           name: web
-          path: apps/supervisor-web/dist
-
+          path: artifacts/web
       - uses: actions/download-artifact@v4
         with:
           pattern: '{darwin-arm64,linux-arm64-gnu,linux-x64-gnu,win32-x64-msvc}'
           path: artifacts/native
-
-      - name: Prepare and pack release
-        shell: bash
+      - name: Assemble versioned binaries, Web and checksums
+        run: python3 scripts/prepare-runtime-release.py --artifacts-dir artifacts/native --web-dir artifacts/web --out release-assets
+      - name: Verify native bootstrap regressions
         run: |
-          set -euo pipefail
-          node scripts/prepare-npm-release.mjs --artifacts-dir artifacts/native --require-all
-          node scripts/verify-npm-package.mjs --prepared
-          node scripts/pack-npm-release.mjs
-
+          sh -n scripts/setup.sh
+          node --test scripts/native-setup.test.mjs
+          python3 scripts/prepare-runtime-release.test.py
       - uses: actions/upload-artifact@v4
         with:
-          name: remote-codex-npm-${{ github.sha }}
-          path: dist/npm/
+          name: remote-codex-runtime-${{ github.sha }}
+          path: release-assets/
           if-no-files-found: error
           retention-days: 14
 
   release:
-    if: inputs.channel != 'dry-run'
-    name: Publish GitHub native assets
+    if: inputs.channel == 'latest'
+    name: Publish immutable GitHub runtime release
     needs: package
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -263,27 +267,18 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v6
-
       - uses: actions/download-artifact@v4
         with:
-          path: artifacts
-
+          name: remote-codex-runtime-${{ github.sha }}
+          path: release-assets
       - name: Create or verify immutable release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          version=$(node -p "require('./package.json').version")
+          version="$(cat release-assets/runtime-version.txt)"
           tag="v${version}"
-          mkdir -p release-assets
-          for key in darwin-arm64 linux-arm64-gnu linux-x64-gnu; do
-            cp "artifacts/${key}/remote-codex" "release-assets/remote-codex-${key}"
-            chmod 0755 "release-assets/remote-codex-${key}"
-          done
-          cp artifacts/win32-x64-msvc/remote-codex.exe release-assets/remote-codex-win32-x64-msvc-cli.exe
-          (cd release-assets && sha256sum remote-codex-* > SHA256SUMS)
-
           if gh release view "${tag}" >/dev/null 2>&1; then
             target=$(gh release view "${tag}" --json targetCommitish --jq .targetCommitish)
             test "${target}" = "${GITHUB_SHA}" || {
@@ -295,39 +290,10 @@ jobs:
             for asset in release-assets/*; do
               cmp "${asset}" "existing-assets/$(basename "${asset}")"
             done
+            gh release edit "${tag}" --latest
           else
             gh release create "${tag}" release-assets/* \
-              --target "${GITHUB_SHA}" \
+              --target "${GITHUB_SHA}" --latest \
               --title "Remote Codex ${version}" \
-              --notes "Rust supervisor and relay runtime release. The Windows CLI asset uses the -cli suffix; the separately released Device Manager updates this runtime through npm. Native binaries are unsigned; verify downloads with SHA256SUMS."
+              --notes-file docs/runtime-release-notes.md
           fi
-
-  publish:
-    if: inputs.channel != 'dry-run'
-    name: Publish npm ${{ inputs.channel }}
-    needs: [package, release]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    environment: npm-release
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          registry-url: https://registry.npmjs.org
-          package-manager-cache: false
-
-      - name: Install OIDC-capable npm
-        run: npm install --global npm@11.19.1
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: remote-codex-npm-${{ github.sha }}
-          path: dist/npm
-
-      - name: Publish native packages before launcher
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          REMOTE_CODEX_ALLOW_LATEST: ${{ inputs.channel == 'latest' && '1' || '0' }}
-        run: node scripts/publish-npm-release.mjs '${{ inputs.channel }}'

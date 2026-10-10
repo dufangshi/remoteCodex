@@ -20,8 +20,8 @@ done
 case "$relay_url" in https://*|http://localhost:*|http://127.0.0.1:*) ;; *) echo 'Relay must use HTTPS.' >&2; exit 1 ;; esac
 case "$setup_port" in *[!0-9]*|'') echo 'Invalid port' >&2; exit 1 ;; esac
 download() {
-  if command -v curl >/dev/null 2>&1; then curl --fail --silent --show-error --location --connect-timeout 20 --max-time 300 "$1" -o "$2"
-  elif command -v wget >/dev/null 2>&1; then wget -q --timeout=300 "$1" -O "$2"
+  if command -v curl >/dev/null 2>&1; then curl --fail --show-error --location --progress-bar --retry 2 --connect-timeout 20 --max-time 300 --speed-time 30 --speed-limit 1024 "$1" -o "$2"
+  elif command -v wget >/dev/null 2>&1; then wget --progress=bar:force --timeout=30 --tries=3 "$1" -O "$2"
   else echo 'curl or wget is required.' >&2; exit 1; fi
 }
 case "$(uname -s)" in Darwin) setup_os=darwin ;; Linux) setup_os=linux ;; *) echo 'This installer supports macOS and Linux.' >&2; exit 1 ;; esac
@@ -35,42 +35,44 @@ fi
 setup_root="$HOME/.local/share/remote-codex"
 mkdir -p "$setup_root"
 setup_tmp=$(mktemp -d "$setup_root/bootstrap.XXXXXX")
-trap 'setup_exit=$?; rm -f "$setup_tmp/node.tar.gz" "$setup_tmp/SHASUMS256.txt"; rmdir "$setup_tmp" 2>/dev/null || true; exit "$setup_exit"' EXIT
+trap 'setup_exit=$?; rm -rf "$setup_tmp"; exit "$setup_exit"' EXIT
 trap 'exit 1' HUP INT TERM
-setup_node=$(command -v node || true)
-if [ -z "$setup_node" ] || ! "$setup_node" -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)' 2>/dev/null || ! command -v npm >/dev/null 2>&1; then
-  echo 'Installing a private Node.js LTS runtime…'
-  setup_node_version=v22.22.0
-  setup_archive="node-${setup_node_version}-${setup_os}-${setup_arch}"
-  setup_node_root="$setup_root/$setup_archive"
-  if [ ! -x "$setup_node_root/bin/node" ]; then
-    download "https://nodejs.org/dist/$setup_node_version/$setup_archive.tar.gz" "$setup_tmp/node.tar.gz"
-    download "https://nodejs.org/dist/$setup_node_version/SHASUMS256.txt" "$setup_tmp/SHASUMS256.txt"
-    setup_expected=$(awk -v name="$setup_archive.tar.gz" '$2 == name {print $1}' "$setup_tmp/SHASUMS256.txt")
-    if command -v sha256sum >/dev/null 2>&1; then setup_actual=$(sha256sum "$setup_tmp/node.tar.gz" | awk '{print $1}'); else setup_actual=$(shasum -a 256 "$setup_tmp/node.tar.gz" | awk '{print $1}'); fi
-    [ -n "$setup_expected" ] && [ "$setup_actual" = "$setup_expected" ] || { echo 'Node.js checksum failed.' >&2; exit 1; }
-    tar -xzf "$setup_tmp/node.tar.gz" -C "$setup_root"
-  fi
-  PATH="$setup_node_root/bin:$PATH"; export PATH
-  setup_node="$setup_node_root/bin/node"
+setup_repo=https://github.com/dufangshi/remoteCodex
+setup_asset="remote-codex-${setup_os}-${setup_arch}"
+[ "$setup_os" != linux ] || setup_asset="$setup_asset-gnu"
+echo 'Checking the latest Remote Codex GitHub release…'
+if ! download "$setup_repo/releases/latest/download/runtime-version.txt" "$setup_tmp/version"; then
+  echo 'Could not resolve the latest GitHub runtime release. Check your connection to github.com and retry.' >&2
+  exit 1
 fi
-echo 'Checking the latest Remote Codex release…'
-setup_launcher="$setup_root/runtime/lib/node_modules/remote-codex/bin/remote-codex.mjs"
-# Resolve from the official registry even if this user's npm uses a stale mirror.
-setup_latest=$(npm view remote-codex@latest version --registry=https://registry.npmjs.org --prefer-online --json)
-setup_version=$("$setup_node" -e 'const v=JSON.parse(process.argv[1]); if(typeof v!=="string" || !/^\d+\.\d+\.\d+$/.test(v)) process.exit(1); process.stdout.write(v)' "$setup_latest")
-setup_installed=$("$setup_node" -e 'try { process.stdout.write(require(process.argv[1]).version) } catch {}' "$setup_root/runtime/lib/node_modules/remote-codex/package.json")
-if [ "$setup_installed" != "$setup_version" ] || [ ! -f "$setup_launcher" ]; then
-  echo "Installing Remote Codex ${setup_version}…"
-  npm install --global --prefix "$setup_root/runtime" "remote-codex@$setup_version" npm@10 --registry=https://registry.npmjs.org --prefer-online --no-audit --no-fund
+setup_version=$(tr -d '\r\n' < "$setup_tmp/version")
+# Only an exact stable version can become part of a download URL or path.
+if ! printf '%s\n' "$setup_version" | LC_ALL=C awk -F. 'NF != 3 {exit 1} {for (i=1;i<=3;i++) if ($i !~ /^[0-9]+$/) exit 1}'; then
+  echo 'GitHub returned an invalid runtime version.' >&2
+  exit 1
+fi
+echo "Downloading Remote Codex $setup_version ($setup_os/$setup_arch)…"
+setup_base="$setup_repo/releases/download/v$setup_version"
+download "$setup_base/SHA256SUMS" "$setup_tmp/SHA256SUMS"
+download "$setup_base/$setup_asset" "$setup_tmp/remote-codex"
+setup_expected=$(awk -v name="$setup_asset" '$2 == name {count++; hash=$1} END {if(count == 1 && length(hash) == 64 && hash !~ /[^0-9a-fA-F]/) print tolower(hash); else exit 1}' "$setup_tmp/SHA256SUMS") || { echo 'Invalid or missing runtime checksum.' >&2; exit 1; }
+if command -v sha256sum >/dev/null 2>&1; then
+  setup_actual=$(sha256sum "$setup_tmp/remote-codex" | awk '{print $1}')
+elif command -v shasum >/dev/null 2>&1; then
+  setup_actual=$(shasum -a 256 "$setup_tmp/remote-codex" | awk '{print $1}')
 else
-  echo "Remote Codex $setup_version is already installed."
+  echo 'sha256sum or shasum is required to verify the runtime.' >&2; exit 1
 fi
-rm -f "$setup_tmp/node.tar.gz" "$setup_tmp/SHASUMS256.txt"
-rmdir "$setup_tmp"
-trap - EXIT HUP INT TERM
+[ "$setup_actual" = "$setup_expected" ] || { echo 'Runtime checksum verification failed. Nothing has been installed.' >&2; exit 1; }
+chmod 700 "$setup_tmp/remote-codex"
+if ! setup_actual_version=$("$setup_tmp/remote-codex" version); then
+  echo 'Cannot execute the downloaded runtime. Linux requires glibc 2.28 or newer.' >&2; exit 1
+fi
+[ "$setup_actual_version" = "$setup_version" ] || { echo 'Runtime version verification failed.' >&2; exit 1; }
+echo "Configuring Remote Codex $setup_version…"
+# Do not exec: keep the cleanup trap alive until native setup finishes.
 if [ -n "$setup_token" ]; then
-  exec "$setup_node" "$setup_launcher" setup --relay "$relay_url" --token "$setup_token" --port "$setup_port"
+  "$setup_tmp/remote-codex" setup --relay "$relay_url" --token "$setup_token" --port "$setup_port"
 else
-  exec "$setup_node" "$setup_launcher" setup --relay "$relay_url" --code "$setup_code" --port "$setup_port"
+  "$setup_tmp/remote-codex" setup --relay "$relay_url" --code "$setup_code" --port "$setup_port"
 fi
