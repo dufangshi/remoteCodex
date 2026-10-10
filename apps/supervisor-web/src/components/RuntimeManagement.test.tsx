@@ -53,6 +53,18 @@ it('distinguishes a prolonged restart disconnect and recovers without another cl
   } finally { vi.useRealTimers(); }
 });
 
+it('offers the native migration on the last npm release even when it matches latest', async () => {
+  api.request.mockImplementation(async (path: string) => path.endsWith('/harnesses') ? [] : {
+    runningVersion: '0.12.77', installedVersion: '0.12.77', latestVersion: '0.12.77', canUpdate: true,
+    canRestart: false, nativeMigration: true,
+    reason: 'This device still runs from the retired npm package. Update installs the native GitHub runtime and moves its service to it.',
+  });
+  mount('/devices/a/workspaces');
+  expect(await screen.findByRole('button', { name: 'Update' })).toBeEnabled();
+  expect(screen.getByText(/retired npm package/)).toBeVisible();
+  expect(screen.queryByRole('button', { name: /Restart Supervisor/ })).not.toBeInTheDocument();
+});
+
 it('offers repair when npm is old but the running process already matches latest', async () => {
   api.request.mockImplementation(async (path: string) => path.endsWith('/harnesses') ? [] : {
     runningVersion: '0.12.32', installedVersion: '0.12.30', latestVersion: '0.12.32', canUpdate: true,

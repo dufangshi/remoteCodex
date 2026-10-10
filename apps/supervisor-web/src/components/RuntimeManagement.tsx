@@ -43,6 +43,8 @@ type Supervisor = {
   latestVersion?: string;
   canUpdate: boolean;
   canRestart?: boolean;
+  /** Running from the retired npm package; Update moves it to the native runtime. */
+  nativeMigration?: boolean;
   startedAt?: string;
   uptimeSeconds?: number;
   observedAt?: number;
@@ -470,6 +472,7 @@ function DeviceRuntimeManagement({
                 {translate("devices.checkUpdates")}</button>
               {supervisor?.latestVersion &&
                 (supervisor.latestVersion !== supervisor.runningVersion ||
+                  supervisor.nativeMigration ||
                   (supervisor.installedVersion &&
                     supervisor.latestVersion !==
                       supervisor.installedVersion)) &&

@@ -190,6 +190,8 @@ const FILE_KEEP = [
   // Native installs run `native/current/remote-codex` from service units and
   // link it as ~/.local/bin/remote-codex; Pockymoe names are added beside them.
   [/^crates\/supervisor\/src\/distribution\/(mod|releases)\.rs$/, ['"remote-codex"', '"remote-codex.exe"']],
+  // Native setup bridges legacy npm installs of the `remote-codex` package.
+  [/^crates\/supervisor\/src\/distribution\/setup\.rs$/, ['"remote-codex"']],
 ];
 
 const REPLACEMENTS = [

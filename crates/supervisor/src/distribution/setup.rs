@@ -122,7 +122,7 @@ fn bridge(path: &Path, binary: &Path) -> Result<()> {
             .join("package.json"),
     )?;
     ensure!(
-        package["name"] == "pockymoe",
+        package["name"] == "remote-codex",
         "Unrecognized legacy launcher package"
     );
     let helper = path.with_file_name("supervisor-update.mjs");

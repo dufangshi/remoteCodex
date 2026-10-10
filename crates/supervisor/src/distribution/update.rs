@@ -114,11 +114,30 @@ async fn action(context: ContextData, action: &str) -> Result<Value> {
         .as_ref()
         .is_some_and(|i| i.executable == context.executable)
         || std::env::current_exe()?.starts_with(install_root());
-    let allowed = release_binary && context.database.is_absolute();
-    let mut base = json!({"runningVersion":context.running_version,"installedVersion":installed,"canUpdate":allowed,"canRestart":allowed,"manager":"github-release","path":context.executable,"job":job(&context),"releaseUrl":releases::REPO});
+    // The last npm release runs this binary from the retired npm launcher.
+    // Its Update moves the device to the native GitHub runtime; Device
+    // Manager devices keep their bootstrap and migrate through setup.ps1.
+    let npm_launcher = !release_binary && npm_launched(&context.environment);
+    let device_manager = context
+        .environment
+        .contains_key("POCKYMOE_WINDOWS_DEVICE_MANAGER");
+    let migrate = npm_launcher && !device_manager;
+    let allowed = (release_binary || migrate) && context.database.is_absolute();
+    let mut base = json!({"runningVersion":context.running_version,"installedVersion":installed,"canUpdate":allowed,"canRestart":allowed && !migrate,"manager":if migrate {"npm"} else {"github-release"},"nativeMigration":migrate,"path":context.executable,"job":job(&context),"releaseUrl":releases::REPO});
     if !allowed {
-        base["reason"] = json!("This is a source or unmanaged executable. Run the GitHub setup command to install a managed native runtime.");
+        base["reason"] = json!(if npm_launcher && device_manager {
+            "This Windows Device Manager device runs the retired npm package. Run the Windows setup command from the Devices page to move it to the native GitHub runtime."
+        } else {
+            "This is a source or unmanaged executable. Run the GitHub setup command to install a managed native runtime."
+        });
         return Ok(base);
+    }
+    if migrate {
+        base["reason"] = json!("This device still runs from the retired npm package. Update installs the native GitHub runtime and moves its service to it.");
+        ensure!(
+            action != "restart",
+            "Update this device to the native runtime before restarting it"
+        );
     }
     if action == "status" {
         return Ok(base);
@@ -143,7 +162,8 @@ async fn action(context: ContextData, action: &str) -> Result<Value> {
         matches!(action, "launch" | "restart"),
         "Unknown native maintenance action"
     );
-    if action != "restart" && version == context.running_version && version == installed {
+    if action != "restart" && !migrate && version == context.running_version && version == installed
+    {
         return Ok(base);
     }
     ensure!(!active(&base["job"]), "A native update is already running");
@@ -194,6 +214,12 @@ async fn action(context: ContextData, action: &str) -> Result<Value> {
         let _ = std::fs::remove_dir(&lock);
     }
     result
+}
+fn npm_launched(environment: &BTreeMap<String, String>) -> bool {
+    environment
+        .get("POCKYMOE_LAUNCHER_PATH")
+        .and_then(|path| Path::new(path).file_name()?.to_str())
+        == Some("remote-codex.mjs")
 }
 pub async fn updater(state: &Supervisor, action_name: &str) -> Result<Value> {
     action(context(state)?, action_name).await
@@ -405,6 +431,18 @@ pub async fn run_worker(path: PathBuf) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_the_retired_npm_launcher_counts_as_an_npm_install() {
+        let env =
+            |path: &str| BTreeMap::from([("POCKYMOE_LAUNCHER_PATH".to_string(), path.to_string())]);
+        assert!(npm_launched(&env(
+            "/usr/lib/node_modules/remote-codex/bin/remote-codex.mjs"
+        )));
+        assert!(!npm_launched(&env(
+            "/home/u/.local/share/remote-codex/native/current/remote-codex"
+        )));
+        assert!(!npm_launched(&BTreeMap::new()));
+    }
     #[test]
     fn native_update_recovers_stale_worker_and_releases_private_lock() {
         let root = tempfile::tempdir().unwrap();
