@@ -304,11 +304,11 @@ pub async fn run_worker(path: PathBuf) -> Result<()> {
         activated = true;
         started = true;
         if plan.context.relay {
-            service::start(
-                &candidate,
-                &plan.context.config,
-                plan.context.manager.as_deref(),
-            )?;
+            // A legacy npm/tmux device has no native manager marker yet. Adopt
+            // the available persistent manager instead of leaving migration
+            // in a transient worker that cannot start the device after reboot.
+            let manager = plan.context.manager.clone().or_else(service::detect);
+            service::start(&candidate, &plan.context.config, manager.as_deref())?;
         } else {
             let mut env = plan.context.environment.clone();
             env.retain(|key, _| {
