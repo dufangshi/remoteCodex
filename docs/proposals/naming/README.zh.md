@@ -1,6 +1,8 @@
 # 项目命名提案
 
-日期：2026-10-08。状态：候选，尚未决定。
+> 最终定名：**Pockymoe**（2026-10-10）。图标见 [`pockymoe/`](pockymoe/README.zh.md)，改名方式和兼容规则见 [`docs/rename-pockymoe.md`](../../rename-pockymoe.md)。下面是第一轮候选，保留作为历史记录。
+
+日期：2026-10-08。状态：已定名为 Pockymoe。
 
 ![候选名与图标预览](preview.png)
 
