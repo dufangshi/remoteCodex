@@ -177,6 +177,10 @@ test('cross-device split keeps both chats writable and tools follow the last foc
       localStorage.setItem('remote-codex-theme-mode', 'dark');
     });
     const page = await context.newPage();
+    // The first-run onboarding card would cover the workbench controls.
+    await page.addLocatorHandler(page.locator('.pm-tour-welcome'), async () => {
+      await page.getByRole('button', { name: '稍后', exact: true }).click();
+    });
     await page.goto(`${base}/devices/${deviceA}/threads/${a.id}`);
     const primary = page.getByTestId('primary-pane'),
       secondary = page.getByTestId('reference-pane');

@@ -159,6 +159,8 @@ test('dual conversations send concurrently to real thread IDs with independent d
   await page.addInitScript(() => {
     localStorage.setItem('remote-codex.locale', 'zh-CN');
     localStorage.setItem('remote-codex-theme-mode', 'light');
+    // The onboarding welcome card would cover the workbench.
+    localStorage.setItem('pockymoe.onboarding.v1:'+JSON.stringify([location.origin,'local:owner']),JSON.stringify({welcomeDismissed:true,completed:[],resume:{}}));
   });
   const { a, b, c } = await fixture(request);
   await page.goto(`/threads/${a.id}`);
