@@ -5,6 +5,7 @@ import {
 import type { ComponentProps } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { DeviceMonitor } from './DeviceMonitor';
+import { TourLauncherButton } from './onboarding/TourProvider';
 import { relayDeviceIdFromPath } from '../lib/relayRoutes';
 
 import { useAppShellNav } from './AppShellNavContext';
@@ -46,7 +47,7 @@ export function ThreadWorkspaceLayout({
   return (
     <SharedThreadWorkspaceLayout
       {...props}
-      deviceMonitor={<DeviceMonitor key={deviceId} />}
+      deviceMonitor={<><DeviceMonitor key={deviceId} /><TourLauncherButton /></>}
       workspaceReturnHref={props.workspaceReturnHref ?? currentWorkspacesHref()}
       settingsSections={props.settingsSections ?? appSettingsSections()}
       {...(effectiveTheme ? { effectiveTheme } : {})}

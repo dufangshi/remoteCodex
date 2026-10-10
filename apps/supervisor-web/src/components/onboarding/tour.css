@@ -1,0 +1,288 @@
+/* Guided tour: a non-modal card and a spotlight that never blocks the page. */
+.pm-tour-spotlight {
+  position: fixed;
+  z-index: 300;
+  border-radius: 10px;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 2px var(--theme-accent-solid),
+    0 0 0 9999px rgb(0 0 0 / 0.42);
+  transition: top 160ms ease, left 160ms ease, width 160ms ease, height 160ms ease;
+}
+.pm-tour-spotlight.is-prerequisite {
+  box-shadow:
+    0 0 0 2px var(--status-warning-fg, #e0b341),
+    0 0 0 9999px rgb(0 0 0 / 0.28);
+}
+.pm-tour-card {
+  position: fixed;
+  z-index: 301;
+  width: min(360px, calc(100vw - 16px));
+  max-height: min(70vh, 460px);
+  overflow-y: auto;
+  padding: 14px 14px 12px;
+  border: 1px solid var(--theme-border-strong, var(--theme-border));
+  border-radius: 12px;
+  background: var(--theme-panel);
+  color: var(--theme-fg);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.35);
+  font-size: 13px;
+  line-height: 1.55;
+  transition: top 160ms ease, left 160ms ease;
+}
+.pm-tour-card:focus-within {
+  outline: none;
+}
+.pm-tour-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+.pm-tour-eyebrow {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--theme-accent-solid);
+}
+.pm-tour-count {
+  font-size: 11px;
+  color: var(--theme-fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+.pm-tour-title {
+  margin: 4px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.pm-tour-card-header .pm-tour-title {
+  margin: 0;
+}
+.pm-tour-body {
+  margin: 6px 0 0;
+  color: var(--theme-fg-soft, var(--theme-fg));
+}
+.pm-tour-prerequisite {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--status-warning-border, var(--theme-border));
+  border-radius: 8px;
+  background: var(--status-warning-bg, var(--theme-surface));
+  color: var(--status-warning-fg, var(--theme-fg));
+  font-size: 12px;
+}
+.pm-tour-prerequisite strong {
+  display: block;
+  font-weight: 600;
+}
+.pm-tour-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--theme-fg-muted);
+}
+.pm-tour-progress {
+  display: flex;
+  gap: 4px;
+  margin-top: 12px;
+}
+.pm-tour-progress span {
+  height: 3px;
+  flex: 1;
+  border-radius: 2px;
+  background: var(--theme-border);
+}
+.pm-tour-progress .is-done {
+  background: var(--theme-accent-border, var(--theme-accent-solid));
+}
+.pm-tour-progress .is-current {
+  background: var(--theme-accent-solid);
+}
+.pm-tour-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+}
+.pm-tour-spacer {
+  flex: 1;
+}
+.pm-tour-card button {
+  cursor: pointer;
+}
+.pm-tour-card button:focus-visible,
+.pm-tour-launcher:focus-visible {
+  outline: 2px solid var(--theme-accent-ring, var(--theme-accent-solid));
+  outline-offset: 2px;
+}
+.pm-tour-primary,
+.pm-tour-secondary {
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.pm-tour-primary {
+  background: var(--theme-accent-solid);
+  color: var(--theme-accent-solid-fg);
+}
+.pm-tour-primary:hover {
+  background: var(--theme-accent-solid-hover, var(--theme-accent-solid));
+}
+.pm-tour-secondary {
+  border: 1px solid var(--theme-border);
+  background: transparent;
+  color: var(--theme-fg);
+}
+.pm-tour-secondary:hover:not(:disabled) {
+  background: var(--theme-hover);
+}
+.pm-tour-secondary:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.pm-tour-link {
+  min-height: 32px;
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--theme-fg-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.pm-tour-link:hover {
+  color: var(--theme-fg);
+}
+.pm-tour-icon {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  margin: -4px -4px -4px 0;
+  border-radius: 6px;
+  color: var(--theme-fg-muted);
+}
+.pm-tour-icon:hover {
+  background: var(--theme-hover);
+  color: var(--theme-fg);
+}
+.pm-tour-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.pm-tour-welcome-icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  color: var(--theme-accent-solid);
+}
+.pm-tour-chapters {
+  display: grid;
+  gap: 2px;
+  margin: 10px -6px 0;
+  padding: 0;
+  list-style: none;
+}
+.pm-tour-chapter {
+  display: flex;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  gap: 10px;
+  padding: 6px;
+  border-radius: 8px;
+  text-align: left;
+  color: var(--theme-fg);
+}
+.pm-tour-chapter:hover,
+.pm-tour-chapter.is-next {
+  background: var(--theme-hover);
+}
+.pm-tour-chapter-index {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--theme-border);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--theme-fg-muted);
+}
+.pm-tour-chapter-index.is-done {
+  border-color: var(--theme-accent-solid);
+  background: var(--theme-accent-soft, transparent);
+  color: var(--theme-accent-solid);
+}
+.pm-tour-chapter-index svg {
+  width: 14px;
+  height: 14px;
+}
+.pm-tour-chapter-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  font-weight: 600;
+}
+.pm-tour-chapter-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--theme-fg-muted);
+}
+.pm-tour-chapter-action {
+  flex: none;
+  font-size: 12px;
+  color: var(--theme-accent-solid);
+}
+.pm-tour-launcher {
+  display: inline-flex;
+  width: 35px;
+  height: 35px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--theme-fg-muted);
+}
+.pm-tour-launcher:hover {
+  background: var(--theme-hover);
+  color: var(--theme-fg);
+}
+.pm-tour-launcher svg {
+  width: 16px;
+  height: 16px;
+}
+/* The phone topbar is already full; phones use Settings or the navigation menu. */
+.thread-ui-shell .matter-workbench .matter-topbar .pm-tour-launcher {
+  display: none;
+}
+@media (max-width: 639px) {
+  .pm-tour-card {
+    padding: 12px 12px 10px;
+  }
+  .pm-tour-primary,
+  .pm-tour-secondary {
+    min-height: 40px;
+  }
+  .pm-tour-icon {
+    width: 36px;
+    height: 36px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pm-tour-spotlight,
+  .pm-tour-card {
+    transition: none;
+  }
+}

@@ -6,6 +6,7 @@ import { RuntimeManagement } from './RuntimeManagement';
 import { UpstreamsSettings } from './UpstreamsSettings';
 import { ModelPricingSettings } from './ModelPricingSettings';
 import { ComposerShortcutSettings } from './ComposerShortcutSettings';
+import { TourSettingsEntry } from './onboarding/TourProvider';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type {
@@ -811,6 +812,7 @@ export function AppShellSettingsDialog({
         <div className="divide-y divide-[var(--theme-border)]">
           {section === 'preferences' && <fieldset className="py-5"><LanguageSwitcher /><p className="mt-1 text-xs text-[var(--theme-fg-muted)]">{translate("files.chooseTheInterfaceLanguageForThisBrowser")}</p></fieldset>}
           {section === 'preferences' && <ComposerShortcutSettings />}
+          {section === 'preferences' && <TourSettingsEntry />}
           {section === 'preferences' ? (
             <fieldset className="py-5">
               <legend className="text-sm font-semibold text-[var(--theme-fg)]">

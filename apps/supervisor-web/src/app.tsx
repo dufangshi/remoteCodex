@@ -30,6 +30,7 @@ import {
 import {
   AppShellSettingsDialog,
 } from './components/AppShellNavigation';
+import { TourProvider } from './components/onboarding/TourProvider';
 import { LoginPage } from './pages/LoginPage';
 import { RelayAccountPage } from './pages/RelayAccountPage';
 import { RelayAdminPage } from './pages/RelayAdminPage';
@@ -298,6 +299,7 @@ function AppShell({
 
   return (
     <AppShellNavContext.Provider value={shellNavValue}>
+      <TourProvider>
       <div
         className={`bg-[var(--app-bg)] text-[var(--app-fg)] ${
           isViewportLockedRoute || isSettingsRoute
@@ -342,6 +344,7 @@ function AppShell({
         </main>
       </div>
       <AppShellSettingsDialog />
+      </TourProvider>
     </AppShellNavContext.Provider>
   );
 }

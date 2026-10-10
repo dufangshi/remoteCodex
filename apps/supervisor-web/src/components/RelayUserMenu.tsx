@@ -1,5 +1,5 @@
 import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
-import { LogOut, Settings, UserRound, MonitorSmartphone } from 'lucide-react';
+import { CircleHelp, LogOut, Settings, UserRound, MonitorSmartphone } from 'lucide-react';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   useEffect,
@@ -11,6 +11,7 @@ import {
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 import { useAppShellNav } from './AppShellNavContext';
+import { useTour } from './onboarding/TourProvider';
 import type { RelaySessionDto } from '@pockymoe/shared';
 import {
   ApiError,
@@ -44,6 +45,7 @@ export function RelayUserMenu({
 }) {
   useI18n();
   const shellNav = useAppShellNav();
+  const tour = useTour();
   const navigate = useNavigate();
   const location = useLocation();
   const menuId = useId();
@@ -237,6 +239,11 @@ export function RelayUserMenu({
             className="flex h-11 items-center gap-2 rounded-md px-3 text-sm text-[var(--theme-fg)] hover:bg-[var(--theme-hover)] focus-visible:bg-[var(--theme-hover)]">
             <MonitorSmartphone aria-hidden="true" className="h-4 w-4" />{translate('files.deviceManagement')}
           </Link>
+          {tour && <button type="button" role="menuitem"
+            className="flex h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-[var(--theme-fg)] hover:bg-[var(--theme-hover)] focus-visible:bg-[var(--theme-hover)]"
+            onClick={() => { setOpen(false); tour.openHub(); }}>
+            <CircleHelp aria-hidden="true" className="h-4 w-4" />{translate('tour.entry')}
+          </button>}
 
           <button
             aria-busy={loggingOut}

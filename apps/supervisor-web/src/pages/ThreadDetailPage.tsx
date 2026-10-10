@@ -6,6 +6,7 @@ import { WorkbenchReferencePane } from '../components/WorkbenchReferencePane';
 import { WorkbenchCollaboration } from '../components/WorkbenchCollaboration';
 import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { DeviceMonitor } from '../components/DeviceMonitor';
+import { TourLauncherButton } from '../components/onboarding/TourProvider';
 import { HarnessSettingsDialog, HarnessSettingsFields } from '../components/HarnessSettingsDialog';
 import { DshPluginPanel, type DshConsoleTarget, type DshPanelAction, type DshPanelResult } from '../components/DshHarnessPanel';
 import { DEEPSEEK_HARNESS_PANEL_KIND } from '@pockymoe/thread-ui/builtin-plugins';
@@ -3839,7 +3840,7 @@ export function ThreadDetailPage() {
     {nativeResult && <LongTextDialog open title={nativeResult.title} text={nativeResult.text} onClose={() => setNativeResult(null)} />}
     {relayThreadIsOwner && relayRouteDeviceId && <PortMappingsControl key={relayRouteDeviceId} deviceId={relayRouteDeviceId} open={portsOpen} onOpenChange={setPortsOpen} />}
     <ThreadDetailSurface
-      deviceMonitor={<DeviceMonitor key={relayRouteDeviceId ?? 'local'} />}
+      deviceMonitor={<><DeviceMonitor key={relayRouteDeviceId ?? 'local'} /><TourLauncherButton /></>}
       workbench={{ ...workbenchNavigation, panels: {
         deviceLabel: presentationDeviceName ?? (relayRouteDeviceId ? relayRouteDeviceId.slice(0, 8) : translate('workbench.localDeviceName')),
         workspaceLabel: detail?.workspace.label ?? workbenchNavigation.workspacePath,

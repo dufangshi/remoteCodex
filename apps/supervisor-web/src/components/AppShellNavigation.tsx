@@ -1,11 +1,12 @@
 import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { useEffect, useRef } from 'react';
-import { MonitorSmartphone, Menu, Settings, X } from 'lucide-react';
+import { CircleHelp, MonitorSmartphone, Menu, Settings, X } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { useAppShellNav } from './AppShellNavContext';
 import { menuItemClassName } from './appShellNavigationModel';
 import { relayModeActive } from '../lib/api';
+import { useTour } from './onboarding/TourProvider';
 export { AppShellSettingsDialog } from './AppShellSettingsDialog';
 
 export function AppShellMenuButton({ className = '' }: { className?: string }) {
@@ -44,6 +45,7 @@ export function AppShellNavigationMenu({
   const location = useLocation();
   const navigate = useNavigate();
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const tour = useTour();
   useEffect(() => {
     if (!shellNav?.navOpen) {
       return;
@@ -143,6 +145,18 @@ export function AppShellNavigationMenu({
         >
           <Settings aria-hidden="true" className="h-4 w-4" />
           {translate("files.settings")}</button>
+        {tour && (
+          <button
+            type="button"
+            onClick={() => {
+              shellNav.closeNav();
+              tour.openHub();
+            }}
+            className={menuItemClassName()}
+          >
+            <CircleHelp aria-hidden="true" className="h-4 w-4" />
+            {translate('tour.entry')}</button>
+        )}
       </nav>
     </div>
   );

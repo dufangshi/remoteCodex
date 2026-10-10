@@ -8,6 +8,7 @@ import { fetchThreads, fetchWorkspaces } from '../lib/api';
 import { currentNewThreadHref, currentRelayDeviceIdFromPath, currentThreadHref, currentWorkspacesHref } from '../lib/relayRoutes';
 import { useAppShellNav } from '../components/AppShellNavContext';
 import { RecentThreadMenu } from '../components/RecentThreadMenu';
+import { TourLauncherButton } from '../components/onboarding/TourProvider';
 import { useWorkbenchNavigation } from './useWorkbenchNavigation';
 import { useThreadListPolling } from './useThreadListPolling';
 
@@ -50,6 +51,7 @@ export function ThreadsPage() {
       title={workspace?.label ?? translate("workbench.workspace")} homeHref={currentWorkspacesHref()}
       options={{ ...navigation, emptyWorkspace: true, workspacePath: workspace?.absPath ?? '', activeView: 'chat', terminalEnabled: false, onViewChange: () => {}, onSearch: () => {}, onNavigate: navigate,
         renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={navigation.currentKey} onFavorite={navigation.onToggleThreadFavorite} onRenamed={navigation.onThreadRenamed} onRemoved={navigation.onThreadRemoved} onNavigate={navigate} /> }}
+      deviceMonitor={<TourLauncherButton />}
       settings={<button aria-label={translate("workbench.openSettings")} onClick={shell?.openSettings}><Settings /></button>}
       newThread={!loading && !error && <Link to={createHref} aria-label={translate("workbench.newThread_02057e")}><Plus /></Link>}
       actions={null} threadMenu={null} connection={null} explorer={null} revealExplorer={0}
