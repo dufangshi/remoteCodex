@@ -58,7 +58,7 @@ def background(scenario):
     raw(notification, "other-session")
     if scenario in ("native", "monitor"):
         tag = "<summary>Monitor event: GitHub progress</summary><event>Linux completed</event>" if scenario == "monitor" else "<status>completed</status><summary>GitHub release finished</summary>"
-        notice = {"type": "user", "origin": {"kind": "task-notification"}, "message": {"content":
+        notice = {"type": "user", "uuid": str(uuid.uuid4()), "origin": {"kind": "task-notification"}, "message": {"content":
             "<task-notification><task-id>release-watch</task-id>" + tag + "</task-notification>"}}
         native(notice)
         native(notice)

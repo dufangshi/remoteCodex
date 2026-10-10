@@ -207,6 +207,10 @@ pub(super) fn normalize_notification(entry: &Value) -> Option<Value> {
     let event = field(header, "event");
     let key = if status != "updated" {
         format!("task:{id}")
+    } else if let Some(uuid) = entry["uuid"].as_str() {
+        format!("event:{id}:{uuid}")
+    } else if let Some(at) = entry["timestamp"].as_str() {
+        format!("event:{id}:{at}")
     } else {
         format!("event:{id}:{summary}:{}", event.unwrap_or(""))
     };
@@ -252,6 +256,19 @@ mod tests {
         assert!(tasks.pending());
         tasks.record(&json!({"type":"assistant","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"All done."}]}}));
         assert!(!tasks.pending());
+    }
+
+    #[test]
+    fn equal_monitor_output_at_distinct_events_is_not_a_duplicate() {
+        let mut tasks = ClaudeNativeTasks::default();
+        tasks.record(&json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"monitor","name":"Monitor"}]}}));
+        tasks.record(&json!({"type":"user","toolUseResult":{"taskId":"watch"},"message":{"content":[{"type":"tool_result","tool_use_id":"monitor"}]}}));
+        for uuid in ["event-one", "event-one", "event-two"] {
+            tasks.record(&json!({"type":"user","uuid":uuid,"origin":{"kind":"task-notification"},"message":{"content":"<task-notification><task-id>watch</task-id><summary>Monitor progress</summary><event>Still running</event></task-notification>"}}));
+        }
+        let notices = tasks.take_notices();
+        assert_eq!(notices.len(), 2);
+        assert_ne!(notices[0]["notificationKey"], notices[1]["notificationKey"]);
     }
 
     #[test]

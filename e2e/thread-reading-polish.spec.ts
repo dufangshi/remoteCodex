@@ -521,7 +521,12 @@ test('background wake replaces its waiting anchor and continues within the same 
   });
   const response=()=>({...detail,totalTurnCount:1,activeSubagents:[],
     thread:{...detail.thread,status:completed?'idle':'running',activeTurnId:completed?null:turnId},
-    turns:[{id:turnId,status:completed?'completed':'inProgress',startedAt,completedAt:completed?new Date().toISOString():null,model:'claude-opus-5-5',items}]});
+    turns:[{id:turnId,status:completed?'completed':'inProgress',startedAt,completedAt:completed?new Date().toISOString():null,model:'claude-opus-5-5',hasDeferredItems:completed,deferredItemCount:completed?1:0,items:completed?items.filter(item=>(item as {kind:string}).kind!=='commandExecution'):items}]});
+  let detailLoads=0;
+  await page.route(`**/api/threads/${id}/turns/${turnId}/detail`,route=>{
+    detailLoads++;
+    return route.fulfill({json:{...response().turns[0],items,hasDeferredItems:false,deferredItemCount:0}});
+  });
   await page.route(`**/api/threads/${id}?**`,route=>route.fulfill({json:response()}));
   await page.goto(`/threads/${id}`);
   const waitRow=page.locator('.thread-graph-task-notice');
@@ -554,7 +559,11 @@ test('background wake replaces its waiting anchor and continues within the same 
   completed=true;
   emit('thread.turn.completed',{turnId,status:'completed'});
   await page.reload();
+  await expect(waitRow).toContainText('已唤醒');
+  await expect(page.getByText(final.text,{exact:true})).toBeVisible();
+  expect(detailLoads).toBe(0);
   await page.locator('.thread-graph-worked-summary button[aria-expanded]').click();
+  await expect.poll(()=>detailLoads).toBe(1);
   await expect(waitRow).toContainText('已唤醒');
   await expect(page.getByText(final.text,{exact:true})).toBeVisible();
   await expect(page.locator('.thread-graph-turn-footer')).toHaveCount(0);

@@ -19,7 +19,8 @@ When an adapter lacks these task bookends, native launch receipts and trusted
 at the current file tail and excludes older turns, other sessions, sidechains,
 and human-quoted task XML. This change does not backfill old history.
 
-Collapsed turns keep waiting/wake anchors and narrative visible; operation
+Lightweight history responses and collapsed turns keep waiting/wake anchors
+and narrative visible; operation
 steps remain expandable. After cancellation or disconnection the marker must
 not keep claiming that the turn is waiting.
 
@@ -29,4 +30,6 @@ and disconnect) and `e2e/thread-reading-polish.spec.ts` (desktop/mobile waiting,
 wake, same-turn rendering, and reload). The opt-in real-harness test
 `haiku_native_background_wake_stays_in_one_durable_turn` in
 `crates/runtime/tests/claude_usage_live.rs` uses an isolated session and database;
-it checks the wake anchor, post-wake command, final report and usage.
+it checks the wake anchor, post-wake command, final report and usage. The
+companion `haiku_monitor_events_and_final_report_stay_in_one_durable_turn`
+checks intermediate Monitor wakes as well as completion.

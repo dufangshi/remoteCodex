@@ -164,6 +164,17 @@ async fn claude_background_wake_output_stays_live_and_persists_after_foreground_
                 && i.status.as_deref() == Some("waiting")),
             "{scenario}: waiting marker persists before wake"
         );
+        let summary = supervisor
+            .get_thread_detail_view(&thread.id, Some(1), true)
+            .await
+            .unwrap();
+        assert!(
+            summary.turns[0]
+                .items
+                .iter()
+                .any(|i| i.extra.get("origin") == Some(&json!("nativeBackgroundWait"))),
+            "{scenario}: lightweight reload must retain waiting anchor"
+        );
         if scenario == "cancel" {
             cancel.cancel();
         } else {
@@ -224,6 +235,33 @@ async fn claude_background_wake_output_stays_live_and_persists_after_foreground_
             _ => "completed",
         };
         assert_eq!(detail.status, expected, "{scenario}");
+        let summary = supervisor
+            .get_thread_detail_view(&thread.id, Some(1), true)
+            .await
+            .unwrap();
+        assert!(
+            summary.turns[0]
+                .items
+                .iter()
+                .any(|i| i.extra.get("origin").is_some()),
+            "{scenario}: completed/interrupted reload retains the anchor"
+        );
+        if scenario != "cancel" {
+            assert!(
+                summary.turns[0]
+                    .items
+                    .iter()
+                    .any(|i| i.text == "Checking the completed release."),
+                "{scenario}: summary retains intermediate narrative"
+            );
+            assert!(
+                summary.turns[0]
+                    .items
+                    .iter()
+                    .all(|i| i.kind != "commandExecution"),
+                "{scenario}: tool details remain lazy"
+            );
+        }
         if scenario == "disconnect" {
             assert!(result.unwrap_err().is::<crate::actor::ExecutionUncertain>());
         } else {

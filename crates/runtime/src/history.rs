@@ -89,11 +89,23 @@ pub fn summarize_completed_turn(mut turn: ThreadTurnDto) -> ThreadTurnDto {
         }
     }
 
+    let background_anchor = |item: &ThreadHistoryItemDto| {
+        matches!(
+            item.extra.get("origin").and_then(serde_json::Value::as_str),
+            Some("nativeBackgroundWait" | "nativeTaskNotification")
+        )
+    };
+    let has_background = turn.items.iter().any(background_anchor);
     let items: Vec<ThreadHistoryItemDto> = turn
         .items
         .iter()
         .enumerate()
-        .filter(|(index, item)| item.kind == "userMessage" || Some(*index) == final_agent_index)
+        .filter(|(index, item)| {
+            item.kind == "userMessage"
+                || Some(*index) == final_agent_index
+                || background_anchor(item)
+                || (has_background && item.kind == "agentMessage")
+        })
         .map(|(_, item)| item.clone())
         .collect();
     let deferred = turn.items.len().saturating_sub(items.len());

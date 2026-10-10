@@ -138,6 +138,27 @@ async fn haiku_reports_native_tokens_and_speed_during_first_tool_wait() {
 #[tokio::test]
 #[ignore = "uses real Claude authentication and tokens in an isolated session"]
 async fn haiku_native_background_wake_stays_in_one_durable_turn() {
+    native_background_wake_acceptance(
+        "Isolated background-wake regression probe. Do not edit files, create agents or run pockymoe. Launch exactly one background Bash task with command sleep 15; printf WAKE_ACCEPTANCE_EVENT using run_in_background=true. Then reply WAKE_ACCEPTANCE_WAITING and end your foreground response. Do not poll, wait or run other commands. When its native task completion notification arrives, run Bash printf WAKE_ACCEPTANCE_VERIFIED once and finally reply WAKE_ACCEPTANCE_DONE. Keep all replies very short.",
+        "WAKE_ACCEPTANCE_DONE", "WAKE_ACCEPTANCE_VERIFIED", 1,
+    ).await;
+}
+
+#[tokio::test]
+#[ignore = "uses real Claude authentication and tokens in an isolated session"]
+async fn haiku_monitor_events_and_final_report_stay_in_one_durable_turn() {
+    native_background_wake_acceptance(
+        "Isolated Monitor wake acceptance test. Do not edit files, create agents, poll or run pockymoe. Use exactly one Monitor tool with command sleep 10; echo MONITOR_ACCEPTANCE_EVENT; sleep 10; echo MONITOR_ACCEPTANCE_FINISHED. It exits by itself. End the foreground response with MONITOR_ACCEPTANCE_WAITING. When the first monitor event arrives, run exactly one Bash command printf MONITOR_ACCEPTANCE_VERIFIED, then reply MONITOR_ACCEPTANCE_PROGRESS and wait for the next notification. When the monitor stream finishes, finally reply MONITOR_ACCEPTANCE_DONE. ToolSearch may be used to enable Monitor. No other tools or commands. Keep replies very short.",
+        "MONITOR_ACCEPTANCE_DONE", "MONITOR_ACCEPTANCE_VERIFIED", 2,
+    ).await;
+}
+
+async fn native_background_wake_acceptance(
+    prompt: &str,
+    final_marker: &str,
+    command_marker: &str,
+    expected_wakes: usize,
+) {
     let dir = tempfile::tempdir().unwrap();
     let runtime = Arc::new(AcpRuntime::bound(Provider::Claude, "claude", 60000));
     let models = runtime
@@ -193,35 +214,45 @@ async fn haiku_native_background_wake_stays_in_one_durable_turn() {
     let mut events = state.bus.subscribe();
     let cancel = CancellationToken::new();
     let input = StartTurnInput {
-        provider_session_id: thread.provider_session_id.clone().unwrap(), thread_id:thread.id.clone(), turn_id:turn_id.clone(),
-        prompt:"Isolated background-wake regression probe. Do not edit files, create agents or run pockymoe. Launch exactly one background Bash task with command sleep 15; printf WAKE_ACCEPTANCE_EVENT using run_in_background=true. Then reply WAKE_ACCEPTANCE_WAITING and end your foreground response. Do not poll, wait or run other commands. When its native task completion notification arrives, run Bash printf WAKE_ACCEPTANCE_VERIFIED once and finally reply WAKE_ACCEPTANCE_DONE. Keep all replies very short.".into(),
-        model:Some(model.clone()), reasoning_effort:None, sandbox_mode:Some("danger-full-access".into()), collaboration_mode:None,
-        approval_mode:Some("yolo".into()), performance_mode:None, hidden:false, images:vec![], title:None, context_delivered:false,
+        provider_session_id: thread.provider_session_id.clone().unwrap(),
+        thread_id: thread.id.clone(),
+        turn_id: turn_id.clone(),
+        prompt: prompt.into(),
+        model: Some(model.clone()),
+        reasoning_effort: None,
+        sandbox_mode: Some("danger-full-access".into()),
+        collaboration_mode: None,
+        approval_mode: Some("yolo".into()),
+        performance_mode: None,
+        hidden: false,
+        images: vec![],
+        title: None,
+        context_delivered: false,
     };
     let runner = runtime.clone();
     let bus = state.bus.clone();
     let token = cancel.clone();
     let mut task = tokio::spawn(async move { runner.start_turn(input, bus, token).await });
     let observed = tokio::time::timeout(Duration::from_secs(180), async {
-        let mut wait_id = None;
-        let mut awake = false;
+        let mut wait_ids = std::collections::HashSet::new();
+        let mut wake_ids = std::collections::HashSet::new();
         loop {
             let event = events.recv().await.map_err(|error| error.to_string())?;
             let item = &event.payload["item"];
             if item["origin"] == "nativeBackgroundWait" && item["status"] == "waiting" {
-                wait_id = item["id"].as_str().map(str::to_owned);
+                wait_ids.insert(item["id"].as_str().unwrap().to_owned());
             }
             if item["origin"] == "nativeTaskNotification" {
-                if wait_id.as_deref() != item["id"].as_str() {
+                if !wait_ids.contains(item["id"].as_str().unwrap()) {
                     return Err("wake must update the durable waiting anchor".to_owned());
                 }
-                awake = true;
+                wake_ids.insert(item["id"].as_str().unwrap().to_owned());
             }
             if event.event_type == "thread.turn.completed" {
-                if !awake {
+                if wake_ids.len() != expected_wakes {
                     return Err("completed without the waiting-to-wake transition".to_owned());
                 }
-                return Ok(wait_id.unwrap());
+                return Ok(wake_ids);
             }
         }
     })
@@ -235,27 +266,24 @@ async fn haiku_native_background_wake_stays_in_one_durable_turn() {
         task.abort();
     }
     runtime.restart("claude").await.unwrap();
-    let wait_id = observed.expect("bounded real wake").unwrap();
+    let wake_ids = observed.expect("bounded real wake").unwrap();
     let items = done.expect("test completes").unwrap().unwrap();
-    assert!(items
-        .iter()
-        .any(|item| item.text.contains("WAKE_ACCEPTANCE_DONE")));
+    assert!(items.iter().any(|item| item.text.contains(final_marker)));
     let detail = state
         .get_thread_turn_detail(&thread.id, &turn_id)
         .await
         .unwrap();
     assert_eq!(detail.status, "completed");
     assert!(
-        detail
-            .items
-            .iter()
-            .any(|i| i.text.contains("WAKE_ACCEPTANCE_DONE")),
+        detail.items.iter().any(|i| i.text.contains(final_marker)),
         "final report persisted before completion"
     );
-    let notice = detail.items.iter().find(|i| i.id == wait_id).unwrap();
-    assert_eq!(notice.extra["origin"], "nativeTaskNotification");
-    assert!(notice.extra["waitingStartedAt"].is_string());
-    assert!(notice.extra["awakenedAt"].is_string());
+    for id in &wake_ids {
+        let notice = detail.items.iter().find(|i| &i.id == id).unwrap();
+        assert_eq!(notice.extra["origin"], "nativeTaskNotification");
+        assert!(notice.extra["waitingStartedAt"].is_string());
+        assert!(notice.extra["awakenedAt"].is_string());
+    }
     assert!(detail
         .items
         .iter()
@@ -264,7 +292,7 @@ async fn haiku_native_background_wake_stays_in_one_durable_turn() {
         detail
             .items
             .iter()
-            .any(|i| i.kind == "commandExecution" && i.text.contains("WAKE_ACCEPTANCE_VERIFIED")),
+            .any(|i| i.kind == "commandExecution" && i.text.contains(command_marker)),
         "post-wake execution persisted"
     );
     assert!(
@@ -286,6 +314,6 @@ async fn haiku_native_background_wake_stays_in_one_durable_turn() {
     assert_eq!(turn_count, 1);
     println!(
         "{}",
-        serde_json::json!({"model":model,"turnCount":turn_count,"items":detail.items.len(),"waitingAnchor":wait_id,"finalReportSaved":true,"postWakeCommandSaved":true,"usageSaved":true})
+        serde_json::json!({"model":model,"turnCount":turn_count,"items":detail.items.len(),"wakeAnchors":wake_ids,"finalReportSaved":true,"postWakeCommandSaved":true,"usageSaved":true})
     );
 }

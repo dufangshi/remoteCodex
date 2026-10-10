@@ -2029,7 +2029,8 @@ impl Supervisor {
             let mut stmt = conn.prepare(
                 "SELECT item_json FROM thread_history_items
                  WHERE thread_id=?1 AND turn_id=?2
-                   AND json_extract(item_json, '$.kind') IN ('userMessage', 'agentMessage')
+                   AND (json_extract(item_json, '$.kind') IN ('userMessage', 'agentMessage')
+                     OR json_extract(item_json, '$.origin') IN ('nativeBackgroundWait', 'nativeTaskNotification'))
                  ORDER BY created_at ASC, rowid ASC",
             )?;
             let items = stmt
