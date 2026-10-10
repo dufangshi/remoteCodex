@@ -83,7 +83,7 @@ export function installPushHandlers(worker: ServiceWorkerGlobalScope) {
               : translate('workbench.threadUpdateFallback'),
           tag: typeof payload.tag === 'string' ? payload.tag : '',
           icon: '/icon-192.png',
-          badge: '/favicon-48x48.png',
+          badge: '/favicon-48x48.png?v=pockymoe',
           data: { url: payload.url, userId: payload.userId },
         });
       })(),
