@@ -1,5 +1,10 @@
 # Pockymoe (Rust rewrite)
 
+<img src="apps/supervisor-web/public/pockymoe-icon.png" alt="Pockymoe icon" width="96" />
+
+Formerly **Remote Codex**. Installed devices keep updating; the `remote-codex`
+command still works. See [the rename notes](docs/rename-pockymoe.md).
+
 Self-hosted control plane for long-running coding agents. The supervisor is Rust. Harnesses speak **ACP** through thin adapters. The thread UI is still React (`pockymoe-thread-ui`).
 
 This branch replaces the TypeScript `supervisor-api` / `relay-server` / per-harness SDK stacks.

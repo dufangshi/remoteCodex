@@ -2,6 +2,7 @@
 
 This branch is a Rust rewrite of the Pockymoe control plane.
 
+- The project was renamed from Remote Codex by `scripts/rename-pockymoe.mjs`. Persisted, wire-level and externally owned identifiers (including GitHub release asset names) deliberately keep their old names, and the runtime still accepts `REMOTE_CODEX_*` variables and the `remote-codex` command. Read [the rename notes](docs/rename-pockymoe.md) before renaming any remaining `remote-codex`, `REMOTE_CODEX_` or `remoteCodex` literal.
 - Runtime and HTTP live under `crates/`. Do not reintroduce the TypeScript supervisor or the 15-coordinator split.
 - ACP is the default harness path. Add a thin adapter under `crates/runtime/src/acp/` for command/capability differences (see `catalog.rs` for the command catalog and `capabilities.rs` for capability overlays).
 - Keep JSON field names camelCase. The React app in `apps/supervisor-web` still consumes `@pockymoe/shared`.
