@@ -45,7 +45,7 @@ class RuntimeReleaseTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             artifacts, web = self.fixture(root)
-            (artifacts / 'linux-arm64-gnu/remote-codex').unlink()
+            (artifacts / 'linux-arm64-gnu/pockymoe').unlink()
             with self.assertRaisesRegex(ValueError, 'Missing native release artifact'):
                 release.prepare(artifacts, web, root / 'output', '0.12.75')
             self.assertFalse((root / 'output').exists())

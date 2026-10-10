@@ -251,7 +251,7 @@ pub fn installation(path: PathBuf, agent: &str) -> Installation {
                 | "opencode-ai"
                 | "@agentclientprotocol/codex-acp"
                 | "@agentclientprotocol/claude-agent-acp"
-                | "remote-codex"
+                | "pockymoe"
         );
         if !allowed {
             continue;
@@ -333,7 +333,7 @@ pub async fn inspect(command: &str, agent: &str) -> Result<Installation> {
             "--no-audit",
             "--no-fund",
         ]))?;
-        found.manager = "remote-codex".into();
+        found.manager = "pockymoe".into();
         found.reason = None;
         found.update = vec![parsed.program];
         found.update.extend(parsed.args);
@@ -376,7 +376,7 @@ pub async fn inventory(state: &Supervisor) -> Value {
             if def.transport == "adapter" { Some(adapter_inventory(&def).await) } else { None }
         });
         let job = state.management_jobs.lock().unwrap().get(&def.id).cloned();
-        let base=base.map(dto).unwrap_or_else(|_|json!({"installed":false,"canInstall":can_install(&def.id),"canUpdate":false,"path":"","resolvedPath":"","manager":"remote-codex","reason":if can_install(&def.id){""}else{"No managed installer available for this platform."}}));
+        let base=base.map(dto).unwrap_or_else(|_|json!({"installed":false,"canInstall":can_install(&def.id),"canUpdate":false,"path":"","resolvedPath":"","manager":"pockymoe","reason":if can_install(&def.id){""}else{"No managed installer available for this platform."}}));
         json!({"id":def.id,"name":def.display_name,"transport":def.transport,"base":base,"adapter":adapter,"job":job})
     })).await;
     json!(rows)
@@ -403,9 +403,9 @@ pub async fn update_harness(state: &Supervisor, id: &str, component: &str) -> Re
         let provider = if state
             .config
             .enabled_providers
-            .contains(&remote_codex_protocol::Provider::Acp)
+            .contains(&pockymoe_protocol::Provider::Acp)
         {
-            remote_codex_protocol::Provider::Acp
+            pockymoe_protocol::Provider::Acp
         } else {
             serde_json::from_value(json!(id))?
         };
@@ -441,7 +441,7 @@ async fn adapter_inventory(def: &crate::acp::catalog::AcpAgentDef) -> Value {
             value["installed"] = json!(true);
             value["reason"] = Value::Null;
             if found_managed {
-                value["manager"] = json!("remote-codex");
+                value["manager"] = json!("pockymoe");
             }
             value
         }

@@ -1,13 +1,11 @@
 use std::sync::Arc;
 
-use remote_codex_protocol::{
-    CreateThreadInput, CreateWorkspaceInput, Provider, ThreadEventEnvelope,
-};
-use remote_codex_runtime::actor::SharedRuntime;
-use remote_codex_runtime::config::RuntimeConfig;
-use remote_codex_runtime::db::Database;
-use remote_codex_runtime::fake::FakeRuntime;
-use remote_codex_runtime::Supervisor;
+use pockymoe_protocol::{CreateThreadInput, CreateWorkspaceInput, Provider, ThreadEventEnvelope};
+use pockymoe_runtime::actor::SharedRuntime;
+use pockymoe_runtime::config::RuntimeConfig;
+use pockymoe_runtime::db::Database;
+use pockymoe_runtime::fake::FakeRuntime;
+use pockymoe_runtime::Supervisor;
 use rusqlite::params;
 use serde_json::{json, Value};
 use tempfile::{tempdir, TempDir};
@@ -15,7 +13,7 @@ use tempfile::{tempdir, TempDir};
 async fn running_thread() -> (TempDir, Arc<Supervisor>, String) {
     let dir = tempdir().unwrap();
     let config = RuntimeConfig {
-        mode: remote_codex_protocol::Mode::Local,
+        mode: pockymoe_protocol::Mode::Local,
         host: "127.0.0.1".into(),
         port: 0,
         workspace_root: dir.path().join("workspaces"),
@@ -111,7 +109,7 @@ async fn tool_details_are_durable_but_not_broadcast() {
 #[test]
 fn old_acp_file_records_gain_paths_counts_and_diff_without_rewriting_storage() {
     let mut item = serde_json::from_value(json!({"id":"legacy-edit","kind":"fileChange","text":"Editing files","detailText":"Tool: apply_patch\n\nResult:\nFile: src/app.ts\n\nBefore:\nconst value = 1;\n\n\nAfter:\nconst value = 2;\n"})).unwrap();
-    remote_codex_runtime::history::normalize_legacy_file_change(&mut item);
+    pockymoe_runtime::history::normalize_legacy_file_change(&mut item);
     assert_eq!(item.text, "src/app.ts");
     assert_eq!(item.extra["addedLines"], 1);
     assert_eq!(item.extra["removedLines"], 1);
@@ -121,7 +119,7 @@ fn old_acp_file_records_gain_paths_counts_and_diff_without_rewriting_storage() {
         .unwrap()
         .contains("+const value = 2;"));
     let once = serde_json::to_value(&item).unwrap();
-    remote_codex_runtime::history::normalize_legacy_file_change(&mut item);
+    pockymoe_runtime::history::normalize_legacy_file_change(&mut item);
     assert_eq!(serde_json::to_value(&item).unwrap(), once);
 }
 

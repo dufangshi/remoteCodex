@@ -1,4 +1,4 @@
-import { getLocale, translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { getLocale, translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
@@ -9,14 +9,14 @@ import {
   RefreshCw,
   X,
 } from 'lucide-react';
-import { TokenUsageCost } from '@remote-codex/thread-ui';
+import { TokenUsageCost } from '@pockymoe/thread-ui';
 import type {
   NativeSubagentDetailDto,
   NativeSubagentDto,
   ThreadDetailDto,
   ThreadHistoryItemDto,
   ThreadSubagentDto,
-} from '@remote-codex/shared';
+} from '@pockymoe/shared';
 import { request } from '../lib/api';
 
 function statusLabel(status: string) {

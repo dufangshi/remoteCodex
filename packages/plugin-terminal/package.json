@@ -1,5 +1,5 @@
 {
-  "name": "@remote-codex/plugin-terminal",
+  "name": "@pockymoe/plugin-terminal",
   "private": true,
   "version": "0.1.0",
   "type": "module",

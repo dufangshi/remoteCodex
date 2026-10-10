@@ -2,17 +2,17 @@ import { useEffect } from 'react';
 import { fetchThreadTurnDetail } from '../lib/api';
 import { useScopedState } from '../pages/useScopedState';
 import { nativeSummaries } from '../pages/workbenchNativeModel';
-import { threadStatusLabel } from '@remote-codex/thread-ui';
+import { threadStatusLabel } from '@pockymoe/thread-ui';
 import {
   formatDate,
   translate as t,
   useI18n,
-} from '@remote-codex/thread-ui/i18n';
+} from '@pockymoe/thread-ui/i18n';
 import type {
   ThreadDetailDto,
   ThreadDto,
   ThreadTurnDto,
-} from '@remote-codex/shared';
+} from '@pockymoe/shared';
 
 export function WorkbenchCollaboration({
   detail,

@@ -70,7 +70,7 @@ the intended group) and trigger existing powercap devices:
 ACTION=="add", SUBSYSTEM=="powercap", KERNEL=="intel-rapl:*", ATTR{name}=="package-*", RUN+="/usr/bin/chgrp ubuntu /sys%p/energy_uj", RUN+="/usr/bin/chmod g+r /sys%p/energy_uj"
 ```
 
-Save under `/etc/udev/rules.d/99-remote-codex-rapl.rules`, then run
+Save under `/etc/udev/rules.d/99-pockymoe-rapl.rules`, then run
 `sudo udevadm control --reload-rules` and
 `sudo udevadm trigger --subsystem-match=powercap --action=add`. The collector
 retries ordinary reads on the next hardware sample, without a Supervisor restart.
@@ -81,7 +81,7 @@ retries ordinary reads on the next hardware sample, without a Supervisor restart
 access. The collector chooses Apple Silicon CPU/GPU samplers or Intel CPU/SMC
 samplers, with a CPU-only fallback if optional samplers are absent. An existing,
 restricted sudo policy for the exact read-only command can permit the fallback;
-Remote Codex never prompts for a password or edits that policy. Native
+Pockymoe never prompts for a password or edits that policy. Native
 temperature availability varies by chip/macOS version, even with administrator
 access; absent sensors remain null. IOReport Energy Model can provide unprivileged
 Apple Silicon energy data on some versions, but is a private ABI; this collector

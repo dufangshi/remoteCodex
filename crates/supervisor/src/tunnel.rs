@@ -7,8 +7,8 @@ use crate::bounded_channel as mpsc;
 use anyhow::{anyhow, Result};
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
-use remote_codex_protocol::now_rfc3339;
-use remote_codex_runtime::Supervisor;
+use pockymoe_protocol::now_rfc3339;
+use pockymoe_runtime::Supervisor;
 use serde_json::{json, Value};
 use tokio_tungstenite::connect_async_with_config;
 use tokio_tungstenite::tungstenite::{
@@ -57,12 +57,12 @@ pub async fn run_relay_tunnel(state: Arc<Supervisor>) -> Result<()> {
         .config
         .relay_server_url
         .as_deref()
-        .ok_or_else(|| anyhow!("REMOTE_CODEX_RELAY_SERVER_URL is required"))?;
+        .ok_or_else(|| anyhow!("POCKYMOE_RELAY_SERVER_URL is required"))?;
     let token = state
         .config
         .relay_agent_token
         .as_deref()
-        .ok_or_else(|| anyhow!("REMOTE_CODEX_RELAY_AGENT_TOKEN is required"))?;
+        .ok_or_else(|| anyhow!("POCKYMOE_RELAY_AGENT_TOKEN is required"))?;
     let tunnel_url = relay_tunnel_url(server_url)?;
     let mut reconnect_delay = RELAY_RECONNECT_INITIAL_DELAY;
 
@@ -815,11 +815,11 @@ fn relay_error_response(status_code: u16, message: &str) -> Value {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use remote_codex_protocol::{Mode, Provider};
-    use remote_codex_runtime::actor::SharedRuntime;
-    use remote_codex_runtime::config::RuntimeConfig;
-    use remote_codex_runtime::db::Database;
-    use remote_codex_runtime::fake::FakeRuntime;
+    use pockymoe_protocol::{Mode, Provider};
+    use pockymoe_runtime::actor::SharedRuntime;
+    use pockymoe_runtime::config::RuntimeConfig;
+    use pockymoe_runtime::db::Database;
+    use pockymoe_runtime::fake::FakeRuntime;
     use tempfile::TempDir;
 
     pub(crate) fn state_with_relay_url(relay_url: &str) -> (TempDir, Arc<Supervisor>) {
@@ -1029,7 +1029,7 @@ pub(crate) mod tests {
     async fn file_receipts_bind_to_trusted_relay_actor_and_ignore_inner_actor_forgery() {
         let (_dir, state) = state_with_relay_url("http://localhost:8788");
         let workspace = state
-            .create_workspace(remote_codex_protocol::CreateWorkspaceInput {
+            .create_workspace(pockymoe_protocol::CreateWorkspaceInput {
                 abs_path: Some(state.config.workspace_root.to_string_lossy().into()),
                 git_url: None,
                 label: Some("files".into()),
@@ -1042,7 +1042,7 @@ pub(crate) mod tests {
             .file_save(
                 "relay:alice",
                 &workspace.id,
-                remote_codex_runtime::file_documents::SaveDocument {
+                pockymoe_runtime::file_documents::SaveDocument {
                     path: doc.path,
                     workspace_revision: doc.workspace_revision,
                     file_identity: doc.file_identity,
@@ -1084,7 +1084,7 @@ pub(crate) mod tests {
             .oneshot(
                 axum::http::Request::builder()
                     .uri("/api/workspaces")
-                    .header("x-remote-codex-relay-forwarded", "1")
+                    .header("x-pockymoe-relay-forwarded", "1")
                     .body(axum::body::Body::empty())
                     .unwrap(),
             )

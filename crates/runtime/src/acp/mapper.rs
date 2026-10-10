@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use remote_codex_protocol::{now_rfc3339, ThreadHistoryItemDto, ThreadSubagentDto};
+use pockymoe_protocol::{now_rfc3339, ThreadHistoryItemDto, ThreadSubagentDto};
 use serde_json::Value;
 
 use crate::actor::GoalState;

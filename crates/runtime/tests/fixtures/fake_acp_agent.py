@@ -9,10 +9,10 @@ import threading
 
 
 # Model the private native control connection used by Codex-backed ACP sessions.
-if os.environ.get("REMOTE_CODEX_APP_SERVER_BRIDGE"):
+if os.environ.get("POCKYMOE_APP_SERVER_BRIDGE"):
     def bridge_loop():
         import socket
-        config = json.loads(os.environ["REMOTE_CODEX_APP_SERVER_BRIDGE"])
+        config = json.loads(os.environ["POCKYMOE_APP_SERVER_BRIDGE"])
         host, port = config["address"].rsplit(":", 1)
         sock = socket.create_connection((host, int(port)))
         stream = sock.makefile("rw")

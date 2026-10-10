@@ -1,1 +1,1 @@
-export { ExportTranscriptDialog } from '@remote-codex/thread-ui';
+export { ExportTranscriptDialog } from '@pockymoe/thread-ui';

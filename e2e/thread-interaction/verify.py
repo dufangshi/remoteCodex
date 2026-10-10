@@ -46,17 +46,17 @@ assert all(t["status"] == "completed" for t in main_turns + auto_turns + manual_
 
 # Creation must appear in the main agent's actual recorded tool activity.
 activity = "\n".join(r[0] for r in db.execute("SELECT item_json FROM thread_history_items WHERE thread_id=?", (main,)))
-assert "remote-codex thread create" in activity and "Grok auto compiler" in activity
-notify = [t for t in main_turns if input_text(t).startswith("[remoteCodex turn notification]") and auto_turns[0]["id"] in input_text(t)]
+assert "pockymoe thread create" in activity and "Grok auto compiler" in activity
+notify = [t for t in main_turns if input_text(t).startswith("[Pockymoe turn notification]") and auto_turns[0]["id"] in input_text(t)]
 assert len(notify) == 1, "initial automatic completion notification must be unique"
 assert notify[0]["started_at"] >= auto_turns[0]["completed_at"]
 assert main_turns[0]["completed_at"] <= auto_turns[0]["completed_at"], "main should return before peer completion"
 assert "AUTO_NOTIFY_FOLLOWUP_OK" in (workspace / "auto-followup.txt").read_text()
 assert (workspace / "auto-build.txt").read_text().strip() == "thread-compile-ok"
 
-manual_replies = [t for t in main_turns if input_text(t).startswith(f"[Message from remoteCodex thread {manual}]") and "MANUAL_COMPILE_REPLY_OK" in input_text(t)]
+manual_replies = [t for t in main_turns if input_text(t).startswith(f"[Message from Pockymoe thread {manual}]") and "MANUAL_COMPILE_REPLY_OK" in input_text(t)]
 assert len(manual_replies) == 1
-assert not any(input_text(t).startswith("[remoteCodex turn notification]") and f"Thread {manual}," in input_text(t) for t in main_turns)
+assert not any(input_text(t).startswith("[Pockymoe turn notification]") and f"Thread {manual}," in input_text(t) for t in main_turns)
 assert "MANUAL_REPLY_FOLLOWUP_OK" in (workspace / "manual-followup.txt").read_text()
 assert (workspace / "manual-build.txt").read_text().strip() == "thread-compile-ok"
 
@@ -76,7 +76,7 @@ assert db.execute("SELECT count(*) FROM thread_pending_steers").fetchone()[0] ==
 if (workspace / "final-version-followup.txt").exists():
     assert "FINAL_VERSION_NOTIFY_OK" in (workspace / "final-version-followup.txt").read_text()
     assert "FINAL_VERSION_PEER_OK" in (workspace / "final-version-peer.txt").read_text()
-    final_notify = [t for t in main_turns if input_text(t).startswith("[remoteCodex turn notification]") and auto_turns[-1]["id"] in input_text(t)]
+    final_notify = [t for t in main_turns if input_text(t).startswith("[Pockymoe turn notification]") and auto_turns[-1]["id"] in input_text(t)]
     assert len(final_notify) == 1
     assert final_notify[0]["started_at"] >= auto_turns[-1]["completed_at"]
 

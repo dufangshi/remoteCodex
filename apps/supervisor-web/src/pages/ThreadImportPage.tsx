@@ -1,4 +1,4 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { ProductHeader } from '../components/ProductHeader';
 import type { FormEvent } from 'react';
 import { useEffect, useMemo, useState } from 'react';
@@ -10,8 +10,8 @@ import type {
   AgentBackendIdDto,
   ImportThreadCandidateDto,
   ModelOptionDto,
-} from '@remote-codex/shared';
-import { defaultAgentBackendId } from '@remote-codex/shared';
+} from '@pockymoe/shared';
+import { defaultAgentBackendId } from '@pockymoe/shared';
 import {
   ApiError,
   fetchAgentBackends,

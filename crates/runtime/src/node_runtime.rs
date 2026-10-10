@@ -1,4 +1,4 @@
-//! Node is an optional Agent/ACP dependency, never a Remote Codex bootstrap dependency.
+//! Node is an optional Agent/ACP dependency, never a Pockymoe bootstrap dependency.
 use anyhow::{bail, ensure, Context, Result};
 use sha2::{Digest, Sha256};
 use std::{
@@ -132,9 +132,7 @@ pub(crate) async fn ensure() -> Result<()> {
     let archive = stage.path().join(&name);
     download(&client, &format!("{base}/{name}"), &archive, matching[0])
         .await
-        .context(
-            "Download Node for Agent dependencies; Remote Codex itself does not require Node",
-        )?;
+        .context("Download Node for Agent dependencies; Pockymoe itself does not require Node")?;
     let extracted = stage.path().join("unpacked");
     std::fs::create_dir(&extracted)?;
     if cfg!(windows) {

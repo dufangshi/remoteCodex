@@ -26,8 +26,8 @@ function prepareProfile() {
   }
   const patch = path.join(profile, 'cordis.patch.yml');
   const current = readFileSync(patch, 'utf8');
-  if (current.includes('remote-codex-e2e-scripted-llm')) return;
-  const row = `- insert:\n    - id: remote-codex-e2e-scripted-llm\n      name: ${JSON.stringify(path.resolve('e2e/fixtures/dsh-scripted-llm.mjs'))}\n`;
+  if (current.includes('pockymoe-e2e-scripted-llm')) return;
+  const row = `- insert:\n    - id: pockymoe-e2e-scripted-llm\n      name: ${JSON.stringify(path.resolve('e2e/fixtures/dsh-scripted-llm.mjs'))}\n`;
   const rows = current.split('\n').filter(line => line.trim() && !line.trim().startsWith('#'));
   writeFileSync(patch, rows.join('').trim() === '[]' ? row : `${current.trimEnd()}\n${row}`);
 }
@@ -39,7 +39,7 @@ test('opens the native DSH console from a Relay page', async ({ page, context },
   const root = await mkdtemp(path.resolve('.local/dsh-console-relay-'));
   const processes: ChildProcess[] = [];
   const logs: string[] = [];
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('REMOTE_CODEX_')));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('POCKYMOE_')));
   const password = randomBytes(24).toString('hex');
   const freePort = async () => {
     const server = createServer();
@@ -50,13 +50,13 @@ test('opens the native DSH console from a Relay page', async ({ page, context },
   };
   const rp = await freePort(), sp = await freePort();
   const base = `http://127.0.0.1:${rp}`;
-  const binary = path.resolve(process.env.E2E_SECURITY_BINARY ?? 'target/debug/remote-codex');
+  const binary = path.resolve(process.env.E2E_SECURITY_BINARY ?? 'target/debug/pockymoe');
   const start = (command: string, extra: Record<string, string>) => {
     const proc = spawn(binary, [command], {
       env: { ...env, HOST: '127.0.0.1', RUST_LOG: 'info',
-        REMOTE_CODEX_ADMIN_USERNAME: 'admin', REMOTE_CODEX_ADMIN_PASSWORD: password,
-        REMOTE_CODEX_SESSION_SECRET: randomBytes(32).toString('hex'),
-        REMOTE_CODEX_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'), ...extra },
+        POCKYMOE_ADMIN_USERNAME: 'admin', POCKYMOE_ADMIN_PASSWORD: password,
+        POCKYMOE_SESSION_SECRET: randomBytes(32).toString('hex'),
+        POCKYMOE_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'), ...extra },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     for (const output of [proc.stdout, proc.stderr]) output!.on('data', data => logs.push(String(data)));
@@ -70,18 +70,18 @@ test('opens the native DSH console from a Relay page', async ({ page, context },
     return { status: response.status, data: text ? JSON.parse(text) : null };
   };
   try {
-    start('relay', { PORT: String(rp), REMOTE_CODEX_RELAY_DATA_DIR: path.join(root, 'relay'),
-      REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: 'true', REMOTE_CODEX_RELAY_WEB_DIST_DIR: path.resolve('apps/supervisor-web/dist'),
-      REMOTE_CODEX_PUBLIC_BASE_URL: base, REMOTE_CODEX_PORT_PREVIEW_BASE_URL: `http://preview.localhost:${rp}` });
+    start('relay', { PORT: String(rp), POCKYMOE_RELAY_DATA_DIR: path.join(root, 'relay'),
+      POCKYMOE_RELAY_REGISTRATION_ENABLED: 'true', POCKYMOE_RELAY_WEB_DIST_DIR: path.resolve('apps/supervisor-web/dist'),
+      POCKYMOE_PUBLIC_BASE_URL: base, POCKYMOE_PORT_PREVIEW_BASE_URL: `http://preview.localhost:${rp}` });
     await expect.poll(() => api('/healthz').then(r => r.status).catch(() => 0)).toBe(200);
     expect((await api('/relay/auth/register', 'POST', { username: 'owner', email: 'owner@example.test', password })).status).toBe(200);
     const owner = (await api('/relay/auth/login', 'POST', { username: 'owner', password })).data.token as string;
     const created = await api('/relay/devices', 'POST', { name: 'DSH device' }, owner);
     const deviceId = created.data.device.id as string;
-    start('relay-supervisor', { PORT: String(sp), REMOTE_CODEX_RELAY_SUPERVISOR_PORT: String(sp),
-      REMOTE_CODEX_RELAY_SERVER_URL: base, REMOTE_CODEX_RELAY_AGENT_TOKEN: created.data.token,
-      REMOTE_CODEX_DATABASE_PATH: path.join(root, 'device.sqlite'), REMOTE_CODEX_WORKSPACE_ROOT: path.join(root, 'workspaces'),
-      REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'acp', DSH_HOME: dshHome, DSH_TELEMETRY_DISABLED: '1' });
+    start('relay-supervisor', { PORT: String(sp), POCKYMOE_RELAY_SUPERVISOR_PORT: String(sp),
+      POCKYMOE_RELAY_SERVER_URL: base, POCKYMOE_RELAY_AGENT_TOKEN: created.data.token,
+      POCKYMOE_DATABASE_PATH: path.join(root, 'device.sqlite'), POCKYMOE_WORKSPACE_ROOT: path.join(root, 'workspaces'),
+      POCKYMOE_ENABLED_AGENT_PROVIDERS: 'acp', DSH_HOME: dshHome, DSH_TELEMETRY_DISABLED: '1' });
     await expect.poll(() => api('/healthz').then(r => r.data.connectedSupervisors)).toBe(1);
     const deviceApi = `/relay/devices/${deviceId}/api`;
     const work = path.join(root, 'workspace');

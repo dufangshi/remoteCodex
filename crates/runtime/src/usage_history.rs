@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use remote_codex_protocol::ThreadTurnDto;
+use pockymoe_protocol::ThreadTurnDto;
 use tokio::sync::Mutex;
 
 type Fingerprint = Option<(PathBuf, u64, Option<SystemTime>)>;

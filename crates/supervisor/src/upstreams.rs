@@ -4,7 +4,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use remote_codex_runtime::{management, upstreams as profiles, Supervisor};
+use pockymoe_runtime::{management, upstreams as profiles, Supervisor};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -234,11 +234,10 @@ pub async fn template(
         let mut completed = vec![];
         let result = async {
             for id in template.harnesses {
-                let def =
-                    remote_codex_runtime::acp::builtin_agents(s.config.acp_command.as_deref())
-                        .into_iter()
-                        .find(|d| d.id == id)
-                        .ok_or_else(|| anyhow::anyhow!("Unknown harness"))?;
+                let def = pockymoe_runtime::acp::builtin_agents(s.config.acp_command.as_deref())
+                    .into_iter()
+                    .find(|d| d.id == id)
+                    .ok_or_else(|| anyhow::anyhow!("Unknown harness"))?;
                 if management::resolve(&def.base_command).is_err() {
                     management::install_harness(&s, &id).await?;
                 } else {

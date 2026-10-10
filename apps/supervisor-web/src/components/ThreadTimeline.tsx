@@ -1,7 +1,7 @@
 import {
   ThreadTimeline as SharedThreadTimeline,
   type ThreadTimelineAdapter,
-} from '@remote-codex/thread-ui';
+} from '@pockymoe/thread-ui';
 import type { ComponentProps } from 'react';
 import { buildThreadImageAssetUrl } from '../lib/api';
 import { currentThreadHref } from '../lib/relayRoutes';

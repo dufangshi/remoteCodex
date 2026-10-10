@@ -1,4 +1,4 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -11,7 +11,7 @@ import {
   ReasoningEffortDto,
   ThreadDto,
   WorkspaceDto,
-} from '@remote-codex/shared';
+} from '@pockymoe/shared';
 import { FormDialog } from '../../components/FormDialog';
 import { useAppShellNav } from '../../components/AppShellNavContext';
 import { dshRunModeHint, dshRunModeName, type DshRunMode } from '../../components/DshHarnessPanel';
@@ -504,7 +504,7 @@ export function ThreadCreateForm({
         {!acpAdvertised ? (
           <p className="mt-2 text-xs leading-5 text-[var(--theme-fg-muted)]">
             {translate("workbench.aCPIsNotEnabledOnThisSupervisor")}<code className="mx-1 font-mono">acp</code>
-            {translate("workbench.to")} <code className="font-mono">REMOTE_CODEX_ENABLED_AGENT_PROVIDERS</code>.
+            {translate("workbench.to")} <code className="font-mono">POCKYMOE_ENABLED_AGENT_PROVIDERS</code>.
           </p>
         ) : null}
         {backendUnavailable ? (

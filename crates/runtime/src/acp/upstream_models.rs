@@ -1,6 +1,6 @@
 use crate::upstreams::{self, DiscoveredModel, Profile};
 use anyhow::Result;
-use remote_codex_protocol::ModelOptionDto;
+use pockymoe_protocol::ModelOptionDto;
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,

@@ -1,7 +1,7 @@
 // Cross-device peer acceptance (docs/cross-device-peer.zh.md §15): a relay and two
 // fake-runtime supervisors owned by one user, plus a third device of another user.
 // Real binaries, loopback ports and a temporary HOME; nothing on the host is touched.
-// Usage: cargo build -p remote-codex && node scripts/peer-e2e-live.mjs [path/to/remote-codex]
+// Usage: cargo build -p pockymoe && node scripts/peer-e2e-live.mjs [path/to/pockymoe]
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { spawn, execFile } from 'node:child_process';
@@ -11,8 +11,8 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-const binary = resolve(process.argv[2] ?? 'target/debug/remote-codex');
-assert(existsSync(binary), `missing ${binary}; run cargo build -p remote-codex`);
+const binary = resolve(process.argv[2] ?? 'target/debug/pockymoe');
+assert(existsSync(binary), `missing ${binary}; run cargo build -p pockymoe`);
 const root = mkdtempSync(join(tmpdir(), 'peer-e2e-'));
 if (process.env.PEER_E2E_KEEP) console.log(JSON.stringify({ stage: 'root', root }));
 const password = randomBytes(24).toString('hex');
@@ -27,10 +27,10 @@ const freePort = () => new Promise(done => {
 });
 const baseEnv = {
   PATH: process.env.PATH, HOME: join(root, 'home'), HOST: '127.0.0.1',
-  REMOTE_CODEX_E2E_FAKE_RUNTIME: '1',
-  REMOTE_CODEX_ADMIN_USERNAME: 'testadmin', REMOTE_CODEX_ADMIN_PASSWORD: password,
-  REMOTE_CODEX_SESSION_SECRET: randomBytes(32).toString('hex'),
-  REMOTE_CODEX_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'),
+  POCKYMOE_E2E_FAKE_RUNTIME: '1',
+  POCKYMOE_ADMIN_USERNAME: 'testadmin', POCKYMOE_ADMIN_PASSWORD: password,
+  POCKYMOE_SESSION_SECRET: randomBytes(32).toString('hex'),
+  POCKYMOE_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'),
 };
 mkdirSync(baseEnv.HOME, { recursive: true });
 
@@ -84,9 +84,9 @@ async function device(token, name) {
     name, id: created.device.id, token, prefix: `/relay/devices/${created.device.id}`,
     cli: db.replace(/\.sqlite$/, '.cli.json'), workspace: join(root, `${name}-workspace`),
     env: {
-      PORT: String(port), REMOTE_CODEX_RELAY_SUPERVISOR_PORT: String(port),
-      REMOTE_CODEX_RELAY_SERVER_URL: relay, REMOTE_CODEX_RELAY_AGENT_TOKEN: created.token,
-      REMOTE_CODEX_DATABASE_PATH: db, REMOTE_CODEX_WORKSPACE_ROOT: join(root, `${name}-workspaces`),
+      PORT: String(port), POCKYMOE_RELAY_SUPERVISOR_PORT: String(port),
+      POCKYMOE_RELAY_SERVER_URL: relay, POCKYMOE_RELAY_AGENT_TOKEN: created.token,
+      POCKYMOE_DATABASE_PATH: db, POCKYMOE_WORKSPACE_ROOT: join(root, `${name}-workspaces`),
     },
   };
   mkdirSync(spec.workspace, { recursive: true });
@@ -104,14 +104,14 @@ function rc(spec, args, { from, allowFailure = false } = {}) {
   return new Promise(done => execFile(binary, argv, { env: { ...baseEnv }, maxBuffer: 64 << 20 }, (error, stdout, stderr) => {
     let json = null;
     try { json = JSON.parse(stdout); } catch { /* text output */ }
-    if (error && !allowFailure) assert.fail(`remote-codex ${args.join(' ')} failed: ${stderr || stdout}`);
+    if (error && !allowFailure) assert.fail(`pockymoe ${args.join(' ')} failed: ${stderr || stdout}`);
     done({ ok: !error, json, stdout, stderr });
   }));
 }
 const step = (stage, detail = {}) => console.log(JSON.stringify({ stage, ...detail }));
 
 try {
-  start('relay', 'relay', { PORT: String(relayPort), REMOTE_CODEX_RELAY_DATA_DIR: join(root, 'relay'), REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: 'true' });
+  start('relay', 'relay', { PORT: String(relayPort), POCKYMOE_RELAY_DATA_DIR: join(root, 'relay'), POCKYMOE_RELAY_REGISTRATION_ENABLED: 'true' });
   await until(() => api(null, '/healthz'), 20000, 'relay health');
   const ownerToken = await account('owner');
   const otherToken = await account('stranger');

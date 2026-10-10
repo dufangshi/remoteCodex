@@ -6,4 +6,4 @@ export {
   threadStatusClassName,
   threadStatusLabel,
   turnStatusLabel,
-} from '@remote-codex/thread-ui';
+} from '@pockymoe/thread-ui';

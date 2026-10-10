@@ -1,5 +1,5 @@
-import { getLocale } from '@remote-codex/thread-ui/i18n';
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { getLocale } from '@pockymoe/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { Plus, Pencil } from 'lucide-react';
 import { FormDialog } from './FormDialog';
 import { useEffect, useState } from 'react';

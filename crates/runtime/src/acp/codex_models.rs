@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use remote_codex_protocol::ReasoningEffortOptionDto;
+use pockymoe_protocol::ReasoningEffortOptionDto;
 use serde_json::{json, Value};
 
 use super::adapter::HarnessProjection;

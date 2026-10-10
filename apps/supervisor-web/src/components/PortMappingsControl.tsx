@@ -1,5 +1,5 @@
-import { getLocale } from '@remote-codex/thread-ui/i18n';
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { getLocale } from '@pockymoe/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { useEffect, useRef, useState } from 'react';
 import { Network } from 'lucide-react';
 import { ApiError, request } from '../lib/api';

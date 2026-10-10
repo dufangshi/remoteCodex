@@ -1,6 +1,6 @@
-import WorkspaceEditorWorker from '@remote-codex/thread-ui/workspace-editor.worker?worker';
+import WorkspaceEditorWorker from '@pockymoe/thread-ui/workspace-editor.worker?worker';
 import React from 'react';
-import { I18nProvider, initializeI18n } from '@remote-codex/thread-ui/i18n';
+import { I18nProvider, initializeI18n } from '@pockymoe/thread-ui/i18n';
 import ReactDOM from 'react-dom/client';
 import 'streamdown/styles.css';
 

@@ -304,7 +304,7 @@ impl RelayStore {
             if !rust_schema_ready(&canonical_path)? {
                 if !allow_legacy_migration {
                     bail!(
-                        "relay-store.sqlite has not been approved for Rust; run `remote-codex relay-migrate --data-dir {}` first, or explicitly set REMOTE_CODEX_RELAY_AUTO_MIGRATE=1",
+                        "relay-store.sqlite has not been approved for Rust; run `pockymoe relay-migrate --data-dir {}` first, or explicitly set POCKYMOE_RELAY_AUTO_MIGRATE=1",
                         data_dir.display()
                     );
                 }
@@ -313,7 +313,7 @@ impl RelayStore {
         } else if legacy_rust_path.exists() {
             if !allow_legacy_migration {
                 bail!(
-                    "legacy relay database found at {}; run `remote-codex relay-migrate --data-dir {}` first, or explicitly set REMOTE_CODEX_RELAY_AUTO_MIGRATE=1",
+                    "legacy relay database found at {}; run `pockymoe relay-migrate --data-dir {}` first, or explicitly set POCKYMOE_RELAY_AUTO_MIGRATE=1",
                     legacy_rust_path.display(),
                     data_dir.display()
                 );

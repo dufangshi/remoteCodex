@@ -1,20 +1,20 @@
 [package]
-name = "remote-codex"
+name = "pockymoe"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "remote-codex"
+name = "pockymoe"
 path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-remote-codex-protocol.workspace = true
-remote-codex-relay.workspace = true
-remote-codex-runtime.workspace = true
-remote-codex-supervisor.workspace = true
+pockymoe-protocol.workspace = true
+pockymoe-relay.workspace = true
+pockymoe-runtime.workspace = true
+pockymoe-supervisor.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

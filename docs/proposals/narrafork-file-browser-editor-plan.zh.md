@@ -8,7 +8,7 @@
 
 | 对象 | 固定版本/提交 | 本次核实范围 |
 | --- | --- | --- |
-| remoteCodex 主仓库 | `ffb07d8b17c08af5aa601a67af6e9f058a5a25ac`；共同报告底层业务基线 `94edcfadc8a6dda5ebc23271ee582709d32af171` | Rust runtime 文件方法、Supervisor HTTP、relay ACL、Web adapter、现有 E2E 源码 |
+| Pockymoe 主仓库 | `ffb07d8b17c08af5aa601a67af6e9f058a5a25ac`；共同报告底层业务基线 `94edcfadc8a6dda5ebc23271ee582709d32af171` | Rust runtime 文件方法、Supervisor HTTP、relay ACL、Web adapter、现有 E2E 源码 |
 | 真正共享 UI 仓库 | `8e4c384d81012c229d1a780ea175fa2dbaa5c82b` | `packages/thread-ui/src` 的 graph-workspace、Monaco、标签、目录模型和预览 hook |
 | NarraFork 只读参考 | `4e04d2f2e490bd57a5d8d712b709a574b905848a` | frontend 文件树/编辑器、editor-document 路由/service/worker、file-change 本地写盘、Go executor 条件写与传输 |
 
@@ -349,7 +349,7 @@ tree保留现有root节点兼容形状，新增`directoryRevision,nextCursor,tru
 | Rust/TS协议 | `crates/protocol/src/lib.rs`、`packages/shared/src/index.ts` | DTO与serde `rename_all="camelCase"`、typed conflict、能力；Rust snake_case仅内部 |
 | relay/传输 | `crates/relay/src/route_acl.rs`、Supervisor secure_transport路由/流匹配 | 新端点最小allowlist、read/write scope、固定版本读取；复用加密传输，新增流才改流匹配 |
 | Web adapter | `apps/supervisor-web/src/lib/api.ts`、`pages/useThreadWorkspaceAdapter.ts` | typed错误、返回save result、signal、资源scope、能力探测；接workspace事件；上传目标path |
-| 共享UI适配 | `remote-codex-thread-ui/packages/thread-ui/src/adapters.ts` | 新可选document/save/checkOperation/getVersion能力；保留老readFile/writeFile类型一段迁移期，但安全编辑不调用旧writeFile |
+| 共享UI适配 | `pockymoe-thread-ui/packages/thread-ui/src/adapters.ts` | 新可选document/save/checkOperation/getVersion能力；保留老readFile/writeFile类型一段迁移期，但安全编辑不调用旧writeFile |
 | 共享UI文档 | `components/graph-workspace/explorer/useWorkspaceFilePreview.ts`、新增`useWorkspaceDocuments.ts`/`workspaceDocumentState.ts` | 每文件状态、不可变保存revision、未知结果核验、内容/树刷新解耦 |
 | Monaco/标签/导航 | `GraphWorkspaceMonacoEditor.tsx`、`GraphWorkspacePreviewPane.tsx`、`WorkspaceFileTabs.tsx`、`GraphWorkspaceExplorer.tsx` | 资源唯一URI、model/view state、dirty close扩展、固定diff；导航卸载guard向应用壳回调 |
 | 文件树 | explorer controller/model/projection/tree/action | 局部stale、去重取消、有限并发、分页与hidden开关；保留现有virtualizer/keyboard/ARIA |
@@ -428,7 +428,7 @@ pnpm exec playwright test e2e/explorer-actions.spec.ts --project=desktop-chromiu
 
 第二条只在改上传/rename/delete/download衔接时运行。已有`e2e/explorer-actions.spec.ts`覆盖“下载、复制路径、重命名、确认删除”，没有覆盖保存冲突；`e2e/drawio-preview.spec.ts`只在预览/分页兼容路径受改时选相关test，不随编辑保存改动全跑。移动端只有toolbar/确认对话框/标签触摸布局变化时选`mobile-chromium`的一条代表场景；不在两个project重复所有API风险。
 
-启动隔离测试时覆盖高优先级`REMOTE_CODEX_DATABASE_PATH`、`REMOTE_CODEX_WORKSPACE_ROOT`并清除继承relay连接参数，勿触碰活动Supervisor。改共享UI TS/TSX后按skill仅构建一次共享UI包并确认Web消费其dist；改Rust且需要Supervisor才准备对应debug binary。选定检查通过后停止；不追加全浏览器套件、workspace-wide测试、release dry-run。
+启动隔离测试时覆盖高优先级`POCKYMOE_DATABASE_PATH`、`POCKYMOE_WORKSPACE_ROOT`并清除继承relay连接参数，勿触碰活动Supervisor。改共享UI TS/TSX后按skill仅构建一次共享UI包并确认Web消费其dist；改Rust且需要Supervisor才准备对应debug binary。选定检查通过后停止；不追加全浏览器套件、workspace-wide测试、release dry-run。
 
 ## 12. 不照搬的设计、未验证项与落地约束
 

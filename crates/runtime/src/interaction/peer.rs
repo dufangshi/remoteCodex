@@ -3,7 +3,7 @@ use super::SendInput;
 use crate::Supervisor;
 use anyhow::Result;
 use chrono::{DateTime, Duration, SecondsFormat};
-use remote_codex_protocol::now_rfc3339;
+use pockymoe_protocol::now_rfc3339;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -82,7 +82,7 @@ pub(super) fn completion_outbox(
 mod tests {
     use super::*;
     use crate::{fake::FakeRuntime, local_sessions::LocalSessionHomes, Database, RuntimeConfig};
-    use remote_codex_protocol::{CreateThreadInput, CreateWorkspaceInput, Mode, Provider};
+    use pockymoe_protocol::{CreateThreadInput, CreateWorkspaceInput, Mode, Provider};
     use std::sync::Arc;
 
     fn setup() -> (tempfile::TempDir, Supervisor) {
@@ -310,7 +310,7 @@ mod tests {
             } else {
                 "\nImmediate handling needed: the remote task depends on this now"
             };
-            let expected = format!("[remoteCodex task from device-a/foreign-thread (device \"Peer laptop\") | Review]\nIn reply to message prior-message{reason}\nhello peer");
+            let expected = format!("[Pockymoe task from device-a/foreign-thread (device \"Peer laptop\") | Review]\nIn reply to message prior-message{reason}\nhello peer");
             assert_eq!(prompt.0, expected);
             assert_eq!(prompt.1, expected);
         }
@@ -397,7 +397,7 @@ mod tests {
             assert!(record["request"]["text"]
                 .as_str()
                 .unwrap()
-                .contains(&format!("remote-codex transcript DEVICE/{target} --turn")));
+                .contains(&format!("pockymoe transcript DEVICE/{target} --turn")));
             let matching = local_mail["messages"]
                 .as_array()
                 .unwrap()

@@ -6,12 +6,12 @@
 
 DSH 本身是 Cordis 全插件平台，但它**刻意把 ACP 定为“仅自动化”协议**（[设计记录](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.0-rc.2/.agents/notes/implemented/simplification/2026-07-23-acp-automation-only-protocol.md)）：只有 model/reasoning 两个 config option、按步提交的整段消息、`kind:"other"` 的通用工具卡。没有流式输出、modes、commands、plan，也没有问答、插件管理或 fork/load。只靠 ACP 永远拿不到 DSH 的主要能力，不能指望上游在 ACP 里补。
 
-可行方案是把“DSH 插件”做成 **adapter 级扩展 + Remote Codex 内置插件**，分四层：
+可行方案是把“DSH 插件”做成 **adapter 级扩展 + Pockymoe 内置插件**，分四层：
 
 1. DSH 侧 `deepseek-bridge.mjs`：用 DSH 官方 `--patch` 插入 ACP 所在的同一进程。
 2. **原生组合**：同一进程再叠加已安装 DSH 自带的 Web bundle（`dsh-web-app` 的 `cordis.patch.yml` 与 `presets/*.patch.yml`）。这样 ACP 会话也有运行模式，并且进程里带着 DSH 自己的 Web 界面（原生控制台）。
 3. Rust `acp/deepseek.rs`：负责 bridge 通道、组合发现和语义映射。
-4. Remote Codex 内置插件 **DeepSeek Harness**（`remote-codex.deepseek-harness`）：
+4. Pockymoe 内置插件 **DeepSeek Harness**（`remote-codex.deepseek-harness`）：
    - 在插件系统里注册一个 thread panel（kind `harness:deepseek`）。
    - DSH 线程的工作台侧栏（手机为顶栏）出现插件按钮，在工具抽屉里打开 `DshPluginPanel`。
    - 同一面板也出现在 `/harness` 对话框里。
@@ -36,7 +36,7 @@ Rust 重写后，插件系统原本只剩“设备级开关终端按钮”的作
 | 权限 | ACP mode / app-server policy | ACP mode | 进程启动时读 `DSH_PERMISSION_MODE`；会话级 `/permission` | 启动 env + 运行时命令，再读 projection 确认 |
 | 计划模式 | mode | mode + ExitPlanMode | `/plan` 命令；`exit_plan_mode` 走 user-questions 审阅 | bridge 下发 `/plan`，并充当问题应答方 |
 | 自治工作 | goal 由 Codex 驱动 | 后台任务 | `create_goal` 或 `/goal` 后在 ACP prompt **结束后**继续自动跑轮次 | 回合持续到 DSH 空闲；Stop 时同时暂停 goal |
-| 会话 | load/fork（经 bridge） | load | 只有 list/resume/close；无 load/fork/回放；所有 profile 共享 `$DSH_HOME/sessions` | 历史由 Remote Codex 自己保存 |
+| 会话 | load/fork（经 bridge） | load | 只有 list/resume/close；无 load/fork/回放；所有 profile 共享 `$DSH_HOME/sessions` | 历史由 Pockymoe 自己保存 |
 | 设置存储 | `CODEX_HOME` config | `CLAUDE_CONFIG_DIR` | volatile 字段整行写进 profile 的 `cordis.patch.yml`；acp 禁用 HMR，需重启；凭据在 `.credentials.yaml`（监听热更新） | 带 revision 写，标注“重连生效”，写前备份 |
 | 模型 | 固定目录 | 固定目录 | 运行时 provider 注册（DeepSeek、pi-ai 的 40+ provider、自定义网关） | 可选项以 ACP 的 config options 为准；推理档位按模型逐个解析 |
 | 工具展示 | 命令、diff、终端输出 | 富卡片 | 只有 `kind:"other"`、`title` = 工具名、`rawInput`、结果文本 | 尚未做：可由 bridge 转发工具的 presentation |
@@ -48,10 +48,10 @@ Rust 重写后，插件系统原本只剩“设备级开关终端按钮”的作
 
 以下均在隔离 `DSH_HOME` 中用真实 DSH 0.2.0-rc.2 复现：
 
-1. **只读线程能写工作区。** Remote Codex 的 sandbox/approval 设置从未传给 DSH，DSH 默认 workspace-write。选 Full access 也只能在 bwrap 拒绝后靠自动批准提权。
+1. **只读线程能写工作区。** Pockymoe 的 sandbox/approval 设置从未传给 DSH，DSH 默认 workspace-write。选 Full access 也只能在 bwrap 拒绝后靠自动批准提权。
 2. **模型列表不一致。** 0.2.x 的 acp 默认模型 `deepseek-v4-flash` 已不在 DeepSeek 目录中。旧的发现插件只列出目录内模型，线程当前模型不在下拉框里。
 3. **没有流式输出。** 长推理期间界面一直不动，直到该步提交才一次性出现。
-4. **goal 自治轮次在回合外运行。** 模型调用 `create_goal` 后，ACP prompt 先返回 `end_turn`，DSH 随后在后台继续跑：12 秒内跑到 15/256 轮。Remote Codex 看不到这些输出，也没有 Stop 可以按，只能看着 token 被消耗。
+4. **goal 自治轮次在回合外运行。** 模型调用 `create_goal` 后，ACP prompt 先返回 `end_turn`，DSH 随后在后台继续跑：12 秒内跑到 15/256 轮。Pockymoe 看不到这些输出，也没有 Stop 可以按，只能看着 token 被消耗。
 5. **`exit_plan_mode` 必然失败。** 没有问题应答方，结果是 `NO_PROVIDER`；同时 plan 模式本身也无法进入。`/compact`、`/goal` 被当作普通文本发给模型。
 6. **插件清单混入 `include:` 组行**，且对任何操作都只读。
 7. **只能用 DSH 的默认模式。** ACP 组合里没有运行模式；DSH Web 建的 preset 会话经 ACP 恢复时会丢掉 preset。现已由原生组合 + `agent/created` 绑定修复。
@@ -65,10 +65,10 @@ Rust 重写后，插件系统原本只剩“设备级开关终端按钮”的作
 
 原生组合的加载规则：
 
-- 找到与 `dsh` **同一版本**的 `dsh-web-app` 时，先追加它自带的全部 patch。可以用 `REMOTE_CODEX_DSH_WEB_APP` 指定位置。
+- 找到与 `dsh` **同一版本**的 `dsh-web-app` 时，先追加它自带的全部 patch。可以用 `POCKYMOE_DSH_WEB_APP` 指定位置。
 - 再追加一份覆盖层，把 Web 主机限制为：OS 分配的回环端口、不打印 URL（stdout 是 ACP 帧）、不开浏览器、`trustedHosts` 为空。
 - 原生组合启动失败时退回纯 acp profile，失败原因记入 `compositionError`。
-- `REMOTE_CODEX_DSH_NATIVE=0` 可以完全关闭原生组合。
+- `POCKYMOE_DSH_NATIVE=0` 可以完全关闭原生组合。
 - 实测常驻内存与纯 acp 相同（约 169 MB）。bridge 在 `appReady` 之后反向连接，发送 `hello` 快照（协议版本、DSH 版本、profile、各模型推理档位、权限预设、插件/bundle/provider 清单、功能开关）。Rust 收到 hello 之后才发 ACP `initialize`/`session/new`。原因是 ACP 会先于其他插件就绪，过早初始化会拿到不完整的 provider 目录。
 
 **通道协议**（JSON lines，单行上限 2 MB）：
@@ -104,7 +104,7 @@ Rust 重写后，插件系统原本只剩“设备级开关终端按钮”的作
   - interrupt 先 `session/cancel`；有激活 goal 时再尽力执行 `/goal pause`。DSH 可能已自行暂停，那时失败也不影响停止结果。
   - 模式命令在全局会话锁之外执行，超时 20 秒。
 - **goal / compact：** 产品的 goal 流程把 `/goal …` 作为一个回合执行；`set_goal` 映射为 edit/pause/clear；compact 走 `/compact`，不再发 prompt。
-- **标题：** DSH 原本用第一条 prompt 给会话起名，而这条 prompt 带有 Remote Codex 的上下文前缀，所以控制台的会话列表里全是 `[remoteCodex: …`。
+- **标题：** DSH 原本用第一条 prompt 给会话起名，而这条 prompt 带有 Pockymoe 的上下文前缀，所以控制台的会话列表里全是 `[remoteCodex: …`。
   - 现在每个回合开始前，如果线程标题有变化，bridge 调 `sessionTitle.rename` 把线程标题写给 DSH。
   - 这相当于用户手动命名：标题被固定，DSH 不再自动生成。
   - 同步尽力而为，超时 2 秒，失败不影响回合。
@@ -157,8 +157,8 @@ relay ACL 默认拒绝共享用户访问该路径（有回归测试）。`GET /a
 | 按会话的控件可用性 | ✓ | 极简模式没有 plan/goal/compact，线程隐藏对应控件 |
 | 任意 DSH 命令（含插件命令） | ✓ | `commands/list` 校验后执行 |
 | DSH 插件自带界面、模式编辑器、DSH 设置页等全部 Web 功能 | ✓ 原生控制台（新标签页） | 同进程 Web 主机 + 回环代理 |
-| 凭据、provider 配置 | 原生控制台里可用；Remote Codex 的「上游」tab 在另一分支 | 计划只写入、不读取 |
-| 插件安装/卸载 | 原生控制台里可用；Remote Codex 面板未做 | pnpm 长任务 |
+| 凭据、provider 配置 | 原生控制台里可用；Pockymoe 的「上游」tab 在另一分支 | 计划只写入、不读取 |
+| 插件安装/卸载 | 原生控制台里可用；Pockymoe 面板未做 | pnpm 长任务 |
 | 会话标题 | ✓ 线程标题同步到 DSH | `sessionTitle.rename` |
 | 工具富展示（diff、位置） | 未做 | bridge 转发 presentation |
 | MCP 透传、子代理/后台任务面板 | 未做 | 目前 `mcpServers: []` |
@@ -182,7 +182,7 @@ DSH 的运行模式就是 agent preset：每种模式是一套工具与 persona 
 - 运行模式出现前就已开始的旧会话：执行 `recompose(默认)`；
 - 子代理沿用父级的模式。
 
-所选模式由 DSH 写进自己的会话日志，重启或恢复后仍然有效，Remote Codex 不需要另存。
+所选模式由 DSH 写进自己的会话日志，重启或恢复后仍然有效，Pockymoe 不需要另存。
 
 **切换的约束。**
 
@@ -193,7 +193,7 @@ DSH 的运行模式就是 agent preset：每种模式是一套工具与 persona 
 **锁定。** DSH 只允许在第一轮之前切换（`agent-preset/locked`）：
 
 - `session.presetLocked` 由 turn-boundary projection 计算；
-- Remote Codex 开始回合时立即标记为锁定，之后再读回确认。
+- Pockymoe 开始回合时立即标记为锁定，之后再读回确认。
 
 **新建线程。** 选择 DeepSeek Harness 后显示「运行模式」：
 
@@ -214,7 +214,7 @@ DSH 的运行模式就是 agent preset：每种模式是一套工具与 persona 
 
 ## 原生控制台
 
-**用途。** DSH 插件可以带自己的 Web 界面。DSH 还有很多原生功能没有 Remote Codex 对应物：preset 编辑器、插件管理与安装、provider/凭据设置、会话日志导出等。原生控制台让这些功能都能用。
+**用途。** DSH 插件可以带自己的 Web 界面。DSH 还有很多原生功能没有 Pockymoe 对应物：preset 编辑器、插件管理与安装、provider/凭据设置、会话日志导出等。原生控制台让这些功能都能用。
 
 **做法。** 原生组合让 DSH Web 主机跑在同一个 DSH 进程里，只监听回环地址。bridge 再开一个回环代理：
 
@@ -241,7 +241,7 @@ relay 会把 Host/Origin 改写成 `127.0.0.1:<端口>`，正好通过代理围�
 
 **为什么不嵌入 iframe。** relay 当前对所有页面设置 `X-Frame-Options: DENY` 和 CSP `frame-ancestors 'none'`、`frame-src 'self' blob:`，主页面无法嵌入 `p-*` 源。要嵌入，需要为预览源放开 `frame-src` 并调整 `frame-ancestors`，这是安全策略决策，留给用户确认。
 
-**注意。** 在控制台里直接对会话发消息，DSH 会照常运行，但这些回合不进入 Remote Codex 线程，面板会显示“DSH 正在回合外运行”。对话应继续在 Remote Codex 里进行。
+**注意。** 在控制台里直接对会话发消息，DSH 会照常运行，但这些回合不进入 Pockymoe 线程，面板会显示“DSH 正在回合外运行”。对话应继续在 Pockymoe 里进行。
 
 ## 保证不出错的原则
 
@@ -280,7 +280,7 @@ relay 会把 Host/Origin 改写成 `127.0.0.1:<端口>`，正好通过代理围�
 | 后续扩展与计划模式 | 计划审阅 → 批准 → 按计划实施 |
 | 子代理代码审查 | 审查发现 2 个真实问题并已修复 |
 | goal | 小目标自主完成；大目标中途停止后，两侧都处于暂停 |
-| 用户提问 | 问题出现在 Remote Codex，回答后继续 |
+| 用户提问 | 问题出现在 Pockymoe，回答后继续 |
 | 只读沙箱下的提权 | 以权限请求呈现，拒绝后未写入 |
 | `/compact` | 下一轮上下文从 21k 降到 10k，记忆保留 |
 | 切换上游模型 | 旧线程继续使用旧模型，新线程使用新模型 |
@@ -295,7 +295,7 @@ relay 会把 Host/Origin 改写成 `127.0.0.1:<端口>`，正好通过代理围�
    - 适配器曾写死 `maxTokens: 4096`。DSH 会把它作为 `max_output_tokens` 发出；即使不写，也会发送 pi-ai 默认的 32768。
    - 现在 Responses 上游设置 `compat.supportsMaxOutputTokens: false`，不再发送上限，由模型自身的上限决定，与 Codex 一致。实测该网关本来就忽略这个参数。Chat Completions 上游没有对应开关，仍用 DSH 默认值。
    - 上下文窗口、推理档位（`reasoningEfforts`）、默认档位和输入模态来自 PATH 上所有 Codex CLI 的 `codex debug models`，按版本合并、新版优先。例如 `gpt-6-astra`：272000 上下文；low/medium/high/xhigh/max 五档，默认 low；支持图片。
-   - 推理档位声明后，Remote Codex 线程的推理强度选择器会出现。录制代理实测，选择的 low/xhigh/high 都作为 `reasoning.effort` 发给了上游。
+   - 推理档位声明后，Pockymoe 线程的推理强度选择器会出现。录制代理实测，选择的 low/xhigh/high 都作为 `reasoning.effort` 发给了上游。
    - 表单里未改动的默认上下文 500000 不再当作模型事实。
 5. **没有每回合用量。** DSH 的 ACP 只报上下文占用。现在 bridge 监听 `session/event` 中 `assistant/message` 的用量（含子代理），按互斥计数映射后计入回合。
 6. **工具分类。** DSH 工具都是 `kind:"other"`：`todo_write` 被当成文件变更，`write` 不显示路径，`bash` 不显示为命令。现在按输入判断。
@@ -307,21 +307,21 @@ relay 会把 Host/Origin 改写成 `127.0.0.1:<端口>`，正好通过代理围�
 - Codex 专有的 `ultra` 档位在 DSH 中没有对应级别。
 - 机器上同时存在 `/usr/local/bin/codex`（0.154）与 `~/.local/bin/codex`（0.160）。正式环境按 `$HOME/.local/bin` 优先解析到新版；HOME 被隔离的测试环境会落到旧版，所以元数据合并所有安装并以新版为准。
 - 压缩完成后，界面上的上下文用量要到下一次模型调用才刷新。
-- 我们注入的上下文提示会引导模型优先使用 `remote-codex` CLI 协作，与 DSH 自带的子代理工具形成竞争。
+- 我们注入的上下文提示会引导模型优先使用 `pockymoe` CLI 协作，与 DSH 自带的子代理工具形成竞争。
 
 ## 验证
 
 均为隔离 `DSH_HOME`，未连接正式 relay 或 Supervisor：
 
 ```sh
-cargo test -p remote-codex-runtime --lib                 # 123 通过（含组合发现、按会话控件、流式对账、权限 fail closed）
-cargo test -p remote-codex-relay --lib route_acl          # 10 通过：harness 动作仅限 owner，运行模式目录可共享
-cargo test -p remote-codex-supervisor --lib               # 62 通过
-cargo test -p remote-codex-runtime --test acp_turn --test thread_interaction   # 7 + 13 通过
+cargo test -p pockymoe-runtime --lib                 # 123 通过（含组合发现、按会话控件、流式对账、权限 fail closed）
+cargo test -p pockymoe-relay --lib route_acl          # 10 通过：harness 动作仅限 owner，运行模式目录可共享
+cargo test -p pockymoe-supervisor --lib               # 62 通过
+cargo test -p pockymoe-runtime --test acp_turn --test thread_interaction   # 7 + 13 通过
 node --test scripts/dsh-bridge.test.mjs                  # 10 通过：白名单、问答、流式、备份、运行模式绑定与锁定、控制台代理围栏、标题同步
-pnpm --filter @remote-codex/supervisor-web exec vitest run src/components/HarnessSettingsDialog.test.tsx   # 13 通过
-pnpm --filter @remote-codex/thread-ui exec vitest run src/plugins src/components/workbench/WorkbenchPanels.test.tsx src/i18n   # 17 通过
-pnpm --filter @remote-codex/supervisor-web typecheck
+pnpm --filter @pockymoe/supervisor-web exec vitest run src/components/HarnessSettingsDialog.test.tsx   # 13 通过
+pnpm --filter @pockymoe/thread-ui exec vitest run src/plugins src/components/workbench/WorkbenchPanels.test.tsx src/i18n   # 17 通过
+pnpm --filter @pockymoe/supervisor-web typecheck
 
 # 真实 DSH + scripted provider，无需模型密钥（dsh 需在 PATH）
 E2E_REAL_DSH=1 E2E_DSH_SCRIPTED=1 E2E_DSH_HOME=/absolute/isolated-dsh-home \

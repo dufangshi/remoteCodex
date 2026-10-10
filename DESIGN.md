@@ -1,4 +1,4 @@
-# Remote Codex Supervisor Design Context
+# Pockymoe Supervisor Design Context
 
 ## Current System
 

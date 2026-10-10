@@ -1,7 +1,7 @@
 // Provider list/search/actions adapted from CC Switch src/components/providers.
 // Copyright (c) 2025 Jason Young. MIT; see THIRD_PARTY_NOTICES.md.
-import { getLocale } from '@remote-codex/thread-ui/i18n';
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { getLocale } from '@pockymoe/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { useEffect, useRef, useState } from 'react';
 import {
   Plus,
@@ -264,7 +264,7 @@ export function UpstreamManagement({
     );
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'remote-codex-template.json';
+    a.download = 'pockymoe-template.json';
     a.click();
     URL.revokeObjectURL(url);
     setNotice(translate('settings.templateExportedWithoutAPIKeysFillThem'));

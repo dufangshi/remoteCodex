@@ -47,9 +47,9 @@ pub fn definition(manager: &str, installed: &Installed, config: &Path) -> String
         config.to_string_lossy().into_owned(),
     ];
     if manager == "launchd" {
-        format!("<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>Label</key><string>com.remote-codex.supervisor</string><key>ProgramArguments</key><array>{}</array><key>EnvironmentVariables</key><dict><key>REMOTE_CODEX_MANAGED_SERVICE</key><string>launchd</string></dict><key>WorkingDirectory</key><string>{}</string><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>StandardOutPath</key><string>{}</string><key>StandardErrorPath</key><string>{}</string></dict></plist>", args.iter().map(|a| format!("<string>{}</string>", xml(a))).collect::<String>(), xml(&home().to_string_lossy()), xml(&log_path().to_string_lossy()), xml(&log_path().to_string_lossy()))
+        format!("<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>Label</key><string>com.remote-codex.supervisor</string><key>ProgramArguments</key><array>{}</array><key>EnvironmentVariables</key><dict><key>POCKYMOE_MANAGED_SERVICE</key><string>launchd</string></dict><key>WorkingDirectory</key><string>{}</string><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>StandardOutPath</key><string>{}</string><key>StandardErrorPath</key><string>{}</string></dict></plist>", args.iter().map(|a| format!("<string>{}</string>", xml(a))).collect::<String>(), xml(&home().to_string_lossy()), xml(&log_path().to_string_lossy()), xml(&log_path().to_string_lossy()))
     } else {
-        format!("[Unit]\nDescription=Remote Codex Supervisor\nAfter=network-online.target\n[Service]\nType=simple\nExecStart={}\nWorkingDirectory=%h\nEnvironment=REMOTE_CODEX_MANAGED_SERVICE=systemd-user\nRestart=always\nRestartSec=5\n[Install]\nWantedBy=default.target\n", args.iter().map(|a| unit(a)).collect::<Vec<_>>().join(" "))
+        format!("[Unit]\nDescription=Pockymoe Supervisor\nAfter=network-online.target\n[Service]\nType=simple\nExecStart={}\nWorkingDirectory=%h\nEnvironment=POCKYMOE_MANAGED_SERVICE=systemd-user\nRestart=always\nRestartSec=5\n[Install]\nWantedBy=default.target\n", args.iter().map(|a| unit(a)).collect::<Vec<_>>().join(" "))
     }
 }
 pub fn log_path() -> PathBuf {
@@ -331,7 +331,7 @@ pub fn capture_tmux(pid: u32, env: &BTreeMap<String, String>) -> Result<Option<T
     ensure!(values.len() == 4, "Invalid tmux ownership response");
     if values[1]
         != env
-            .get("REMOTE_CODEX_RELAY_SUPERVISOR_TMUX_SESSION")
+            .get("POCKYMOE_RELAY_SUPERVISOR_TMUX_SESSION")
             .map(String::as_str)
             .unwrap_or("remote-codex-relay-supervisor")
     {

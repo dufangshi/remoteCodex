@@ -6,7 +6,7 @@
 
 ## 1. 结论与证据口径
 
-当前 UI 的 watches 是 **Claude 原生调度任务的历史投影**，并不是 Remote Codex 已有的通用持久化 scheduler。创建证据来自成功的 `CronCreate` 工具历史；取消证据来自成功的 `CronDelete`；空列表对账只识别特定 `CronList` 文本。原生 timer 完成回复通过 Claude 本地 JSONL transcript 的显式 `turnOrigin: scheduled` 标记回填。创建识别与执行历史恢复是两条不同链路，不能把扫描 transcript 说成创建任务，也不能把 UI active 说成实时 CronList 确认。
+当前 UI 的 watches 是 **Claude 原生调度任务的历史投影**，并不是 Pockymoe 已有的通用持久化 scheduler。创建证据来自成功的 `CronCreate` 工具历史；取消证据来自成功的 `CronDelete`；空列表对账只识别特定 `CronList` 文本。原生 timer 完成回复通过 Claude 本地 JSONL transcript 的显式 `turnOrigin: scheduled` 标记回填。创建识别与执行历史恢复是两条不同链路，不能把扫描 transcript 说成创建任务，也不能把 UI active 说成实时 CronList 确认。
 
 建议建立一个小型 Supervisor-owned `trigger → condition → action` 注册表和执行账本，复用现有 thread admission、持久化 continuation、inbox、completion notification、task dependency 和 peer outbox。不要再造另一套线程、消息、依赖任务或 shell 授权系统。Native Claude watches 继续作为外部来源投影；Supervisor automation 才承诺跨 Supervisor 重启恢复、明确 missed-run 策略与执行历史。
 
@@ -42,7 +42,7 @@
 | [仓库事实] 执行归属仅精确 prompt + lifetime | `crates/runtime/src/service/watches.rs:227` | scheduled turn displayPrompt 精确匹配创建 prompt，限定 start/end；多个候选计 ambiguous，不计总成本；没有原生 jobId→runId 因果关系。数字是已记录/可归属运行，不是完整 scheduler audit。 |
 | [仓库事实] UI 是只读轮询 | `apps/supervisor-web/src/components/ThreadWatchesControl.tsx:179`, `:223`, `:258` | Claude 页面 visible 时每 30 秒 GET；显示当前/历史、cron/prompt/创建/过期/触发/费用；无 create/pause/cancel/真实 nextRunAt，无 watches 就隐藏。API 错误静默忽略，旧 snapshot 可能留存。 |
 | [仓库事实] Rust hooks 管理仍是占位 | `crates/supervisor/src/http.rs:233`, `:1651`; `crates/protocol/src/lib.rs:584` | GET 返回空 hooks/path/warnings/errors；默认 management.hooks/hookTrust false。relay ACL 中出现 hooks 路由不等于 runtime 已实现 hooks。 |
-| [仓库事实] ACP Claude 有特殊 bookends | `crates/runtime/src/acp/adapter.rs:188`; `crates/runtime/src/acp/runtime.rs:2624`; `crates/runtime/src/acp/claude_lifecycle.rs:40` | 接收 session/update 和 _claude/sdkMessage，只额外请求 command_lifecycle/result/system；native 原生运行不等于每次都有 Remote Codex owned turn。不能仅 idle frame 判完成。 |
+| [仓库事实] ACP Claude 有特殊 bookends | `crates/runtime/src/acp/adapter.rs:188`; `crates/runtime/src/acp/runtime.rs:2624`; `crates/runtime/src/acp/claude_lifecycle.rs:40` | 接收 session/update 和 _claude/sdkMessage，只额外请求 command_lifecycle/result/system；native 原生运行不等于每次都有 Pockymoe owned turn。不能仅 idle frame 判完成。 |
 
 ### 2.1 创建究竟属于谁
 
@@ -57,7 +57,7 @@ Claude 模型请求 CronCreate
     → GET watches 重放成功工具记录并生成 snapshot
 ```
 
-证据：`crates/runtime/src/acp/mapper.rs:146`（tool_call/tool_call_update 合并），`:434`（kind 映射），`:603`（rawInput/detail）；`crates/runtime/src/acp/runtime.rs:3298`（item 事件）；`crates/runtime/src/service.rs:433`（upsert 历史）；`crates/runtime/src/service/watches.rs:349`（查询）。所以 **CronCreate 是创建工具；ACP tool event 是观测传输；DB history 是展示持久化**。没有源码证据显示 Remote Codex 自己注册该 cron、通过 tools/event 创建它，或把 transcript 字句变成调度任务。
+证据：`crates/runtime/src/acp/mapper.rs:146`（tool_call/tool_call_update 合并），`:434`（kind 映射），`:603`（rawInput/detail）；`crates/runtime/src/acp/runtime.rs:3298`（item 事件）；`crates/runtime/src/service.rs:433`（upsert 历史）；`crates/runtime/src/service/watches.rs:349`（查询）。所以 **CronCreate 是创建工具；ACP tool event 是观测传输；DB history 是展示持久化**。没有源码证据显示 Pockymoe 自己注册该 cron、通过 tools/event 创建它，或把 transcript 字句变成调度任务。
 
 [本机安装事实] catalog 使用 `claude-agent-acp`，依赖安装默认 `@latest`，不是仓库固定版本（`crates/runtime/src/acp/catalog.rs:63`, `crates/runtime/src/acp/dependencies.rs:19`, `:44`）。当前本机：
 
@@ -121,7 +121,7 @@ MVP prompt action 永远 `delivery: queue`，因为它是已授权的独立周�
 
 自动化记录 origin 放在 queue payload/turn metadata，建议新增 `automationRunId/automationId/triggerEventId/originKind`，不新增与现有 MESSAGE_KINDS 冲突的 message kind。内部 wake 文本解释“这是你登记的 continuation”，不是假装用户发了新的普通任务。非 self target 的自动 prompt 必须有接收者或用户明确授权，managed agent 无权任意使兄弟线程定时自启动。
 
-[推断/风险] 原生 Claude timers 会自行运行，而本仓 `live.active` 的入场锁只覆盖 Remote Codex 发起的 turn（`crates/runtime/src/acp/runtime.rs:1714`）。“DB thread idle”不等于 native scheduler 也 idle。Supervisor prompt 与 native autonomous 输出共用 session 可能遇到 attribution/忙态 race。MVP 不宣称安全合并两种执行所有权：同一 Claude session 默认不同时开启 native timer 与 Supervisor prompt automation；发现 active/unconfirmed native watch 需在 UI 选择保留 native 或先由 harness 确认取消，再启用 Supervisor 计划。既有 native watches 不自动导入复制执行。未来需权威 busy/origin/jobId 适配，不能只靠旧投影状态。
+[推断/风险] 原生 Claude timers 会自行运行，而本仓 `live.active` 的入场锁只覆盖 Pockymoe 发起的 turn（`crates/runtime/src/acp/runtime.rs:1714`）。“DB thread idle”不等于 native scheduler 也 idle。Supervisor prompt 与 native autonomous 输出共用 session 可能遇到 attribution/忙态 race。MVP 不宣称安全合并两种执行所有权：同一 Claude session 默认不同时开启 native timer 与 Supervisor prompt automation；发现 active/unconfirmed native watch 需在 UI 选择保留 native 或先由 harness 确认取消，再启用 Supervisor 计划。既有 native watches 不自动导入复制执行。未来需权威 busy/origin/jobId 适配，不能只靠旧投影状态。
 
 ## 5. Tool/terminal/command hook 的真实边界
 
@@ -133,7 +133,7 @@ MVP prompt action 永远 `delivery: queue`，因为它是已授权的独立周�
 | Native Claude SDK hooks | 本机 `dist/acp-agent.js:7161`; 官方 hooks 链接见上 | harness 可以在其工具成功后运行 native callback/command | Rust hooks endpoint 空，不代表已转发；OS 用户权限 native command hook 不受 ACP guarded approval 充分约束。 |
 | transcript 回填 scheduled tools | `crates/runtime/src/service/claude_history.rs:103`, `:120` | 已完成 scheduled turn 中记录的工具历史 | 属于 replay，不能默认重新执行后置脚本，否则每次恢复会重复外部副作用；未完成记录仍看不到。 |
 
-[建议] 第一版“检测 xx 命令后跑脚本”只承诺 **通过 `remote-codex command run` 显式登记的受控命令**。给该执行分配 commandId，存 resolved executable/argv/cwd 与真实 exit；command.completed 条件匹配该 ID/固定参数，脚本执行一次。不要新增盲扫 transcript/PTY 文本的 scheduler。随后将 ACP Client terminal spawn/wait 接入相同 command registry，再加具名工具完成 adapter；其余来源 coverage 明确标部分覆盖。
+[建议] 第一版“检测 xx 命令后跑脚本”只承诺 **通过 `pockymoe command run` 显式登记的受控命令**。给该执行分配 commandId，存 resolved executable/argv/cwd 与真实 exit；command.completed 条件匹配该 ID/固定参数，脚本执行一次。不要新增盲扫 transcript/PTY 文本的 scheduler。随后将 ACP Client terminal spawn/wait 接入相同 command registry，再加具名工具完成 adapter；其余来源 coverage 明确标部分覆盖。
 
 Tool hook 用结构化 event，不反向解析 mapper 的 detailText。保留 `toolName/toolCallId/nativeSessionId/rawInput/redactedOutput/status/exitCode?` 的最小摘要；Secret 脱敏，argv/output 均不放通知全量。没有可靠 exitCode 就不能接受 `exitCodeEquals:0` condition，只允许 `toolStatus: completed` 并用文字说明。
 
@@ -172,7 +172,7 @@ prompt 每次执行重新读取 thread policy；guarded 仍 guarded，审批待�
 
 runScript MVP 只允许 workspace 内已授权固定 scriptPath/executable/argv/cwd，不允许动态字符串拼 shell；规范化 realpath，检查 symlink 逃逸，绑定内容 SHA256 与 scope。编辑脚本导致 hash 不同标 needsAuthorization，不能沿用旧 grant 执行新代码。不能自动载入整个仓库 hooks 或给 shell blanket allow；创建请求默认 needsAuthorization，明确用户指令已经给出精确 grant 时可一次登记。授权实施不可单靠 native Claude hook trust。
 
-script runner 为受控进程，复用 child_process 平台处理，但不能直接把当前 AgentTerminals.create 当安全 sandbox（该函数直接 spawn，`crates/runtime/src/acp/runtime.rs:2880` 也未见独立 terminal shell approval 检查）。显式 timeoutSeconds（建议默认 60、上限 300）、stdout/stderr 截断/磁盘上限、退出码、取消信号、工作区、环境 allowlist、并发上限；不传 REMOTE_CODEX_TOKEN 或 machine credential。环境只暴露 runId/automationId/event JSON stdin；不提供任意 target prompt/自授权凭证。需要 OS 约束时明确支持能力，未支持的平台禁用 script，不以 guarded 名义假装已沙箱。
+script runner 为受控进程，复用 child_process 平台处理，但不能直接把当前 AgentTerminals.create 当安全 sandbox（该函数直接 spawn，`crates/runtime/src/acp/runtime.rs:2880` 也未见独立 terminal shell approval 检查）。显式 timeoutSeconds（建议默认 60、上限 300）、stdout/stderr 截断/磁盘上限、退出码、取消信号、工作区、环境 allowlist、并发上限；不传 POCKYMOE_TOKEN 或 machine credential。环境只暴露 runId/automationId/event JSON stdin；不提供任意 target prompt/自授权凭证。需要 OS 约束时明确支持能力，未支持的平台禁用 script，不以 guarded 名义假装已沙箱。
 
 ### 6.4 防止递归与成本失控
 
@@ -183,12 +183,12 @@ script runner 为受控进程，复用 child_process 平台处理，但不能直
 ### 7.1 复用命令已经可用
 
 ```bash
-remote-codex thread wait child-a child-b --wake
-remote-codex inbox wait --kind result --kind question
-remote-codex thread send child-a --delivery queue --kind task --subject '执行检查' \
+pockymoe thread wait child-a child-b --wake
+pockymoe inbox wait --kind result --kind question
+pockymoe thread send child-a --delivery queue --kind task --subject '执行检查' \
   --text-file check.txt --notify-on-complete --request-id check-r1
-remote-codex task add '待构建结束后检查报告' --after 1 --assign reviewer
-remote-codex task claim --wait
+pockymoe task add '待构建结束后检查报告' --after 1 --assign reviewer
+pockymoe task claim --wait
 ```
 
 这些是当前命令，完成通知 passive，wake 必须由 receiver 登记。上述示例仅文档，不在本研究执行。
@@ -197,39 +197,39 @@ remote-codex task claim --wait
 
 ```bash
 # 下一小时起每小时独立检查；用户授权时可 enable，agent 提案显示有效状态
-remote-codex automation create --name hourly-self --thread self \
+pockymoe automation create --name hourly-self --thread self \
   --every 1h --action prompt --text-file hourly-prompt.txt \
   --busy-policy coalesce --missed-run-policy coalesceLatest --request-id hourly-r1
 
 # 精确选定 turn，事件提醒被动进入当前 thread（不重新发一个 task）
-remote-codex automation create --name build-finished --on-turn TURN_UUID \
+pockymoe automation create --name build-finished --on-turn TURN_UUID \
   --source-thread BUILD_THREAD_UUID --status completed --action notifyInbox \
   --thread self --once --subject '构建轮次已完成' --request-id build-reminder-r1
 
-remote-codex automation create --name task-finished --on-task 4 --root ROOT_UUID \
+pockymoe automation create --name task-finished --on-task 4 --root ROOT_UUID \
   --status completed --action notifyInbox --thread self --once --request-id task-reminder-r1
 
 # 第二阶段：用户先在 UI/可信 CLI 授权固定脚本，agent不能自发 grant
-remote-codex automation create --file command-hook.json --request-id command-hook-r1
-remote-codex automation authorize AUTO_UUID --script-sha256 SHA256
+pockymoe automation create --file command-hook.json --request-id command-hook-r1
+pockymoe automation authorize AUTO_UUID --script-sha256 SHA256
 # hook 可按 invocation 的 commandId 绑定，或预先按 explicit commandKey 绑定
-remote-codex command run --thread self --command-key focused-build --cwd . -- cargo check -p remote-codex-runtime
+pockymoe command run --thread self --command-key focused-build --cwd . -- cargo check -p pockymoe-runtime
 
-remote-codex automation list --thread self
-remote-codex automation show AUTO_UUID
-remote-codex automation preview --file proposal.json
-remote-codex automation pause AUTO_UUID
-remote-codex automation resume AUTO_UUID
-remote-codex automation cancel AUTO_UUID
-remote-codex automation runs AUTO_UUID --limit 20
-remote-codex automation retry RUN_UUID --request-id retry-r1
+pockymoe automation list --thread self
+pockymoe automation show AUTO_UUID
+pockymoe automation preview --file proposal.json
+pockymoe automation pause AUTO_UUID
+pockymoe automation resume AUTO_UUID
+pockymoe automation cancel AUTO_UUID
+pockymoe automation runs AUTO_UUID --limit 20
+pockymoe automation retry RUN_UUID --request-id retry-r1
 ```
 
 `authorize` 是可信身份校验后的操作，不是通过 --from 欺骗身份。MVP可以只提供 UI grant，CLI authorize 延后。retry 仅 transport 或可证明未执行的 action；executionUncertain/有副作用脚本不得自动重试。`--once` 针对 immutable source，只生成一 occurrence。禁止默认挂“任意某线程下一次完成”，避免 source 无意改变。
 
 ### 7.3 最小定义与执行记录
 
-所有公开 JSON 字段保持 camelCase，放 `crates/protocol` + `@remote-codex/shared` 类型，不再像 native Watch 一样仅组件内私有接口。
+所有公开 JSON 字段保持 camelCase，放 `crates/protocol` + `@pockymoe/shared` 类型，不再像 native Watch 一样仅组件内私有接口。
 
 ```json
 {
@@ -362,7 +362,7 @@ command_executions (阶段 2):
 
 执行历史每行有 run 状态、scheduled/queued/started/completed、合并次数、条件 skip、exit/error、重试次数、触发来源、费用 coverage、thread/turn 链接。点 prompt run 到现有线程 turn，点 command run 到受控输出 artifact，不把机密 argv/env 贴在通知里。错误允许 safe retry，否则显示“执行结果不明，需要核查”，不把它美化为普通失败后自动重跑。
 
-Web/shared 类型落 `apps/supervisor-web` / `@remote-codex/shared`，公共 `remote.lnz-study.com` 由 Rust relay 服务；真正实施 Web 改动后需按用户已有流程发布 shared UI SHA 并 dispatch relay-deploy。研究不部署，不因 runtime automation 触碰 Windows Device Manager 独立版本。
+Web/shared 类型落 `apps/supervisor-web` / `@pockymoe/shared`，公共 `remote.lnz-study.com` 由 Rust relay 服务；真正实施 Web 改动后需按用户已有流程发布 shared UI SHA 并 dispatch relay-deploy。研究不部署，不因 runtime automation 触碰 Windows Device Manager 独立版本。
 
 ## 9. 分期、实现落点与具体验收
 

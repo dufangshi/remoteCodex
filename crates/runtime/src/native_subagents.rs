@@ -4,7 +4,7 @@ use crate::{
     usage::{estimate_price, Tokens},
 };
 use anyhow::{anyhow, Result};
-use remote_codex_protocol::{
+use pockymoe_protocol::{
     NativeSubagentDetailDto, NativeSubagentDto, ThreadHistoryItemDto, ThreadSubagentDto,
 };
 use serde_json::{json, Value};
@@ -931,7 +931,7 @@ impl crate::Supervisor {
         let item_id = item_id.map(str::to_owned);
         let thread = self.get_thread(thread_id)?;
         let provider = match thread.provider {
-            remote_codex_protocol::Provider::Codex | remote_codex_protocol::Provider::Claude => {
+            pockymoe_protocol::Provider::Codex | pockymoe_protocol::Provider::Claude => {
                 thread.provider.as_str()
             }
             _ => thread.agent_id.as_deref().unwrap_or(""),

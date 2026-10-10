@@ -2,13 +2,13 @@
 
 状态：已按评审方向实现。本文保留设计讨论；实际命令与边界以 [线程交互使用说明](thread-interaction.md) 为准，验证见 [Docker E2E 记录](thread-interaction-e2e.md)。
 
-工作目录：`/Users/mac/dev/remoteCodex-thread-messaging`  
+工作目录：`/Users/mac/dev/pockymoe-thread-messaging`  
 分支：`feat/local-thread-messaging`  
 代码起点：`0b1d60f8`
 
 ## 1. 核心接口
 
-remoteCodex 向本机 Agent 和用户提供一组通用能力：
+Pockymoe 向本机 Agent 和用户提供一组通用能力：
 
 1. 创建线程，并选择 workspace、provider、agent、模型和推理等级。
 2. 向任意已有且有权访问的线程发送文字消息。
@@ -18,7 +18,7 @@ remoteCodex 向本机 Agent 和用户提供一组通用能力：
 
 发布跟踪、代码评审、资料查询、请另一个 Agent 解答问题、长期复用某个专业线程，都是这组接口的使用方式。何时创建、复用、读取、回信由 skill 指导 Agent 决策，不进入基础接口的业务状态机。
 
-## 2. 数据直接复用现有 remoteCodex
+## 2. 数据直接复用现有 pockymoe
 
 本功能不新增数据库表，不建立独立的 Message、Task、合作关系或消息日志存储。继续使用现有线程、turn、history item、pending steer 和运行时状态。
 
@@ -37,49 +37,49 @@ CLI 调用 Supervisor API，由 runtime 查询已有数据；CLI 不直写 SQLit
 
 ## 3. CLI 表面
 
-建议沿用现有 `remote-codex` 二进制，提供以下独立命令。所有输出为有界的结构化 JSON，字段采用 camelCase；示例参数为提案。
+建议沿用现有 `pockymoe` 二进制，提供以下独立命令。所有输出为有界的结构化 JSON，字段采用 camelCase；示例参数为提案。
 
 ```sh
 # 发现已有线程，列表只返回简要信息。
-remote-codex thread list --workspace WORKSPACE_ID
-remote-codex thread show THREAD_ID
+pockymoe thread list --workspace WORKSPACE_ID
+pockymoe thread show THREAD_ID
 
 # 查询运行状态，不附带聊天历史。
-remote-codex thread status THREAD_ID
+pockymoe thread status THREAD_ID
 
 # 发现目标 provider 可选的 agent、模型和推理等级。
-remote-codex thread backends
-remote-codex thread models --provider acp --agent grok
+pockymoe thread backends
+pockymoe thread models --provider acp --agent grok
 
 # 创建线程；创建与发送是可独立使用的操作。
-remote-codex thread create \
+pockymoe thread create \
   --workspace WORKSPACE_ID --title helper \
   --provider acp --agent grok \
   --model MODEL_ID --reasoning-effort low
 
 # 发送消息；不等待模型回复。
-remote-codex thread send THREAD_ID --text "请帮我查一下这个问题。"
-remote-codex thread send THREAD_ID --text-file question.txt
-remote-codex thread send THREAD_ID --text-file -
+pockymoe thread send THREAD_ID --text "请帮我查一下这个问题。"
+pockymoe thread send THREAD_ID --text-file question.txt
+pockymoe thread send THREAD_ID --text-file -
 
 # 默认查看最近 3 个 turn 的用户输入和全部 Agent 文字回复。
-remote-codex transcript THREAD_ID
-remote-codex transcript THREAD_ID --limit 5
+pockymoe transcript THREAD_ID
+pockymoe transcript THREAD_ID --limit 5
 
 # 往前翻阅，返回较早的历史页。
-remote-codex transcript THREAD_ID --before-turn TURN_ID --limit 3
+pockymoe transcript THREAD_ID --before-turn TURN_ID --limit 3
 
 # 对某一轮感兴趣时，展开条目；再读取具体内容。
-remote-codex transcript THREAD_ID --turn TURN_ID
-remote-codex transcript THREAD_ID --turn TURN_ID --item ITEM_ID
-remote-codex transcript THREAD_ID --turn TURN_ID --item ITEM_ID --raw
+pockymoe transcript THREAD_ID --turn TURN_ID
+pockymoe transcript THREAD_ID --turn TURN_ID --item ITEM_ID
+pockymoe transcript THREAD_ID --turn TURN_ID --item ITEM_ID --raw
 ```
 
 `create` 可以提供可选的初始文字参数，作为“创建后发送”的便利组合，不赋予它特殊任务语义。返回 thread ID 后，后续操作与任何已有线程完全相同。创建成功但初始发送失败时，应返回已创建的 ID，方便继续使用。
 
 模型与推理等级来自目标 provider 的实际能力。明确指定而不支持的值需要明确报错；未指定时遵循现有创建线程的默认配置。发送消息本身不改变接收线程的模型设置。
 
-线程 ID 始终是 remoteCodex ID，不要求调用者处理 provider session ID。可兼容完整网页 URL 输入，但应确认其中的 device ID 指向当前设备，不根据 URL 隐式跨机器调用。
+线程 ID 始终是 Pockymoe ID，不要求调用者处理 provider session ID。可兼容完整网页 URL 输入，但应确认其中的 device ID 指向当前设备，不根据 URL 隐式跨机器调用。
 
 ## 4. 发送和状态语义
 
@@ -97,7 +97,7 @@ remote-codex transcript THREAD_ID --turn TURN_ID --item ITEM_ID --raw
 
 ### 默认层：对话文字
 
-`remote-codex transcript THREAD_ID` 建议返回最近 **3 个 turn**，页内按时间先后排列。通过 `--limit N` 控制轮数，通过 `--before-turn` 向前翻页；第一轮的初始 prompt 在其所在历史页完整可读，不在每个请求里重复附带。
+`pockymoe transcript THREAD_ID` 建议返回最近 **3 个 turn**，页内按时间先后排列。通过 `--limit N` 控制轮数，通过 `--before-turn` 向前翻页；第一轮的初始 prompt 在其所在历史页完整可读，不在每个请求里重复附带。
 
 每轮包含 turn ID、状态、开始 / 结束时间，以及该轮所有用户输入和 Agent 对外文字回复。保留中间进度说明，不只保留最后答案。每条文字带 item ID、种类和已存时间戳，默认不包含工具结果、命令输出、diff 或其他 verbose 结构。
 
@@ -113,7 +113,7 @@ remote-codex transcript THREAD_ID --turn TURN_ID --item ITEM_ID --raw
 
 ### Item 层：具体内容
 
-`--turn TURN_ID --item ITEM_ID` 返回单条详细内容。`--raw` 读取同一条记录的完整已存 JSON，包括扩展字段。附件沿用现有引用与读取接口；只暴露 remoteCodex 实际保存过的记录，不声称存在从未存储的完整协议日志。
+`--turn TURN_ID --item ITEM_ID` 返回单条详细内容。`--raw` 读取同一条记录的完整已存 JSON，包括扩展字段。附件沿用现有引用与读取接口；只暴露 Pockymoe 实际保存过的记录，不声称存在从未存储的完整协议日志。
 
 ### 每一层都有体积边界
 
@@ -128,25 +128,25 @@ remote-codex transcript THREAD_ID --turn TURN_ID --item ITEM_ID --raw
 后续写一个线程交互 skill，说明接口和典型决策，而不替接口增加隐藏业务限制：
 
 - 先看线程列表、简要状态，发现已有合适线程时复用；需要不同上下文、workspace 或模型时创建。
-- 发消息时说明上下文、目的，以及需要回复时回复到哪个 remoteCodex thread ID。
+- 发消息时说明上下文、目的，以及需要回复时回复到哪个 Pockymoe thread ID。
 - 只需要知道是否运行就查 status；想了解交流内容先查最近几轮；遇到具体疑点再展开 turn / item。
 - 可以连续补充消息，可以同时联系多个线程，可以主动回信；不要求发送后等待。
 - 把值得复用的 thread ID 留在当前对话或已有可扩展 metadata 中，避免每次都从头创建。
 - 发布跟踪等长耗时场景只是示例：另一线程完成工作后，可直接调用同一 `send` 给发起者汇报。
 
-需要让受管理的 Agent 能发现当前 remoteCodex thread ID、workspace、本机 Supervisor 连接方式和 CLI 帮助。采用统一 runtime 上下文传递，覆盖创建与恢复；不依赖某个 provider 的专用工具。
+需要让受管理的 Agent 能发现当前 Pockymoe thread ID、workspace、本机 Supervisor 连接方式和 CLI 帮助。采用统一 runtime 上下文传递，覆盖创建与恢复；不依赖某个 provider 的专用工具。
 
-最初提出的“由 remoteCodex 自动在完成时通知”仍保留为待讨论的可选便利能力。它与 Agent 主动 `send` 回报不同：skill 能指导主动回信，但不能单靠说明文字保证进程失败时也通知。基础协议先独立成立；若保留自动通知，围绕现有执行事件与 KV 等机制单独约定触发条件，不把一般消息绑定成必须结束的 Task，也不新增表。本稿尚未确定该可选能力的具体实现与交付保证。
+最初提出的“由 Pockymoe 自动在完成时通知”仍保留为待讨论的可选便利能力。它与 Agent 主动 `send` 回报不同：skill 能指导主动回信，但不能单靠说明文字保证进程失败时也通知。基础协议先独立成立；若保留自动通知，围绕现有执行事件与 KV 等机制单独约定触发条件，不把一般消息绑定成必须结束的 Task，也不新增表。本稿尚未确定该可选能力的具体实现与交付保证。
 
 ## 7. 参考 Treer 与后端归属
 
 参考 `~/dev/treer/crates/treer-cli/src/main.rs` 中独立的 list / show / prompt / transcript 操作，以及 transcript 的 overview → turn → item 展开选择器和 JSON 输出。发送、读取与可选等待分别可用，不要求所有交互走 dispatch 工作流。
 
-采用 remoteCodex 自己的默认值：最近 3 轮、保留中间对外文字、使用已有 beforeTurnId 分页；不照搬 Treer 从第 0 页开始或 overview 仅展示最终输出的细节。
+采用 Pockymoe 自己的默认值：最近 3 轮、保留中间对外文字、使用已有 beforeTurnId 分页；不照搬 Treer 从第 0 页开始或 overview 仅展示最终输出的细节。
 
 ```text
 Codex / ACP Grok / 其他受管理的 Agent / 本机用户
-  → remote-codex CLI
+  → pockymoe CLI
   → Supervisor API
   → 现有线程 service、历史查询与存储
   → AgentRuntime / ACP 薄适配

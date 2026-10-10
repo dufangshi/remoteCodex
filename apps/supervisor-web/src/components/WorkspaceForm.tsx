@@ -1,4 +1,4 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { FolderOpen, FolderPlus, GitBranch } from 'lucide-react';
 

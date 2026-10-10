@@ -1,4 +1,4 @@
-# remote-codex guide preview
+# pockymoe guide preview
 
 Web previews: show a local web app to the user.
 
@@ -8,15 +8,15 @@ When the user asks to view an app, or your task calls for delivering a runnable
 web preview, reserve its address **before starting the HTTP service**:
 
 ```bash
-remote-codex preview create --port 4013 --label "App preview"
+pockymoe preview create --port 4013 --label "App preview"
 # Read JSON: hostname (exact host), origin, url and openUrl.
 # Configure the framework if needed, then start HTTP on 127.0.0.1:4013.
-remote-codex preview check 4013
-remote-codex preview list
+pockymoe preview check 4013
+pockymoe preview list
 # Optional: probe a known WebSocket endpoint (not a complete browser HMR test).
-remote-codex preview check 4013 --websocket-path /ws
+pockymoe preview check 4013 --websocket-path /ws
 # Revoke when no longer needed; this does not stop the HTTP process.
-remote-codex preview stop 4013
+pockymoe preview stop 4013
 ```
 
 - Creation reserves a mapping, **not a running server**. Repeating it for an
@@ -50,4 +50,4 @@ remote-codex preview stop 4013
   into reports or CLI commands. CLI output contains neither.
 - A disconnected Supervisor, disabled preview gateway or old runtime/Relay must
   be fixed explicitly. Do not invent a domain or bypass authentication. See
-  `remote-codex preview --help`; an older installation may need updating.
+  `pockymoe preview --help`; an older installation may need updating.

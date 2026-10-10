@@ -1,5 +1,5 @@
-import { LanguageSwitcher } from '@remote-codex/thread-ui/i18n';
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { LanguageSwitcher } from '@pockymoe/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { LoginVerification, usePendingLogin } from '../components/RelaySecurity';
 import { ArrowLeft, BookOpen, Eye, EyeOff } from 'lucide-react';
 import {
@@ -12,7 +12,7 @@ import {
 } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
-import type { RelaySessionDto } from '@remote-codex/shared';
+import type { RelaySessionDto } from '@pockymoe/shared';
 import {
   ApiError,
   enableRelayMode,
@@ -45,7 +45,7 @@ function safeReturnTo(value: unknown) {
   }
 
   try {
-    const base = 'https://remote-codex.invalid';
+    const base = 'https://pockymoe.invalid';
     const parsed = new URL(value, base);
     const path = `${parsed.pathname}${parsed.search}${parsed.hash}`;
     if (

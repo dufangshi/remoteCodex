@@ -4,8 +4,8 @@
 
 ## 环境与真实模型
 
-- Docker Desktop，Linux ARM64；隔离容器 `remote-codex-thread-e2e`，独立数据库与示例目录。
-- 实际运行从本分支构建的 Rust `remote-codex`，没有使用 fake runtime 代替真实模型场景。
+- Docker Desktop，Linux ARM64；隔离容器 `pockymoe-thread-e2e`，独立数据库与示例目录。
+- 实际运行从本分支构建的 Rust `pockymoe`，没有使用 fake runtime 代替真实模型场景。
 - Codex CLI 0.154.0、codex-acp 1.10.0、Grok 1.0.25。
 - Astra 主线程：`28c55ce7-07b6-4d4c-ac04-36287a8c35de`，provider `codex`，模型 `gpt-6-astra`，推理等级 `high`。
 - 网页手动创建的 Grok 线程：`24667668-9c56-479d-a581-e743419a35ea`，provider `acp` / agent `grok`，模型 `grok-4.6`，推理等级 `xhigh`。
@@ -37,7 +37,7 @@
 - [测试镜像 Dockerfile](../e2e/thread-interaction/Dockerfile)
 - [只读验证脚本](../e2e/thread-interaction/verify.py)
 - [CLI 使用说明](thread-interaction.md)
-- [随二进制提供的 skill](../skills/thread-interaction/SKILL.md)（索引和行为规则；详细说明在 [主题指南](../skills/thread-interaction/guides/)，即 `remote-codex guide TOPIC`，以及各命令的 `--help`）
+- [随二进制提供的 skill](../skills/thread-interaction/SKILL.md)（索引和行为规则；详细说明在 [主题指南](../skills/thread-interaction/guides/)，即 `pockymoe guide TOPIC`，以及各命令的 `--help`）
 
 本机测试数据保留在 worktree 的忽略目录 `.local/thread-e2e`，包含回执、编译产物与验证 JSON。凭据和完整真实 transcript 不提交到仓库。
 

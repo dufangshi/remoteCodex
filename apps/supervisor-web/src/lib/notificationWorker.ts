@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { translate } from '@remote-codex/thread-ui/i18n';
+import { translate } from '@pockymoe/thread-ui/i18n';
 const threadPath = /^\/devices\/[0-9a-f-]{36}\/threads\/[0-9a-f-]{36}\/?$/i;
 export function notificationThreadUrl(
   raw: unknown,
@@ -76,7 +76,7 @@ export function installPushHandlers(worker: ServiceWorkerGlobalScope) {
           !notificationThreadUrl(payload.url, worker.location.origin)
         )
           return;
-        await worker.registration.showNotification('Remote Codex', {
+        await worker.registration.showNotification('Pockymoe', {
           body:
             typeof payload.body === 'string'
               ? payload.body

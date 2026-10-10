@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use anyhow::{bail, ensure, Context, Result};
-use remote_codex_protocol::ThreadGoalDto;
+use pockymoe_protocol::ThreadGoalDto;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -273,7 +273,7 @@ impl Database {
                 id
             } else {
                 let id = Uuid::new_v4().to_string();
-                let now = remote_codex_protocol::now_rfc3339();
+                let now = pockymoe_protocol::now_rfc3339();
                 let hostname = hostname::get()
                     .map(|h| h.to_string_lossy().into_owned())
                     .unwrap_or_else(|_| "localhost".into());
@@ -769,7 +769,7 @@ fn run_migrations(conn: &mut Connection) -> Result<()> {
             params![
                 migration.version,
                 migration.name,
-                remote_codex_protocol::now_rfc3339()
+                pockymoe_protocol::now_rfc3339()
             ],
         )?;
     }

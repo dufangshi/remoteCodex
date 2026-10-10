@@ -2,4 +2,4 @@ export {
   PluginContext,
   mergePluginState,
   type PluginContextValue,
-} from '@remote-codex/thread-ui';
+} from '@pockymoe/thread-ui';

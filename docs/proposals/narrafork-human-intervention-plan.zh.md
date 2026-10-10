@@ -2,22 +2,22 @@
 
 日期：2026-10-07（Toronto）；任务板 #2。本文仅研究与设计，不实现产品功能。
 
-建议把人工接管实现为 Rust 控制面的**持久协作闸门**：用户明确持有一个 remoteCodex 子线程的自动驱动权和成果交付权，原生 harness 仍负责执行。接管默认让正在运行的 turn 结束；停止当前 turn、发送纠偏、暂停后续调度、归还成果分别操作。结果始终通过 passive inbox 交付，不能借接管把报告升级为 direct/queue，也不能因打开、聚焦或关闭面板隐式发命令。
+建议把人工接管实现为 Rust 控制面的**持久协作闸门**：用户明确持有一个 Pockymoe 子线程的自动驱动权和成果交付权，原生 harness 仍负责执行。接管默认让正在运行的 turn 结束；停止当前 turn、发送纠偏、暂停后续调度、归还成果分别操作。结果始终通过 passive inbox 交付，不能借接管把报告升级为 direct/queue，也不能因打开、聚焦或关闭面板隐式发命令。
 
 ## 1. 范围、基线与证据等级
 
 | 对象 | 实际读取版本 | 说明 |
 | --- | --- | --- |
-| remoteCodex | `ffb07d8b17c08af5aa601a67af6e9f058a5a25ac` | 当前工作目录 HEAD；业务对比基线为 `94edcfadc8a6dda5ebc23271ee582709d32af171` |
-| shared UI | `8e4c384d81012c229d1a780ea175fa2dbaa5c82b` | 独立仓库 `remote-codex-thread-ui` |
+| Pockymoe | `ffb07d8b17c08af5aa601a67af6e9f058a5a25ac` | 当前工作目录 HEAD；业务对比基线为 `94edcfadc8a6dda5ebc23271ee582709d32af171` |
+| shared UI | `8e4c384d81012c229d1a780ea175fa2dbaa5c82b` | 独立仓库 `pockymoe-thread-ui` |
 | NarraFork | `4e04d2f2e490bd57a5d8d712b709a574b905848a` | `.temp/research/NarraFork`，全程只读 |
 
 共同输入为 [代码对比报告](../narrafork-comparison-2026-10-07.zh.md)。下面“已有”以生产源码为依据；测试只帮助核对边界；“建议”“草案”“拟新增”均尚未实现。本轮没有运行 NarraFork Agent、读取其模型凭据、修改产品源码、构建应用或执行浏览器测试。
 
 特别区分三个对象：
 
-1. **remoteCodex 托管子线程**：有自己的 threadId、parentThreadId/rootThreadId、CLI 身份、投递队列、inbox、任务记录，是第一阶段可接管对象。
-2. **harness 原生子代理**：例如 `activeSubagents` 中的 native subagent。它可能没有可寻址 remoteCodex threadId，能否单独中止/对话/接回由 harness 决定，不自动获得本方案能力。
+1. **Pockymoe 托管子线程**：有自己的 threadId、parentThreadId/rootThreadId、CLI 身份、投递队列、inbox、任务记录，是第一阶段可接管对象。
+2. **harness 原生子代理**：例如 `activeSubagents` 中的 native subagent。它可能没有可寻址 Pockymoe threadId，能否单独中止/对话/接回由 harness 决定，不自动获得本方案能力。
 3. **其他设备上的 peer thread**：可通过已有 peer 路由通信，但不能凭本机 lineage 名称或接管标记取得远端控制权。第一阶段只读展示，并使用既有 peer 纠偏/结果语义。
 
 ## 2. NarraFork 的真实体验及其限制
@@ -486,7 +486,7 @@ shared UI 只拥有展示/动作意图，不拥有调度事实；本地打开标
 
 已有 `e2e/thread-groups.spec.ts` 只证明分组导航，没有接管覆盖；`session-state-recovery.spec.ts` 只证明 ACP stale state/queue reload，也不证明接管持久化。仅在这两类实际代码被改动时跑相关 spec，不能用已有标题替代新增行为断言。
 
-不启动正式数据库/服务做测试；按 skill 选择独立 `REMOTE_CODEX_DATABASE_PATH`、`REMOTE_CODEX_WORKSPACE_ROOT`，清除测试进程继承的 relay 参数。涉及 shared UI TSX 后只构建它的包及受影响 Rust binary 一次，后续按新改动重跑相关项，不追加全浏览器套件。
+不启动正式数据库/服务做测试；按 skill 选择独立 `POCKYMOE_DATABASE_PATH`、`POCKYMOE_WORKSPACE_ROOT`，清除测试进程继承的 relay 参数。涉及 shared UI TSX 后只构建它的包及受影响 Rust binary 一次，后续按新改动重跑相关项，不追加全浏览器套件。
 
 ## 16. 推荐最小方案与不建议照搬的设计
 
@@ -512,6 +512,6 @@ shared UI 只拥有展示/动作意图，不拥有调度事实；本地打开标
 - NarraFork：[takeover 状态与重启说明](https://github.com/NarraFork/NarraFork/blob/4e04d2f2e490bd57a5d8d712b709a574b905848a/server/services/subagent-takeover.ts#L4)、[takeover/归还路由](https://github.com/NarraFork/NarraFork/blob/4e04d2f2e490bd57a5d8d712b709a574b905848a/server/routes/narrators.ts#L4319)、[manual override claim](https://github.com/NarraFork/NarraFork/blob/4e04d2f2e490bd57a5d8d712b709a574b905848a/server/services/subagent-manual-override.ts#L95)、[前台 runtime control](https://github.com/NarraFork/NarraFork/blob/4e04d2f2e490bd57a5d8d712b709a574b905848a/server/services/agent-runtime/control.ts#L60)。
 - NarraFork：[后台转人工](https://github.com/NarraFork/NarraFork/blob/4e04d2f2e490bd57a5d8d712b709a574b905848a/server/services/subagent-runner.ts#L773)、[后台归还 publication](https://github.com/NarraFork/NarraFork/blob/4e04d2f2e490bd57a5d8d712b709a574b905848a/server/services/subagent-runner.ts#L644)、[Agent 创建 takeover](https://github.com/NarraFork/NarraFork/blob/4e04d2f2e490bd57a5d8d712b709a574b905848a/server/lib/agent/tools/task.ts#L9)、[Await/Send 接管语义](https://github.com/NarraFork/NarraFork/blob/4e04d2f2e490bd57a5d8d712b709a574b905848a/server/services/agent-communication.ts#L760)、[Await 不消费接管结果](https://github.com/NarraFork/NarraFork/blob/4e04d2f2e490bd57a5d8d712b709a574b905848a/server/lib/agent/tools/await.ts#L17)。
 - NarraFork：[composer 行为选择](https://github.com/NarraFork/NarraFork/blob/4e04d2f2e490bd57a5d8d712b709a574b905848a/frontend/components/narrator/composer/composer-action-slot.ts#L1)、[归还按钮](https://github.com/NarraFork/NarraFork/blob/4e04d2f2e490bd57a5d8d712b709a574b905848a/frontend/components/narrator/composer/NarratorComposerRow.tsx#L342)、[父卡片加载补齐](https://github.com/NarraFork/NarraFork/blob/4e04d2f2e490bd57a5d8d712b709a574b905848a/server/services/narrator-messages.ts#L2383)。
-- remoteCodex：[发送/回执/幂等](https://github.com/dufangshi/remoteCodex/blob/ffb07d8b17c08af5aa601a67af6e9f058a5a25ac/crates/runtime/src/interaction/mod.rs#L157)、[被动完成通知](https://github.com/dufangshi/remoteCodex/blob/ffb07d8b17c08af5aa601a67af6e9f058a5a25ac/crates/runtime/src/interaction/mod.rs#L590)、[wait/member state](https://github.com/dufangshi/remoteCodex/blob/ffb07d8b17c08af5aa601a67af6e9f058a5a25ac/crates/runtime/src/interaction/agents.rs#L366)、[wake](https://github.com/dufangshi/remoteCodex/blob/ffb07d8b17c08af5aa601a67af6e9f058a5a25ac/crates/runtime/src/interaction/agents.rs#L618)。
-- remoteCodex：[task done/依赖解锁](https://github.com/dufangshi/remoteCodex/blob/ffb07d8b17c08af5aa601a67af6e9f058a5a25ac/crates/runtime/src/interaction/tasks.rs#L377)、[drain/steer](https://github.com/dufangshi/remoteCodex/blob/ffb07d8b17c08af5aa601a67af6e9f058a5a25ac/crates/runtime/src/service.rs#L2546)、[审批响应](https://github.com/dufangshi/remoteCodex/blob/ffb07d8b17c08af5aa601a67af6e9f058a5a25ac/crates/runtime/src/service.rs#L3436)、[选择性更新恢复](https://github.com/dufangshi/remoteCodex/blob/ffb07d8b17c08af5aa601a67af6e9f058a5a25ac/crates/runtime/src/service/update.rs#L8)、[native 列表](https://github.com/dufangshi/remoteCodex/blob/ffb07d8b17c08af5aa601a67af6e9f058a5a25ac/apps/supervisor-web/src/components/ThreadSubagentsControl.tsx#L20)。
+- pockymoe：[发送/回执/幂等](https://github.com/dufangshi/remoteCodex/blob/ffb07d8b17c08af5aa601a67af6e9f058a5a25ac/crates/runtime/src/interaction/mod.rs#L157)、[被动完成通知](https://github.com/dufangshi/remoteCodex/blob/ffb07d8b17c08af5aa601a67af6e9f058a5a25ac/crates/runtime/src/interaction/mod.rs#L590)、[wait/member state](https://github.com/dufangshi/remoteCodex/blob/ffb07d8b17c08af5aa601a67af6e9f058a5a25ac/crates/runtime/src/interaction/agents.rs#L366)、[wake](https://github.com/dufangshi/remoteCodex/blob/ffb07d8b17c08af5aa601a67af6e9f058a5a25ac/crates/runtime/src/interaction/agents.rs#L618)。
+- pockymoe：[task done/依赖解锁](https://github.com/dufangshi/remoteCodex/blob/ffb07d8b17c08af5aa601a67af6e9f058a5a25ac/crates/runtime/src/interaction/tasks.rs#L377)、[drain/steer](https://github.com/dufangshi/remoteCodex/blob/ffb07d8b17c08af5aa601a67af6e9f058a5a25ac/crates/runtime/src/service.rs#L2546)、[审批响应](https://github.com/dufangshi/remoteCodex/blob/ffb07d8b17c08af5aa601a67af6e9f058a5a25ac/crates/runtime/src/service.rs#L3436)、[选择性更新恢复](https://github.com/dufangshi/remoteCodex/blob/ffb07d8b17c08af5aa601a67af6e9f058a5a25ac/crates/runtime/src/service/update.rs#L8)、[native 列表](https://github.com/dufangshi/remoteCodex/blob/ffb07d8b17c08af5aa601a67af6e9f058a5a25ac/apps/supervisor-web/src/components/ThreadSubagentsControl.tsx#L20)。
 - shared UI：[pending queue](https://github.com/dufangshi/remote-codex-thread-ui-rust/blob/8e4c384d81012c229d1a780ea175fa2dbaa5c82b/packages/thread-ui/src/components/composer/ComposerPendingQueue.tsx#L10)、[审批/补输入卡](https://github.com/dufangshi/remote-codex-thread-ui-rust/blob/8e4c384d81012c229d1a780ea175fa2dbaa5c82b/packages/thread-ui/src/components/timeline/TimelineRequestCards.tsx#L15)。

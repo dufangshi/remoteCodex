@@ -1,7 +1,5 @@
-use remote_codex_protocol::{
-    CreateThreadInput, CreateWorkspaceInput, Provider, ThreadEventEnvelope,
-};
-use remote_codex_runtime::{fake::FakeRuntime, Database, RuntimeConfig, Supervisor};
+use pockymoe_protocol::{CreateThreadInput, CreateWorkspaceInput, Provider, ThreadEventEnvelope};
+use pockymoe_runtime::{fake::FakeRuntime, Database, RuntimeConfig, Supervisor};
 use serde_json::{json, Value};
 use std::sync::Arc;
 

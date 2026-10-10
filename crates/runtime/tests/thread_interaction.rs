@@ -1,5 +1,5 @@
-use remote_codex_protocol::{CreateThreadInput, CreateWorkspaceInput, Provider};
-use remote_codex_runtime::{
+use pockymoe_protocol::{CreateThreadInput, CreateWorkspaceInput, Provider};
+use pockymoe_runtime::{
     fake::FakeRuntime,
     interaction::{SendInput, TranscriptQuery},
     Database, RuntimeConfig, Supervisor,
@@ -11,7 +11,7 @@ use std::{sync::Arc, time::Duration};
 fn setup() -> (tempfile::TempDir, Arc<Supervisor>) {
     let dir = tempfile::tempdir().unwrap();
     let config = RuntimeConfig {
-        mode: remote_codex_protocol::Mode::Local,
+        mode: pockymoe_protocol::Mode::Local,
         host: "127.0.0.1".into(),
         port: 0,
         workspace_root: dir.path().into(),
@@ -108,7 +108,7 @@ async fn publication_selects_history_and_includes_future_until_revoked() {
     let publication = s
         .create_publication(
             &thread,
-            remote_codex_runtime::publications::CreatePublication {
+            pockymoe_runtime::publications::CreatePublication {
                 turn_ids: vec![first],
                 theme: "light".into(),
             },
@@ -233,17 +233,17 @@ async fn conversation_is_recent_bounded_and_every_stored_detail_is_discoverable(
 }
 
 #[tokio::test]
-async fn managed_path_resolves_remote_codex_to_this_executable() {
+async fn managed_path_resolves_pockymoe_to_this_executable() {
     let (_dir, s) = setup();
-    // Test executables are not named remote-codex, like the suffixed release binaries.
+    // Test executables are not named pockymoe, like the suffixed release binaries.
     let dir = s
         .configure_cli("http://127.0.0.1:8787".into())
         .bin_dir
-        .expect("a remote-codex link for managed agents");
+        .expect("a pockymoe link for managed agents");
     let link = dir.join(if cfg!(windows) {
-        "remote-codex.exe"
+        "pockymoe.exe"
     } else {
-        "remote-codex"
+        "pockymoe"
     });
     #[cfg(unix)]
     assert_eq!(
@@ -253,7 +253,7 @@ async fn managed_path_resolves_remote_codex_to_this_executable() {
     assert!(link.is_file());
     let env = s
         .with_cli_context("thread-a", async {
-            remote_codex_runtime::interaction::launch_env()
+            pockymoe_runtime::interaction::launch_env()
         })
         .await;
     let path = &env.iter().find(|(key, _)| key == "PATH").unwrap().1;
@@ -262,14 +262,14 @@ async fn managed_path_resolves_remote_codex_to_this_executable() {
 
 #[tokio::test]
 async fn cli_identity_is_rebound_when_a_loaded_session_changes_thread_context() {
-    use remote_codex_runtime::{
+    use pockymoe_runtime::{
         acp::AcpRuntime,
         actor::{AgentRuntime, EventBus, SessionSettings, StartSessionInput, StartTurnInput},
     };
     let (dir, s) = setup();
     s.configure_cli("http://127.0.0.1:8787".into());
     let script = dir.path().join("agent.py");
-    std::fs::write(&script,format!("import os,json\nwith open('cli-context.json','w') as f: json.dump({{'threadId':os.getenv('REMOTE_CODEX_THREAD_ID'),'hasToken':bool(os.getenv('REMOTE_CODEX_TOKEN'))}},f)\n{}",include_str!("fixtures/fake_acp_agent.py"))).unwrap();
+    std::fs::write(&script,format!("import os,json\nwith open('cli-context.json','w') as f: json.dump({{'threadId':os.getenv('POCKYMOE_THREAD_ID'),'hasToken':bool(os.getenv('POCKYMOE_TOKEN'))}},f)\n{}",include_str!("fixtures/fake_acp_agent.py"))).unwrap();
     let python = which::which("python3")
         .or_else(|_| which::which("python"))
         .unwrap();
@@ -345,7 +345,7 @@ async fn cli_identity_is_rebound_when_a_loaded_session_changes_thread_context() 
             .map(|line| serde_json::from_str::<String>(line).unwrap())
             .collect::<Vec<_>>()
     };
-    assert!(prompts()[0].contains("remote-codex thread self"));
+    assert!(prompts()[0].contains("pockymoe thread self"));
     assert!(prompts()[0].ends_with("\n\nfirst"));
     assert_eq!(prompts()[1], "second");
     assert!(
@@ -375,7 +375,7 @@ async fn cli_identity_is_rebound_when_a_loaded_session_changes_thread_context() 
     )
     .await
     .unwrap();
-    assert!(prompts()[2].contains("remote-codex thread self"));
+    assert!(prompts()[2].contains("pockymoe thread self"));
     assert!(prompts()[2].ends_with("\n\nresumed"));
     s.with_cli_context(
         "thread-b",
@@ -823,7 +823,7 @@ async fn direct_rejects_unavailable_state_and_unsupported_steering_without_queue
     let state = Supervisor::new(
         state.config,
         state.db,
-        vec![Arc::new(remote_codex_runtime::acp::AcpRuntime::catalog(
+        vec![Arc::new(pockymoe_runtime::acp::AcpRuntime::catalog(
             None, 1000,
         ))],
     );

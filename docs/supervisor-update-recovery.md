@@ -54,10 +54,10 @@ The opt-in live test runs **inside an isolated Linux machine**, with two distinc
 ```sh
 node scripts/test-supervisor-update-live.mjs \
   --allow-token-use \
-  --directory /home/mac/remote-codex-update-test \
-  --prefix /home/mac/remote-codex-update-test/prefix \
-  --seed-binary /home/mac/remote-codex-update-test/seed-binary \
-  --candidate-binary /home/mac/remote-codex-update-test/candidate-binary
+  --directory /home/mac/pockymoe-update-test \
+  --prefix /home/mac/pockymoe-update-test/prefix \
+  --seed-binary /home/mac/pockymoe-update-test/seed-binary \
+  --candidate-binary /home/mac/pockymoe-update-test/candidate-binary
 ```
 
 Only release distribution is served from a loopback test registry, using distinct unpublished test versions. The production management API, npm installation, native binary hash validation, independent update worker, process restart, SQLite recovery, and real ACP/Codex session execute normally. The test triggers Update during a multi-step task, checks that the PID/version changes, then requires the same native session to finish a five-line checkpoint without duplicate lines. Evidence is written to the isolated run directory's `result.json`.
@@ -69,7 +69,7 @@ On the existing Treer Apple Container machine (Linux ARM64), a real `gpt-5.6-lun
 
 ### Relay verification and the 2026-09-11 offline incident
 
-The 0.12.29 worker treated an empty `REMOTE_CODEX_RELAY_SUPERVISOR_LOG` exported by tmux as a real path. Although the 0.12.31 process was running and reachable through Relay, the worker could not find its connection log, timed out, and restored 0.12.29. The database already used migration 8, so the old runtime could not start. Recovery reinstalled the already-published 0.12.31 package in the same npm prefix and started it with the existing database and device identity. Incident evidence is retained under `~/.remote-codex/recovery/update-0.12.31-offline/`.
+The 0.12.29 worker treated an empty `POCKYMOE_RELAY_SUPERVISOR_LOG` exported by tmux as a real path. Although the 0.12.31 process was running and reachable through Relay, the worker could not find its connection log, timed out, and restored 0.12.29. The database already used migration 8, so the old runtime could not start. Recovery reinstalled the already-published 0.12.31 package in the same npm prefix and started it with the existing database and device identity. Incident evidence is retained under `~/.remote-codex/recovery/update-0.12.31-offline/`.
 
 The unreleased fix reads `relayConnected` from the new process's health endpoint. The Supervisor sets this flag only after the relay's registration greeting and clears it when its tunnel exits or is cancelled. Compatibility with old runtimes resolves an empty log override to the launcher's default and interprets file offsets as bytes. Explicit `relayConnected: false` always wins over a historical connection log. A verification failure keeps the new process and installed package rather than blindly downgrading a migrated database.
 
@@ -77,4 +77,4 @@ Settings labels the installed/running version separately from the ongoing operat
 
 `test-supervisor-relay-restart-live.mjs` exercises the real relay, Supervisor and independent worker twice through the owner's device-scoped API in Treer, with an empty log override and registry access blocked. It makes no model calls. Together with the worker's failure tests and UI reconnect tests, this covers the branch omitted by the earlier local-mode restart test. These fixes are committed without a version bump or deployment.
 
-Unreleased verification (2026-09-11): workspace tests passed (267 passed, one existing real-Gemini test ignored), updater tests 13/13, runtime-settings component tests 8/8, Web typecheck and production build passed. Treer relay evidence: `/home/mac/remote-codex-update-test/relay-restart-ZMBMoR/result.json`; PID sequence `3639 → 3695 → 3786`, both jobs completed with the same version and the device connected. The initial fixture lacked the relay's required administrator settings; it was corrected before the successful run. The production device was restored using the already-published 0.12.31 package, and its failed maintenance record was explicitly marked `recovered` with the original error retained.
+Unreleased verification (2026-09-11): workspace tests passed (267 passed, one existing real-Gemini test ignored), updater tests 13/13, runtime-settings component tests 8/8, Web typecheck and production build passed. Treer relay evidence: `/home/mac/pockymoe-update-test/relay-restart-ZMBMoR/result.json`; PID sequence `3639 → 3695 → 3786`, both jobs completed with the same version and the device connected. The initial fixture lacked the relay's required administrator settings; it was corrected before the successful run. The production device was restored using the already-published 0.12.31 package, and its failed maintenance record was explicitly marked `recovered` with the original error retained.

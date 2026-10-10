@@ -30,7 +30,7 @@ pnpm test:e2e 现在默认选择 desktop。平时仍按文件/场景选择；验
 ## 更便宜的检查
 
 - Rust：cargo test --workspace。保留迁移/备份/原子回滚、鉴权加密、ACP 执行故障、更新恢复、存储排他锁、历史持久化、线程 CLI 投递。
-- Web：pnpm --filter @remote-codex/supervisor-web test。仅设备加密、设备作用域管理权限、投递结果确认。
+- Web：pnpm --filter @pockymoe/supervisor-web test。仅设备加密、设备作用域管理权限、投递结果确认。
 - Launcher/更新：pnpm npm:publish:test。下载校验、CLI 参数、数据库身份、不可变发布、升级失败回滚。
 - Docker CLI：e2e/thread-interaction/inbox.py 保留 CLI/HTTP/存储串联；启动方式见同目录 README。真实模型历史验收不属于默认测试。
 

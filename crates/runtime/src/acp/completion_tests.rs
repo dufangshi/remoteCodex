@@ -3,10 +3,10 @@ use super::*;
 #[tokio::test]
 async fn claude_coalesced_prompt_drains_only_proven_completed_work() {
     let dir = tempfile::tempdir().unwrap();
-    if std::env::var("REMOTE_CODEX_COALESCED_TEST_CHILD").is_err() {
+    if std::env::var("POCKYMOE_COALESCED_TEST_CHILD").is_err() {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "acp::runtime::completion_tests::claude_coalesced_prompt_drains_only_proven_completed_work", "--nocapture"])
-            .env("REMOTE_CODEX_COALESCED_TEST_CHILD", "1")
+            .env("POCKYMOE_COALESCED_TEST_CHILD", "1")
             .env("CLAUDE_CONFIG_DIR", dir.path()).output().unwrap();
         assert!(
             output.status.success(),
@@ -46,7 +46,7 @@ async fn claude_coalesced_prompt_drains_only_proven_completed_work() {
         "user-cancel",
         "steer-before-drain",
     ] {
-        if std::env::var("REMOTE_CODEX_COALESCED_TEST_SCENARIO")
+        if std::env::var("POCKYMOE_COALESCED_TEST_SCENARIO")
             .is_ok_and(|selected| selected != scenario)
         {
             continue;
@@ -198,10 +198,10 @@ async fn claude_incomplete_tool_reconciles_only_abandoned_streams() {
     // Isolate provider homes in a subprocess rather than changing process-wide
     // environment while other Rust tests are running.
     let dir = tempfile::tempdir().unwrap();
-    if std::env::var("REMOTE_CODEX_COMPLETION_TEST_CHILD").is_err() {
+    if std::env::var("POCKYMOE_COMPLETION_TEST_CHILD").is_err() {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "acp::runtime::completion_tests::claude_incomplete_tool_reconciles_only_abandoned_streams", "--nocapture"])
-            .env("REMOTE_CODEX_COMPLETION_TEST_CHILD", "1")
+            .env("POCKYMOE_COMPLETION_TEST_CHILD", "1")
             .env("CLAUDE_CONFIG_DIR", dir.path())
             .output().unwrap();
         assert!(

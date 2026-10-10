@@ -1,4 +1,4 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -195,7 +195,7 @@ export function DeviceEncryptionStatus({
       <ConfirmDialog
         open={Boolean(confirm)}
         title={translate("auth.trustTheReplacementDeviceIdentity")}
-        description={translate("auth.compareSHA256WithRemoteCodexRelay", { value1: confirm?.fingerprint ?? "" })}
+        description={translate("auth.compareSHA256WithPockymoeRelay", { value1: confirm?.fingerprint ?? "" })}
         confirmLabel={translate("auth.iVerifiedTheFingerprint")}
         onCancel={() => setConfirm(null)}
         onConfirm={async () => {

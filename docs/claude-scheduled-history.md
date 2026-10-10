@@ -1,6 +1,6 @@
 # Claude scheduled-turn history
 
-Claude's `CronCreate` / `/loop` turns can run between Remote Codex prompts. Older
+Claude's `CronCreate` / `/loop` turns can run between Pockymoe prompts. Older
 Claude ACP/SDK versions may execute them in the native session JSONL without
 sending the idle client their output. The runtime's prompt-scoped ACP receiver
 cannot be relied on to capture those turns.

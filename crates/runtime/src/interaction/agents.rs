@@ -4,7 +4,7 @@
 use super::{closing_message, enqueue};
 use crate::Supervisor;
 use anyhow::{anyhow, bail, ensure, Result};
-use remote_codex_protocol::{now_rfc3339, ThreadEventEnvelope};
+use pockymoe_protocol::{now_rfc3339, ThreadEventEnvelope};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 use std::{
@@ -74,7 +74,7 @@ pub fn load_role(workspace: &Path, name: &str) -> Result<RoleTemplate> {
         .iter()
         .find_map(|dir| std::fs::read_to_string(dir.join(format!("{name}.md"))).ok())
         .ok_or_else(|| {
-            anyhow!("role `{name}` not found; define .remote-codex/agents/{name}.md in the workspace or home directory, or list roles with `remote-codex thread roles`")
+            anyhow!("role `{name}` not found; define .remote-codex/agents/{name}.md in the workspace or home directory, or list roles with `pockymoe thread roles`")
         })?;
     Ok(parse_role(name, &text))
 }
@@ -147,7 +147,7 @@ pub(crate) fn stage_role(conn: &Connection, thread: &str, role: &RoleTemplate) -
         "INSERT OR REPLACE INTO kv(key,value) VALUES(?1,?2)",
         params![
             format!("cli:role:{thread}"),
-            format!("[remoteCodex role: {}]\n{}", role.name, role.instructions)
+            format!("[Pockymoe role: {}]\n{}", role.name, role.instructions)
         ],
     )?;
     Ok(())
@@ -493,9 +493,9 @@ impl Supervisor {
                     "next": if blocked {
                         "A delegate is blocked: answer its question (reply with --in-reply-to, or acknowledge it) or resolve its approval, then wait again."
                     } else if done {
-                        "Read each settled thread's closingMessage; check artifacts before acting on them. Close delegates you no longer need with `remote-codex thread close NAME`."
+                        "Read each settled thread's closingMessage; check artifacts before acting on them. Close delegates you no longer need with `pockymoe thread close NAME`."
                     } else {
-                        "Still running. Wait again, or continue other work and check `remote-codex thread tree`."
+                        "Still running. Wait again, or continue other work and check `pockymoe thread tree`."
                     },
                 }));
             }
@@ -584,7 +584,7 @@ impl Supervisor {
         })?;
         ensure!(
             thread.status != "running" && thread.active_turn_id.is_none() && queued == 0,
-            "conflict: thread is still running or has queued work; wait for it (`remote-codex thread wait {id}`) before closing"
+            "conflict: thread is still running or has queued work; wait for it (`pockymoe thread wait {id}`) before closing"
         );
         let mut removed = false;
         if drop_worktree {
@@ -703,7 +703,7 @@ impl Supervisor {
                 .collect::<Vec<_>>()
                 .join("\n");
             let text = format!(
-                "[remoteCodex wake: the delegates you registered a wake for have settled]\n{lines}\n\nVerify results before acting on them. Full transcripts: remote-codex transcript ID --limit 1"
+                "[Pockymoe wake: the delegates you registered a wake for have settled]\n{lines}\n\nVerify results before acting on them. Full transcripts: pockymoe transcript ID --limit 1"
             );
             let now = now_rfc3339();
             self.db.with(|c| {

@@ -1,5 +1,5 @@
-import { getLocale } from '@remote-codex/thread-ui/i18n';
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { getLocale } from '@pockymoe/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { LoginVerification, RelaySecurityPanel, usePendingLogin } from '../components/RelaySecurity';
 import {
   FormEvent,
@@ -32,7 +32,7 @@ import type {
   RelaySessionDto,
   RelaySessionShareDto,
   RelayUserDto,
-} from '@remote-codex/shared';
+} from '@pockymoe/shared';
 import { LoginPage } from './LoginPage';
 import { useDialogLifecycle } from '../components/useDialogLifecycle';
 import {

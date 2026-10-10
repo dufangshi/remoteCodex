@@ -1,4 +1,4 @@
-import { useI18n } from '@remote-codex/thread-ui/i18n';
+import { useI18n } from '@pockymoe/thread-ui/i18n';
 
 /** Search copy uses the same locale store and paired resources as the workbench. */
 export function useSearchMessages() {

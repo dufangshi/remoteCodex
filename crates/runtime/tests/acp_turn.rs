@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
-use remote_codex_runtime::acp::AcpRuntime;
-use remote_codex_runtime::actor::{AgentRuntime, EventBus, StartSessionInput, StartTurnInput};
+use pockymoe_runtime::acp::AcpRuntime;
+use pockymoe_runtime::actor::{AgentRuntime, EventBus, StartSessionInput, StartTurnInput};
 use tempfile::tempdir;
 use tokio_util::sync::CancellationToken;
 
@@ -165,7 +165,7 @@ async fn process_exit_leaves_completion_unconfirmed() {
         .unwrap();
     assert_eq!(
         runtime.execution_state(&session_id).await,
-        remote_codex_runtime::actor::ExecutionState::Idle
+        pockymoe_runtime::actor::ExecutionState::Idle
     );
     runtime
         .start_turn(
@@ -364,8 +364,8 @@ fn turn_input(session_id: &str, prompt: &str, turn_id: &str) -> StartTurnInput {
 }
 
 fn completed_event(
-    events: &mut tokio::sync::broadcast::Receiver<remote_codex_protocol::ThreadEventEnvelope>,
-) -> remote_codex_protocol::ThreadEventEnvelope {
+    events: &mut tokio::sync::broadcast::Receiver<pockymoe_protocol::ThreadEventEnvelope>,
+) -> pockymoe_protocol::ThreadEventEnvelope {
     let mut completed = None;
     while let Ok(event) = events.try_recv() {
         if event.event_type == "thread.turn.completed" {

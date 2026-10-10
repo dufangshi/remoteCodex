@@ -1,5 +1,5 @@
-import { confirmWorkspaceDocumentLeave, type WorkspaceDocumentSnapshot, type WorkspaceDocumentSaveInput, type WorkspaceSaveReceipt } from "@remote-codex/thread-ui";
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { confirmWorkspaceDocumentLeave, type WorkspaceDocumentSnapshot, type WorkspaceDocumentSaveInput, type WorkspaceSaveReceipt } from "@pockymoe/thread-ui";
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { encryptedBrowserFetch, encryptedRelaySocket } from './relayTransport';
 import type {
   ApplyProviderHostConfigArchiveResultDto,
@@ -80,9 +80,9 @@ import type {
   UpdateWorkspaceFavoriteInput,
   WorkspaceDto,
   WorkspaceSettingsDto,
-} from '@remote-codex/shared';
-export type { PromptAttachmentUpload } from '@remote-codex/thread-ui';
-import type { PromptAttachmentUpload } from '@remote-codex/thread-ui';
+} from '@pockymoe/shared';
+export type { PromptAttachmentUpload } from '@pockymoe/thread-ui';
+import type { PromptAttachmentUpload } from '@pockymoe/thread-ui';
 import {
   currentRelayDeviceIdFromPath,
   currentThreadIdFromPath,
@@ -107,7 +107,7 @@ type RequestAuthMode = 'default' | 'relay-admin' | 'none';
 
 declare global {
   interface Window {
-    __REMOTE_CODEX_BOOTSTRAP__?: {
+    __POCKYMOE_BOOTSTRAP__?: {
       mode?: 'local' | 'server' | 'relay';
       relayApiBase?: string;
     };
@@ -155,7 +155,7 @@ function relayModeEnabled() {
     return false;
   }
   return (
-    window.__REMOTE_CODEX_BOOTSTRAP__?.mode === 'relay' ||
+    window.__POCKYMOE_BOOTSTRAP__?.mode === 'relay' ||
     window.location.pathname.startsWith('/relay-portal') ||
     window.location.pathname.startsWith('/relay-admin') ||
     window.location.pathname.startsWith('/relay-account') ||
@@ -439,7 +439,7 @@ export async function request<T>(
 }
 
 function fallbackDownloadFilename(input: RequestInfo | URL) {
-  return String(input).includes('/exports/html') ? 'remote-codex-transcript.html' : 'download';
+  return String(input).includes('/exports/html') ? 'pockymoe-transcript.html' : 'download';
 }
 
 function parseContentDispositionFilename(value: string | null) {

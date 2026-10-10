@@ -1,7 +1,7 @@
 # Native installation and GitHub runtime releases
 
 GitHub Releases in `dufangshi/remoteCodex` are the authoritative runtime versions.
-Remote Codex no longer publishes runtime/npm packages. npm remains a possible
+Pockymoe no longer publishes runtime/npm packages. npm remains a possible
 installation mechanism for third-party Agent/ACP dependencies, not for this runtime.
 
 ## Install and migrate
@@ -27,7 +27,7 @@ pauses active turns before the independent native worker restarts the service. T
 old helper is backed up. Read-only/unrecognized legacy helpers fail before shutdown;
 those require explicit service recovery instead of silently stopping the device.
 The old npm package is not removed automatically. On Unix the native CLI is available
-at `~/.local/bin/remote-codex` when that path is free; restart your shell or use its
+at `~/.local/bin/pockymoe` when that path is free; restart your shell or use its
 absolute path if an older npm CLI still wins PATH. Managed agents always receive the
 running native executable's directory on PATH.
 

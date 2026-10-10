@@ -28,19 +28,19 @@ test('account push registration, durable completion and background tab read stat
   const password = randomBytes(24).toString('hex');
   const cleanEnv = Object.fromEntries(
     Object.entries(process.env).filter(
-      ([key]) => !key.startsWith('REMOTE_CODEX_'),
+      ([key]) => !key.startsWith('POCKYMOE_'),
     ),
   );
   function start(command: string, extra: Record<string, string>) {
-    const proc = spawn(resolve('target/debug/remote-codex'), [command], {
+    const proc = spawn(resolve('target/debug/pockymoe'), [command], {
       env: {
         ...cleanEnv,
         HOST: '127.0.0.1',
-        REMOTE_CODEX_ADMIN_USERNAME: 'admin',
-        REMOTE_CODEX_ADMIN_PASSWORD: password,
-        REMOTE_CODEX_E2E_FAKE_RUNTIME: '1',
-        REMOTE_CODEX_SESSION_SECRET: randomBytes(32).toString('hex'),
-        REMOTE_CODEX_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'),
+        POCKYMOE_ADMIN_USERNAME: 'admin',
+        POCKYMOE_ADMIN_PASSWORD: password,
+        POCKYMOE_E2E_FAKE_RUNTIME: '1',
+        POCKYMOE_SESSION_SECRET: randomBytes(32).toString('hex'),
+        POCKYMOE_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'),
         ...extra,
       },
       stdio: 'ignore',
@@ -65,9 +65,9 @@ test('account push registration, durable completion and background tab read stat
   try {
     start('relay', {
       PORT: String(relayPort),
-      REMOTE_CODEX_RELAY_DATA_DIR: join(root, 'relay'),
-      REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: 'true',
-      REMOTE_CODEX_RELAY_WEB_DIST_DIR: resolve('apps/supervisor-web/dist'),
+      POCKYMOE_RELAY_DATA_DIR: join(root, 'relay'),
+      POCKYMOE_RELAY_REGISTRATION_ENABLED: 'true',
+      POCKYMOE_RELAY_WEB_DIST_DIR: resolve('apps/supervisor-web/dist'),
     });
     await expect
       .poll(() =>
@@ -89,11 +89,11 @@ test('account push registration, durable completion and background tab read stat
     });
     start('relay-supervisor', {
       PORT: String(devicePort),
-      REMOTE_CODEX_RELAY_SUPERVISOR_PORT: String(devicePort),
-      REMOTE_CODEX_RELAY_SERVER_URL: base,
-      REMOTE_CODEX_RELAY_AGENT_TOKEN: device.token,
-      REMOTE_CODEX_DATABASE_PATH: join(root, 'supervisor.sqlite'),
-      REMOTE_CODEX_WORKSPACE_ROOT: join(root, 'workspaces'),
+      POCKYMOE_RELAY_SUPERVISOR_PORT: String(devicePort),
+      POCKYMOE_RELAY_SERVER_URL: base,
+      POCKYMOE_RELAY_AGENT_TOKEN: device.token,
+      POCKYMOE_DATABASE_PATH: join(root, 'supervisor.sqlite'),
+      POCKYMOE_WORKSPACE_ROOT: join(root, 'workspaces'),
     });
     await expect
       .poll(async () => (await api('/healthz')).connectedSupervisors)

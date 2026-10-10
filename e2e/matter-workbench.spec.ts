@@ -206,7 +206,7 @@ test('workbench keeps tab positions, fills the viewport and separates session id
   // A parent's old bottom padding clipped the workbench even when its own bounds were correct.
   expect(await page.evaluate(() => document.elementsFromPoint(innerWidth / 2, innerHeight - 1).some(e => e.classList.contains('matter-workbench')))).toBe(true);
   await page.locator('.matter-thread-menu > summary').click();
-  await page.getByRole('button', { name: 'Copy Remote Codex session ID', exact: true }).click();
+  await page.getByRole('button', { name: 'Copy Pockymoe session ID', exact: true }).click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(ids[0]);
   const detail = await (await request.get(`${base}/api/threads/${ids[0]}`)).json();
   expect(detail.thread.providerSessionId).toBeTruthy();
@@ -219,7 +219,7 @@ test('workbench keeps tab positions, fills the viewport and separates session id
   const settings = page.getByTestId('settings-dialog');
   await expect(settings).toHaveClass(/matter-settings-dialog/);
   await expect(settings).toHaveAttribute('data-theme-effective', 'dark');
-  await expect(settings.getByText('Remote Codex session ID', { exact: true })).toBeVisible();
+  await expect(settings.getByText('Pockymoe session ID', { exact: true })).toBeVisible();
   await expect(settings.getByText('Harness session ID', { exact: true })).toBeVisible();
   await page.screenshot({ path: `output/playwright/matter-settings-dark-${testInfo.project.name}.png` });
   await settings.getByRole('button', { name: 'Global', exact: true }).click();
@@ -432,7 +432,7 @@ test('execution timeline expands deferred work and keeps the last reply above th
   await mkdir(absPath, { recursive: true });
   const ws = await (
     await request.post(`${base}/api/workspaces`, {
-      data: { absPath, label: 'Remote Codex' },
+      data: { absPath, label: 'Pockymoe' },
     })
   ).json();
   const created = await (

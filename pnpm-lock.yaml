@@ -32,18 +32,18 @@ importers:
       '@hpke/core':
         specifier: ^1.9.0
         version: 1.9.0
-      '@remote-codex/plugin-runtime':
+      '@pockymoe/plugin-runtime':
         specifier: workspace:*
         version: link:../../packages/plugin-runtime
-      '@remote-codex/plugin-terminal':
+      '@pockymoe/plugin-terminal':
         specifier: workspace:*
         version: link:../../packages/plugin-terminal
-      '@remote-codex/shared':
+      '@pockymoe/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      '@remote-codex/thread-ui':
-        specifier: file:../../remote-codex-thread-ui/packages/thread-ui
-        version: file:remote-codex-thread-ui/packages/thread-ui(@remote-codex/plugin-runtime@packages+plugin-runtime)(@remote-codex/plugin-terminal@packages+plugin-terminal)(@remote-codex/shared@packages+shared)(@types/mdast@4.0.4)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(micromark-util-types@2.0.2)(micromark@4.0.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(unified@11.0.5)
+      '@pockymoe/thread-ui':
+        specifier: file:../../pockymoe-thread-ui/packages/thread-ui
+        version: file:pockymoe-thread-ui/packages/thread-ui(@pockymoe/plugin-runtime@packages+plugin-runtime)(@pockymoe/plugin-terminal@packages+plugin-terminal)(@pockymoe/shared@packages+shared)(@types/mdast@4.0.4)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(micromark-util-types@2.0.2)(micromark@4.0.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(unified@11.0.5)
       '@streamdown/code':
         specifier: ^1.1.1
         version: 1.1.1(react@19.2.7)
@@ -645,6 +645,15 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
+  '@pockymoe/thread-ui@file:pockymoe-thread-ui/packages/thread-ui':
+    resolution: {directory: pockymoe-thread-ui/packages/thread-ui, type: directory}
+    peerDependencies:
+      '@pockymoe/plugin-runtime': 0.1.0
+      '@pockymoe/plugin-terminal': 0.1.0
+      '@pockymoe/shared': 0.1.0
+      react: ^19.1.0
+      react-dom: ^19.1.0
+
   '@radix-ui/number@1.1.2':
     resolution: {integrity: sha512-ceTwaxc4I5IOi97DgCotl3pqiyRGvffcc0oOsE2dQYaJOFIDsDt4VWG6xEbg1QePv9QWausCEIppud/tJ1wNig==}
 
@@ -974,15 +983,6 @@ packages:
 
   '@radix-ui/rect@1.1.2':
     resolution: {integrity: sha512-xnXE7wG13PI+cxieVssYXlQJuYVRhH9NBoxt3KNwzghDIA69GMm7d4wXRouHIYjE+KvS6U/MsMO73NdS2MH9ZA==}
-
-  '@remote-codex/thread-ui@file:remote-codex-thread-ui/packages/thread-ui':
-    resolution: {directory: remote-codex-thread-ui/packages/thread-ui, type: directory}
-    peerDependencies:
-      '@remote-codex/plugin-runtime': 0.1.0
-      '@remote-codex/plugin-terminal': 0.1.0
-      '@remote-codex/shared': 0.1.0
-      react: ^19.1.0
-      react-dom: ^19.1.0
 
   '@rolldown/pluginutils@1.0.0-beta.27':
     resolution: {integrity: sha512-+d0F4MKMCbeVUJwG96uQ4SgAznZNSq93I3V+9NHA4OpvqG8mRCpGdKmK8l/dl02h2CCDHwW2FqilnTyDcAnqjA==}
@@ -3609,6 +3609,50 @@ snapshots:
     dependencies:
       playwright: 1.60.0
 
+  '@pockymoe/thread-ui@file:pockymoe-thread-ui/packages/thread-ui(@pockymoe/plugin-runtime@packages+plugin-runtime)(@pockymoe/plugin-terminal@packages+plugin-terminal)(@pockymoe/shared@packages+shared)(@types/mdast@4.0.4)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(micromark-util-types@2.0.2)(micromark@4.0.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(unified@11.0.5)':
+    dependencies:
+      3dmol: 2.5.5
+      '@pockymoe/plugin-runtime': link:packages/plugin-runtime
+      '@pockymoe/plugin-terminal': link:packages/plugin-terminal
+      '@pockymoe/shared': link:packages/shared
+      '@radix-ui/react-accordion': 1.2.13(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@radix-ui/react-dialog': 1.1.16(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@radix-ui/react-separator': 1.1.9(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@radix-ui/react-slider': 1.4.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@radix-ui/react-slot': 1.2.5(@types/react@19.2.17)(react@19.2.7)
+      '@radix-ui/react-tooltip': 1.2.9(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@tanstack/react-virtual': 3.14.10(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@xterm/addon-fit': 0.11.0
+      '@xyflow/react': 12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      class-variance-authority: 0.7.1
+      clsx: 2.1.1
+      dompurify: 3.4.8
+      katex: 0.16.47
+      lucide-react: 0.544.0(react@19.2.7)
+      mermaid: 11.16.1
+      monaco-editor: 0.56.0
+      react: 19.2.7
+      react-dom: 19.2.7(react@19.2.7)
+      react-markdown: 10.1.0(@types/react@19.2.17)(react@19.2.7)
+      react-resizable-panels: 3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      react-syntax-highlighter: 15.6.6(react@19.2.7)
+      rehype-katex: 7.0.1
+      remark-cjk-friendly: 2.3.1(@types/mdast@4.0.4)(micromark-util-types@2.0.2)(micromark@4.0.2)(unified@11.0.5)
+      remark-gfm: 4.0.1
+      remark-math: 6.0.0
+      shiki: 4.2.0
+      tailwind-merge: 3.6.0
+      xterm: 5.3.0
+    transitivePeerDependencies:
+      - '@types/mdast'
+      - '@types/react'
+      - '@types/react-dom'
+      - immer
+      - micromark
+      - micromark-util-types
+      - supports-color
+      - unified
+
   '@radix-ui/number@1.1.2': {}
 
   '@radix-ui/primitive@1.1.4': {}
@@ -3909,50 +3953,6 @@ snapshots:
       '@types/react-dom': 19.2.3(@types/react@19.2.17)
 
   '@radix-ui/rect@1.1.2': {}
-
-  '@remote-codex/thread-ui@file:remote-codex-thread-ui/packages/thread-ui(@remote-codex/plugin-runtime@packages+plugin-runtime)(@remote-codex/plugin-terminal@packages+plugin-terminal)(@remote-codex/shared@packages+shared)(@types/mdast@4.0.4)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(micromark-util-types@2.0.2)(micromark@4.0.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(unified@11.0.5)':
-    dependencies:
-      3dmol: 2.5.5
-      '@radix-ui/react-accordion': 1.2.13(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@radix-ui/react-dialog': 1.1.16(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@radix-ui/react-separator': 1.1.9(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@radix-ui/react-slider': 1.4.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@radix-ui/react-slot': 1.2.5(@types/react@19.2.17)(react@19.2.7)
-      '@radix-ui/react-tooltip': 1.2.9(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@remote-codex/plugin-runtime': link:packages/plugin-runtime
-      '@remote-codex/plugin-terminal': link:packages/plugin-terminal
-      '@remote-codex/shared': link:packages/shared
-      '@tanstack/react-virtual': 3.14.10(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      '@xterm/addon-fit': 0.11.0
-      '@xyflow/react': 12.11.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      class-variance-authority: 0.7.1
-      clsx: 2.1.1
-      dompurify: 3.4.8
-      katex: 0.16.47
-      lucide-react: 0.544.0(react@19.2.7)
-      mermaid: 11.16.1
-      monaco-editor: 0.56.0
-      react: 19.2.7
-      react-dom: 19.2.7(react@19.2.7)
-      react-markdown: 10.1.0(@types/react@19.2.17)(react@19.2.7)
-      react-resizable-panels: 3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      react-syntax-highlighter: 15.6.6(react@19.2.7)
-      rehype-katex: 7.0.1
-      remark-cjk-friendly: 2.3.1(@types/mdast@4.0.4)(micromark-util-types@2.0.2)(micromark@4.0.2)(unified@11.0.5)
-      remark-gfm: 4.0.1
-      remark-math: 6.0.0
-      shiki: 4.2.0
-      tailwind-merge: 3.6.0
-      xterm: 5.3.0
-    transitivePeerDependencies:
-      - '@types/mdast'
-      - '@types/react'
-      - '@types/react-dom'
-      - immer
-      - micromark
-      - micromark-util-types
-      - supports-color
-      - unified
 
   '@rolldown/pluginutils@1.0.0-beta.27': {}
 

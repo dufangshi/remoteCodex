@@ -14,7 +14,7 @@ fn webauthn(state: &AppState) -> Result<Webauthn, Failure> {
         .host_str()
         .ok_or_else(|| invalid("Invalid public URL"))?;
     WebauthnBuilder::new(rp, &origin)
-        .and_then(|b| b.rp_name("Remote Codex").build())
+        .and_then(|b| b.rp_name("Pockymoe").build())
         .map_err(internal)
 }
 pub(super) fn routes() -> Router<Arc<AppState>> {

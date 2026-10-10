@@ -5,7 +5,7 @@ use crate::{
     http::{err, map_err, ApiErr},
 };
 use axum::{extract::State, http::StatusCode, Extension, Json};
-use remote_codex_runtime::{
+use pockymoe_runtime::{
     interaction::{RemoteSender, SendInput},
     Supervisor,
 };
@@ -153,8 +153,8 @@ mod tests {
         http::Request,
         Router,
     };
-    use remote_codex_protocol::{CreateThreadInput, CreateWorkspaceInput, Mode, Provider};
-    use remote_codex_runtime::{
+    use pockymoe_protocol::{CreateThreadInput, CreateWorkspaceInput, Mode, Provider};
+    use pockymoe_runtime::{
         fake::FakeRuntime, local_sessions::LocalSessionHomes, Database, RuntimeConfig,
     };
     use std::{process::Command, time::Duration};
@@ -557,7 +557,7 @@ mod tests {
             let transcript = state
                 .transcript(
                     &target,
-                    &remote_codex_runtime::interaction::TranscriptQuery {
+                    &pockymoe_runtime::interaction::TranscriptQuery {
                         turn_id: Some(turn),
                         view: Some("overview".into()),
                         ..Default::default()
@@ -566,7 +566,7 @@ mod tests {
                 .unwrap();
             let items = transcript["turns"][0]["items"].as_array().unwrap();
             assert_eq!(items.len(), 1);
-            assert_eq!(items[0]["text"], "[remoteCodex task from device-a/foreign-thread (device \"Peer laptop\") | Review]\nImmediate handling needed: the active turn is working from stale input\ncorrection");
+            assert_eq!(items[0]["text"], "[Pockymoe task from device-a/foreign-thread (device \"Peer laptop\") | Review]\nImmediate handling needed: the active turn is working from stale input\ncorrection");
         }
     }
 

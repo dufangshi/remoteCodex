@@ -1,4 +1,4 @@
-# remote-codex guide tasks
+# pockymoe guide tasks
 
 The lineage task board and harness-native timers.
 
@@ -13,15 +13,15 @@ check or formatting change. An assigned task sends passive mail; an idle assigne
 still needs an explicit queued assignment or an already-running claim/wait loop.
 
 ```bash
-remote-codex task add 'Design the schema' --detail-file /tmp/schema.txt
-remote-codex task add 'Write the migration' --after 1 --assign migrator
-remote-codex task list            # open tasks: owner, blockedBy, ready
-remote-codex task claim           # take the lowest ready task for you or nobody
-remote-codex task claim --wait    # ...or block until one is ready / the board is done
-remote-codex task show 2
-remote-codex task done 2 --result 'Migration in db/0042.sql; tests pass'
-remote-codex task done 3 --failed --result 'Blocked: no staging credentials'
-remote-codex task release 2       # give it back
+pockymoe task add 'Design the schema' --detail-file /tmp/schema.txt
+pockymoe task add 'Write the migration' --after 1 --assign migrator
+pockymoe task list            # open tasks: owner, blockedBy, ready
+pockymoe task claim           # take the lowest ready task for you or nobody
+pockymoe task claim --wait    # ...or block until one is ready / the board is done
+pockymoe task show 2
+pockymoe task done 2 --result 'Migration in db/0042.sql; tests pass'
+pockymoe task done 3 --failed --result 'Blocked: no staging credentials'
+pockymoe task release 2       # give it back
 ```
 
 Claims are atomic, so delegates may self-serve with `task claim` without colliding.
@@ -36,7 +36,7 @@ rest to one peer. Keep results short and point at files or commits for anything 
 
 A harness-native timer such as Claude `CronCreate` / `/loop` is a separate, explicit
 scheduled prompt, not a completion subscription. It can wake that native session
-while its harness process remains alive. Remote Codex recovers its finished reply
+while its harness process remains alive. Pockymoe recovers its finished reply
 and tool history and notifies open pages; intermediate scheduled output is backfilled
 after completion. Native timers require an active harness to execute; persistence/resume depends on
 the installed harness and task kind and is not confirmed by the history projection. Do not claim you configured a watch merely because you wrote

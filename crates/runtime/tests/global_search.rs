@@ -1,13 +1,13 @@
 //! Device-local search indexing and scope regression.
-use remote_codex_protocol::{CreateThreadInput, CreateWorkspaceInput, Provider};
-use remote_codex_runtime::{fake::FakeRuntime, Database, RuntimeConfig, Supervisor};
+use pockymoe_protocol::{CreateThreadInput, CreateWorkspaceInput, Provider};
+use pockymoe_runtime::{fake::FakeRuntime, Database, RuntimeConfig, Supervisor};
 use serde_json::json;
 use std::sync::Arc;
 
 fn setup() -> (tempfile::TempDir, Arc<Supervisor>) {
     let dir = tempfile::tempdir().unwrap();
     let config = RuntimeConfig {
-        mode: remote_codex_protocol::Mode::Local,
+        mode: pockymoe_protocol::Mode::Local,
         host: "127.0.0.1".into(),
         port: 0,
         workspace_root: dir.path().into(),
@@ -51,7 +51,7 @@ fn workspace(s: &Supervisor) -> String {
         .id
 }
 
-async fn spawn(s: &Supervisor, ws: &str, parent: Option<&str>) -> remote_codex_protocol::ThreadDto {
+async fn spawn(s: &Supervisor, ws: &str, parent: Option<&str>) -> pockymoe_protocol::ThreadDto {
     s.create_thread(CreateThreadInput {
         workspace_id: ws.to_string(),
         title: None,

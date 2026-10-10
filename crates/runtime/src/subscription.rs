@@ -196,7 +196,7 @@ async fn codex() -> Option<Value> {
     process
         .request(
             "initialize",
-            json!({"clientInfo":{"name":"remote-codex-usage","version":"1"},"capabilities":{}}),
+            json!({"clientInfo":{"name":"pockymoe-usage","version":"1"},"capabilities":{}}),
         )
         .await
         .ok()?;
@@ -245,7 +245,7 @@ async fn grok() -> Option<Value> {
     let (process, _, _) = AcpProcess::spawn(&command, home()?.to_str()?, &[])
         .await
         .ok()?;
-    process.request("initialize",json!({"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"remote-codex-usage","version":"1"}})).await.ok()?;
+    process.request("initialize",json!({"protocolVersion":1,"clientCapabilities":{},"clientInfo":{"name":"pockymoe-usage","version":"1"}})).await.ok()?;
     let data = process.request("_x.ai/billing", json!({})).await.ok()?;
     parse_grok(&data)
 }

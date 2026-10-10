@@ -1,4 +1,4 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { useEffect, useRef } from 'react';
 import { MonitorSmartphone, Menu, Settings, X } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';

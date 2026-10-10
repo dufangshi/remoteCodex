@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use remote_codex_protocol::{now_rfc3339, ThreadHistoryItemDto, ThreadTurnDto};
+use pockymoe_protocol::{now_rfc3339, ThreadHistoryItemDto, ThreadTurnDto};
 use rusqlite::{params, Connection, OpenFlags};
 use serde_json::Value;
 
@@ -1585,7 +1585,7 @@ fn item(id: String, kind: &str, text: String, status: &str, turn_id: &str) -> Th
     }
 }
 
-use remote_codex_protocol::truncate_title;
+use pockymoe_protocol::truncate_title;
 
 fn nonempty(value: Option<String>) -> Option<String> {
     value.and_then(|text| {

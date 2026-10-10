@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use remote_codex_protocol::{Mode, Provider, WorkspaceSettingsDto};
-use remote_codex_runtime::actor::SharedRuntime;
-use remote_codex_runtime::config::RuntimeConfig;
-use remote_codex_runtime::db::Database;
-use remote_codex_runtime::fake::FakeRuntime;
-use remote_codex_runtime::Supervisor;
+use pockymoe_protocol::{Mode, Provider, WorkspaceSettingsDto};
+use pockymoe_runtime::actor::SharedRuntime;
+use pockymoe_runtime::config::RuntimeConfig;
+use pockymoe_runtime::db::Database;
+use pockymoe_runtime::fake::FakeRuntime;
+use pockymoe_runtime::Supervisor;
 use rusqlite::{params, Connection, OptionalExtension};
 use tempfile::tempdir;
 

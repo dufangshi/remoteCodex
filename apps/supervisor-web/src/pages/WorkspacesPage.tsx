@@ -1,5 +1,5 @@
-import { getLocale } from '@remote-codex/thread-ui/i18n';
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { getLocale } from '@pockymoe/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { DeviceEncryptionStatus } from '../components/DeviceEncryptionStatus';
 import { ProductHeader } from '../components/ProductHeader';
 import {
@@ -22,7 +22,7 @@ import {
   Trash2,
 } from 'lucide-react';
 
-import type { RuntimeConfigDto, WorkspaceDto } from '@remote-codex/shared';
+import type { RuntimeConfigDto, WorkspaceDto } from '@pockymoe/shared';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { LongTextDialog } from '../components/LongTextDialog';
 import { RenameDialog } from '../components/RenameDialog';

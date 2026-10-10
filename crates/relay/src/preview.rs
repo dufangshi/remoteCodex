@@ -39,7 +39,7 @@ pub(super) struct Hub {
 
 impl Hub {
     pub(super) fn from_env() -> Result<Self> {
-        let base = std::env::var("REMOTE_CODEX_PORT_PREVIEW_BASE_URL")
+        let base = std::env::var("POCKYMOE_PORT_PREVIEW_BASE_URL")
             .ok()
             .filter(|s| !s.trim().is_empty())
             .map(|s| parse_base(&s))
@@ -89,7 +89,7 @@ fn parse_base(value: &str) -> Result<url::Url> {
         || url.query().is_some()
         || url.fragment().is_some()
     {
-        bail!("REMOTE_CODEX_PORT_PREVIEW_BASE_URL must be an HTTP(S) domain origin, for example https://lnz-study.com");
+        bail!("POCKYMOE_PORT_PREVIEW_BASE_URL must be an HTTP(S) domain origin, for example https://lnz-study.com");
     }
     Ok(url)
 }
@@ -308,7 +308,7 @@ fn require_browser_login(state: &AppState, request: &Request, mapping: &Mapping)
     }
     (
         StatusCode::UNAUTHORIZED,
-        "Open this port from your signed-in Remote Codex device page.",
+        "Open this port from your signed-in Pockymoe device page.",
     )
         .into_response()
 }

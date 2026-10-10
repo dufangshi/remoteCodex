@@ -5,18 +5,13 @@ use std::{io::Read, path::PathBuf};
 
 #[derive(Args)]
 pub struct Connection {
-    #[arg(long, global = true, env = "REMOTE_CODEX_URL")]
+    #[arg(long, global = true, env = "POCKYMOE_URL")]
     pub url: Option<String>,
-    #[arg(
-        long,
-        global = true,
-        env = "REMOTE_CODEX_TOKEN",
-        hide_env_values = true
-    )]
+    #[arg(long, global = true, env = "POCKYMOE_TOKEN", hide_env_values = true)]
     pub token: Option<String>,
-    #[arg(long, global = true, env = "REMOTE_CODEX_THREAD_ID")]
+    #[arg(long, global = true, env = "POCKYMOE_THREAD_ID")]
     pub from: Option<String>,
-    #[arg(long, global = true, env = "REMOTE_CODEX_CLI_CONFIG")]
+    #[arg(long, global = true, env = "POCKYMOE_CLI_CONFIG")]
     pub cli_config: Option<PathBuf>,
 }
 #[derive(Args)]
@@ -80,7 +75,7 @@ pub enum PreviewCommand {
     framework needs it; never `*` or disabled host checks.
   - Give the user `openUrl`. Never copy tokens or launch tickets into reports.
 
-More: remote-codex guide preview"#)]
+More: pockymoe guide preview"#)]
     Create {
         #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
         port: u16,
@@ -107,7 +102,7 @@ More: remote-codex guide preview"#)]
 
 #[derive(Subcommand)]
 pub enum ThreadCommand {
-    /// Current remoteCodex thread identity and status.
+    /// Current Pockymoe thread identity and status.
     #[command(name = "self")]
     SelfInfo,
     /// Threads a person started, with a count of the agent threads under each.
@@ -162,7 +157,7 @@ pub enum ThreadCommand {
   - --worktree branches from COMMITTED HEAD; commit what the delegate builds on first.
   - If sending fails after creation, reuse the returned thread ID instead of creating again.
 
-More: remote-codex guide delegate"#)]
+More: pockymoe guide delegate"#)]
     Create {
         /// Other device; requires --workspace and creates no local lineage.
         #[arg(long)]
@@ -209,7 +204,7 @@ More: remote-codex guide delegate"#)]
   - `blocked: true` means a delegate waits on an approval or your answer (`waitingOn`).
   - Settled is not success: check the evidence in each closing message.
 
-More: remote-codex guide delegate"#)]
+More: pockymoe guide delegate"#)]
     Wait {
         #[arg(required = true, num_args = 1..)]
         ids: Vec<String>,
@@ -255,7 +250,7 @@ peer is idle. Always pass --kind and --subject; use --in-reply-to when answering
 Read the whole JSON receipt: `queued` is acceptance, `steered` is acknowledgement,
 `held` needs inspection rather than retries. Use --request-id for a send you may retry.
 
-More: remote-codex guide messaging"#)]
+More: pockymoe guide messaging"#)]
     Send {
         id: String,
         #[arg(long)]
@@ -414,7 +409,7 @@ pub struct Client {
 impl Client {
     pub fn new(c: Connection) -> Result<Self> {
         let path = c.cli_config.unwrap_or_else(|| {
-            remote_codex_runtime::RuntimeConfig::from_env()
+            pockymoe_runtime::RuntimeConfig::from_env()
                 .database_url
                 .with_extension("cli.json")
         });
@@ -422,7 +417,7 @@ impl Client {
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or(Value::Null);
-        let url=c.url.or_else(||saved["url"].as_str().map(str::to_owned)).context("No local Supervisor connection. Set REMOTE_CODEX_URL and REMOTE_CODEX_TOKEN, or --cli-config PATH.")?;
+        let url=c.url.or_else(||saved["url"].as_str().map(str::to_owned)).context("No local Supervisor connection. Set POCKYMOE_URL and POCKYMOE_TOKEN, or --cli-config PATH.")?;
         let parsed = reqwest::Url::parse(&url)?;
         ensure!(
             matches!(parsed.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))
@@ -679,7 +674,7 @@ impl Client {
 
 #[derive(Args)]
 pub struct Inbox {
-    /// Defaults to the managed caller's remoteCodex identity.
+    /// Defaults to the managed caller's Pockymoe identity.
     #[arg(long, global = true)]
     pub thread: Option<String>,
     #[command(subcommand)]

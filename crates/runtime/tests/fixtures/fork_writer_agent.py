@@ -68,7 +68,7 @@ def serve(reader, writer):
 
 
 def bridge():
-    config = json.loads(os.environ["REMOTE_CODEX_APP_SERVER_BRIDGE"])
+    config = json.loads(os.environ["POCKYMOE_APP_SERVER_BRIDGE"])
     host, port = config["address"].rsplit(":", 1)
     connection = socket.create_connection((host, int(port)))
     stream = connection.makefile("rw")

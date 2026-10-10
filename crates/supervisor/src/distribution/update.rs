@@ -3,7 +3,7 @@ use super::{
     service, setup, *,
 };
 use anyhow::{bail, ensure};
-use remote_codex_runtime::Supervisor;
+use pockymoe_runtime::Supervisor;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -81,9 +81,9 @@ fn context(state: &Supervisor) -> Result<ContextData> {
         database: state.config.database_url.clone(),
         port: state.config.port,
         host: state.config.host.clone(),
-        relay: state.config.mode == remote_codex_protocol::Mode::Relay,
+        relay: state.config.mode == pockymoe_protocol::Mode::Relay,
         config: config_path(),
-        manager: std::env::var("REMOTE_CODEX_MANAGED_SERVICE").ok(),
+        manager: std::env::var("POCKYMOE_MANAGED_SERVICE").ok(),
         environment: std::env::vars().collect(),
     })
 }
@@ -92,15 +92,15 @@ fn compatible_context() -> Result<ContextData> {
         std::env::var(key).with_context(|| format!("Missing maintenance context {key}"))
     };
     Ok(ContextData {
-        running_version: value("REMOTE_CODEX_UPDATE_RUNNING_VERSION")?,
-        pid: value("REMOTE_CODEX_UPDATE_PID")?.parse()?,
-        executable: value("REMOTE_CODEX_UPDATE_EXECUTABLE")?.into(),
-        database: value("REMOTE_CODEX_UPDATE_DATABASE")?.into(),
-        port: value("REMOTE_CODEX_UPDATE_PORT")?.parse()?,
-        host: value("REMOTE_CODEX_UPDATE_HOST")?,
-        relay: value("REMOTE_CODEX_UPDATE_MODE")? == "relay",
+        running_version: value("POCKYMOE_UPDATE_RUNNING_VERSION")?,
+        pid: value("POCKYMOE_UPDATE_PID")?.parse()?,
+        executable: value("POCKYMOE_UPDATE_EXECUTABLE")?.into(),
+        database: value("POCKYMOE_UPDATE_DATABASE")?.into(),
+        port: value("POCKYMOE_UPDATE_PORT")?.parse()?,
+        host: value("POCKYMOE_UPDATE_HOST")?,
+        relay: value("POCKYMOE_UPDATE_MODE")? == "relay",
         config: config_path(),
-        manager: std::env::var("REMOTE_CODEX_MANAGED_SERVICE").ok(),
+        manager: std::env::var("POCKYMOE_MANAGED_SERVICE").ok(),
         environment: std::env::vars().collect(),
     })
 }
@@ -312,18 +312,18 @@ pub async fn run_worker(path: PathBuf) -> Result<()> {
         } else {
             let mut env = plan.context.environment.clone();
             env.retain(|key, _| {
-                !key.starts_with("REMOTE_CODEX_UPDATE_")
+                !key.starts_with("POCKYMOE_UPDATE_")
                     && !matches!(
                         key.as_str(),
-                        "REMOTE_CODEX_NATIVE_BINARY"
-                            | "REMOTE_CODEX_LAUNCHER_PATH"
-                            | "REMOTE_CODEX_LAUNCHER_NODE"
+                        "POCKYMOE_NATIVE_BINARY"
+                            | "POCKYMOE_LAUNCHER_PATH"
+                            | "POCKYMOE_LAUNCHER_NODE"
                             | "TMUX"
                             | "TMUX_PANE"
                     )
             });
             env.insert(
-                "REMOTE_CODEX_WEB_DIST_DIR".into(),
+                "POCKYMOE_WEB_DIST_DIR".into(),
                 candidate.web_dist.to_string_lossy().into_owned(),
             );
             service::independent(

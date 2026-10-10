@@ -479,7 +479,7 @@ async fn setup_script() -> impl IntoResponse {
             (header::CACHE_CONTROL, "no-cache"),
         ],
         include_str!("../../../scripts/setup.sh")
-            .replace("__REMOTE_CODEX_VERSION__", env!("CARGO_PKG_VERSION")),
+            .replace("__POCKYMOE_VERSION__", env!("CARGO_PKG_VERSION")),
     )
 }
 async fn setup_powershell_script() -> impl IntoResponse {

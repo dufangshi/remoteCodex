@@ -110,7 +110,7 @@ for (const backend of ['codex', 'claude'])
             {
               id: 'test',
               kind: 'toolCall',
-              text: 'exec_command\ncargo test -p remote-codex-runtime native_subagents\n\n16 checks passed. No failures.',
+              text: 'exec_command\ncargo test -p pockymoe-runtime native_subagents\n\n16 checks passed. No failures.',
               status: 'completed',
               createdAt: '2026-10-09T06:01:12Z',
             },

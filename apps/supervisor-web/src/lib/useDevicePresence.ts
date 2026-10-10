@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { RelayPortalSummaryDto } from '@remote-codex/shared';
+import type { RelayPortalSummaryDto } from '@pockymoe/shared';
 import { request } from './api';
 
 const PROBE_INTERVAL_MS = 3000;

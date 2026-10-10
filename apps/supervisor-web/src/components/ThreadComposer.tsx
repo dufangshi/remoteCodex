@@ -1,1 +1,1 @@
-export { ThreadComposer } from '@remote-codex/thread-ui';
+export { ThreadComposer } from '@pockymoe/thread-ui';

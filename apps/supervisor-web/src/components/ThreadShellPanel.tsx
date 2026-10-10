@@ -3,7 +3,7 @@ import {
   type ThreadShellAdapter,
   type ThreadShellControlState,
   type ThreadShellPanelHandle,
-} from '@remote-codex/thread-ui';
+} from '@pockymoe/thread-ui';
 import { forwardRef, type ComponentProps } from 'react';
 
 import { useAppShellNav } from './AppShellNavContext';

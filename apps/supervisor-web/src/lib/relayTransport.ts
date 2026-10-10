@@ -1,4 +1,4 @@
-import { getLocale, translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { getLocale, translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import workerUrl from './relayServiceWorker.ts?worker&url';
 import {
   exchange,

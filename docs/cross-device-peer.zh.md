@@ -13,7 +13,7 @@
 ## 2. 总体流程
 
 ```text
-A 上的 agent ── remote-codex CLI ── loopback /api/cli (A supervisor)
+A 上的 agent ── pockymoe CLI ── loopback /api/cli (A supervisor)
    A supervisor ── peer_send::intercept ── peer_link::request（HPKE 加密）
       ── A 的隧道帧 peer.request ──▶ relay（核对同一 owner、路径前缀、密文）
       ── B 的隧道帧 relay.request + relay 写入的 peer 身份 ──▶ B supervisor
@@ -25,8 +25,8 @@ A 上的 agent ── remote-codex CLI ── loopback /api/cli (A supervisor)
 
 - **relay device ID**：relay 在 `relay.connected` 中发送 `deviceId` 和（新增）`deviceName`。supervisor 记录在 `peer_link`，`relay_identity()` 返回。本地 `hosts.id` 保持不变；`/api/cli` 的 `info` 增加 `relayDeviceId`、`deviceName`。
 - **PeerCaller**（`crates/supervisor/src/auth.rs`）：`{device_id, device_name, user_id}`，只能由隧道根据 relay 写入的 `peer` 对象构造，作为请求 extension，与 `TrustedRelayForward` 同时存在。
-- **开关**：每台 device 独立，默认关闭。`Supervisor::peer_access_enabled()` / `set_peer_access(bool)`（已实现，KV `peer:settings`）。发出和接收都要求本机开启。Web/本机 owner 通过 `GET|PATCH /api/config/peer-access`（`{"enabled":bool}`）设置；CLI `remote-codex device access on|off` 只接受本机 machine credential（`CliCaller(None)`），thread 凭据只能查看。远端 device 无法修改开关（PeerCaller 只能访问 `/api/peer/*`）。
-- **身份钉扎**：A 首次与 B 握手时 TOFU 钉住 B 的 identity key（runtime KV `peer:pin:{relayDeviceId}` = `{"identityKey","fingerprint","pinnedAt"}`），之后变化即 `PeerError::IdentityChanged`。`remote-codex device trust DEVICE --reset`（machine credential）清除。
+- **开关**：每台 device 独立，默认关闭。`Supervisor::peer_access_enabled()` / `set_peer_access(bool)`（已实现，KV `peer:settings`）。发出和接收都要求本机开启。Web/本机 owner 通过 `GET|PATCH /api/config/peer-access`（`{"enabled":bool}`）设置；CLI `pockymoe device access on|off` 只接受本机 machine credential（`CliCaller(None)`），thread 凭据只能查看。远端 device 无法修改开关（PeerCaller 只能访问 `/api/peer/*`）。
+- **身份钉扎**：A 首次与 B 握手时 TOFU 钉住 B 的 identity key（runtime KV `peer:pin:{relayDeviceId}` = `{"identityKey","fingerprint","pinnedAt"}`），之后变化即 `PeerError::IdentityChanged`。`pockymoe device trust DEVICE --reset`（machine credential）清除。
 
 ## 4. 隧道帧（relay ↔ supervisor）
 
@@ -112,7 +112,7 @@ relay → 目标（沿用 `relay.request`，多一个只由 relay 写入的 `pee
 ## 10. 远程发件人与完成通知（runtime）
 
 - 远程发件人 `{deviceId, deviceName, threadId?}` 只来自 `PeerCaller` + 请求体的 `fromThreadId`，不能经本地 `/api/cli` JSON 设置。
-- `send` 不在本机校验远程 `fromThreadId`。inbox 记录新增 `fromDeviceId`、`fromDeviceName`、`replyTo`（`"{deviceId}/{threadId}"`）。direct/queue/steer 的 prompt 头为 `[remoteCodex {kind} from {deviceId}/{threadId} (device "{deviceName}") | {subject}]`，其余（`In reply to`、正文）与本地一致。
+- `send` 不在本机校验远程 `fromThreadId`。inbox 记录新增 `fromDeviceId`、`fromDeviceName`、`replyTo`（`"{deviceId}/{threadId}"`）。direct/queue/steer 的 prompt 头为 `[Pockymoe {kind} from {deviceId}/{threadId} (device "{deviceName}") | {subject}]`，其余（`In reply to`、正文）与本地一致。
 - 去重键命名空间：`cli:request:{id}:peer:{deviceId}:{threadId}:{key}`。
 - `notifyOnComplete`：订阅值增加 `deviceId`、`deviceName`。`finish_notification` 遇到远程订阅时不写本机 inbox，而是写一条 outbox 记录（§12），内容与本地完成通知相同（kind `result`），`fromThreadId` 为完成的本机 thread。
 
@@ -129,18 +129,18 @@ relay → 目标（沿用 `relay.request`，多一个只由 relay 写入的 `pee
 CLI：
 
 ```sh
-remote-codex device list
-remote-codex device access [on|off]
-remote-codex device trust DEVICE --reset
-remote-codex device workspaces DEVICE
-remote-codex thread list|backends|models --device DEVICE ...
-remote-codex thread create --device DEVICE --workspace WS ...
-remote-codex thread status|show DEVICE/THREAD
-remote-codex transcript DEVICE/THREAD ...
-remote-codex thread send DEVICE/THREAD [--attach PATH ...] ...
-remote-codex fs ls DEVICE --workspace WS [PATH]
-remote-codex fs get DEVICE --workspace WS PATH [--out LOCAL]
-remote-codex outbox
+pockymoe device list
+pockymoe device access [on|off]
+pockymoe device trust DEVICE --reset
+pockymoe device workspaces DEVICE
+pockymoe thread list|backends|models --device DEVICE ...
+pockymoe thread create --device DEVICE --workspace WS ...
+pockymoe thread status|show DEVICE/THREAD
+pockymoe transcript DEVICE/THREAD ...
+pockymoe thread send DEVICE/THREAD [--attach PATH ...] ...
+pockymoe fs ls DEVICE --workspace WS [PATH]
+pockymoe fs get DEVICE --workspace WS PATH [--out LOCAL]
+pockymoe outbox
 ```
 
 目标解析：`DEVICE/THREAD`（THREAD 为 UUID，DEVICE 为名字或 relay id）；完整网页 URL 用 `info.relayDeviceId`（兼容 `hosts.id`）判断本机/远端，修复现有 URL 误判；名字、`self`、`parent`、`root` 只在本机解析。
@@ -204,7 +204,7 @@ KV `peer:outbox:{id}`：
 - 远程完成通知把 transcript 提示写成 `DEVICE/THREAD`，并说明 DEVICE 即该邮件的 `fromDeviceId`（runtime 不知道本机 relay ID）。
 - relay 与 supervisor 都拒绝非字面的 peer 路径：`.`、`..` 或空段，以及 `%`、`\`。两端各自检查，不依赖对方规范化路径。
 - 附件发送的回执带 `attachments`（每个文件在目标端的路径、大小与 sha256）。
-- 发布版二进制带平台后缀（如 `remote-codex-linux-x64-gnu`），受管 agent 的 `remote-codex` 曾落到 PATH 上更旧的全局安装。supervisor 现在在 `<数据库>.cli-bin/` 中链接 `remote-codex`（Unix 用 symlink，Windows 用硬链接或复制），并把该目录放在受管 PATH 的最前面。
+- 发布版二进制带平台后缀（如 `remote-codex-linux-x64-gnu`），受管 agent 的 `pockymoe` 曾落到 PATH 上更旧的全局安装。supervisor 现在在 `<数据库>.cli-bin/` 中链接 `pockymoe`（Unix 用 symlink，Windows 用硬链接或复制），并把该目录放在受管 PATH 的最前面。
 - 验证：
   - 各分支的定向测试，以及合并后的 supervisor 单元测试、`http_e2e`、runtime `thread_interaction` / `agent_coordination` / `thread_lineage`、relay 单元测试、CLI 测试。
   - `scripts/peer-e2e-live.mjs` 全部阶段通过：目录、两端开关、跨 owner 隔离、带远程署名的投信与按 `replyTo` 回信、本机/远端 URL 寻址、完成通知回到发起方 inbox、远程创建、三类附件（含 20 MiB）、`fs ls/get` 与越界拦截、离线 outbox 与重连后送达、经 relay 的 20 MiB 浏览器式上传不再断隧道。

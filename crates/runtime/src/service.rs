@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
-use remote_codex_protocol::{
+use pockymoe_protocol::{
     now_rfc3339, truncate_title, AgentBackendDto, AgentCapabilitySnapshotDto, CreateThreadInput,
     CreateWorkspaceInput, ImportThreadCandidateDto, ImportThreadInput, ModelOptionDto, Provider,
     SendThreadPromptInput, ThreadDetailDto, ThreadDto, ThreadForkTurnOptionDto, ThreadGoalDto,
@@ -483,7 +483,7 @@ impl Supervisor {
 
     fn append_history_delta(
         &self,
-        event: &mut remote_codex_protocol::ThreadEventEnvelope,
+        event: &mut pockymoe_protocol::ThreadEventEnvelope,
     ) -> Result<()> {
         let (Some(turn_id), Some(item_id), Some(delta)) = (
             event.payload.get("turnId").and_then(Value::as_str),
@@ -603,7 +603,7 @@ impl Supervisor {
 
     pub(crate) fn persist_usage_event(
         &self,
-        event: &remote_codex_protocol::ThreadEventEnvelope,
+        event: &pockymoe_protocol::ThreadEventEnvelope,
     ) -> Result<()> {
         let Some(turn_id) = event.payload.get("turnId").and_then(Value::as_str) else {
             return Ok(());
@@ -615,7 +615,7 @@ impl Supervisor {
             return Ok(());
         };
         if let Some(context) = crate::usage::context_usage(raw, &event.timestamp) {
-            self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+            self.bus.emit(pockymoe_protocol::ThreadEventEnvelope {
                 event_type: "thread.context.updated".into(),
                 thread_id: event.thread_id.clone(),
                 timestamp: event.timestamp.clone(),
@@ -701,7 +701,7 @@ impl Supervisor {
             Ok(Some(json!({"turnId":turn_id,"model":model,"reasoningEffort":effort,"tokenUsage":crate::usage::public_usage(&usage),"priceEstimate":price})))
         })?;
         if let Some(payload) = payload {
-            self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+            self.bus.emit(pockymoe_protocol::ThreadEventEnvelope {
                 event_type: "thread.turn.token.updated".into(),
                 thread_id: event.thread_id.clone(),
                 timestamp: event.timestamp.clone(),
@@ -1258,7 +1258,7 @@ impl Supervisor {
             Ok(())
         })?;
         let thread = self.get_thread(&id)?;
-        self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+        self.bus.emit(pockymoe_protocol::ThreadEventEnvelope {
             event_type: "thread.updated".into(),
             thread_id: id.clone(),
             timestamp: now_rfc3339(),
@@ -1272,7 +1272,7 @@ impl Supervisor {
         .flatten()
         .collect::<HashSet<_>>()
         {
-            self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+            self.bus.emit(pockymoe_protocol::ThreadEventEnvelope {
                 event_type: "thread.updated".into(),
                 thread_id: parent.clone(),
                 timestamp: now_rfc3339(),
@@ -2380,7 +2380,7 @@ impl Supervisor {
             tx.commit()?;
             Ok(())
         })?;
-        self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+        self.bus.emit(pockymoe_protocol::ThreadEventEnvelope {
             event_type: "thread.updated".into(),
             thread_id: thread.id.clone(),
             timestamp: now.clone(),
@@ -2503,7 +2503,7 @@ impl Supervisor {
         } else {
             "idle"
         };
-        self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+        self.bus.emit(pockymoe_protocol::ThreadEventEnvelope {
             event_type: "thread.updated".into(),
             thread_id: thread.id.clone(),
             timestamp: completed_at.clone(),
@@ -2589,7 +2589,7 @@ impl Supervisor {
             tx.commit()?;
             Ok(())
         })?;
-        self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+        self.bus.emit(pockymoe_protocol::ThreadEventEnvelope {
             event_type: "thread.updated".into(),
             thread_id: thread_id.into(),
             timestamp: now.into(),
@@ -2721,7 +2721,7 @@ impl Supervisor {
         if removed == 0 {
             bail!("Pending queued prompt was not found.");
         }
-        self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+        self.bus.emit(pockymoe_protocol::ThreadEventEnvelope {
             event_type: "thread.updated".into(),
             thread_id: thread_id.into(),
             timestamp: now_rfc3339(),
@@ -2836,7 +2836,7 @@ impl Supervisor {
             tx.commit()?;
             Ok(())
         })?;
-        self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+        self.bus.emit(pockymoe_protocol::ThreadEventEnvelope {
             event_type: "thread.updated".into(),
             thread_id: thread_id.into(),
             timestamp: now,
@@ -2883,7 +2883,7 @@ impl Supervisor {
 
             let reconciled = self.reconcile_stale_turns(Some(thread_id), true)?;
             if reconciled > 0 {
-                self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+                self.bus.emit(pockymoe_protocol::ThreadEventEnvelope {
                     event_type: "thread.updated".into(),
                     thread_id: thread_id.into(),
                     timestamp: now_rfc3339(),
@@ -3237,7 +3237,7 @@ impl Supervisor {
         self.get_thread(id)
     }
 
-    /// Whether this harness session already holds the Remote Codex context.
+    /// Whether this harness session already holds the Pockymoe context.
     /// A restarted or resumed process replays its history, so this survives
     /// processes; a new session ID (new thread session, fork) starts over.
     fn harness_context_delivered(&self, thread_id: &str, session_id: &str) -> bool {
@@ -3522,7 +3522,7 @@ impl Supervisor {
         self.runtime(thread.provider)?
             .respond_permission(request_id, allow, answer)
             .await?;
-        self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+        self.bus.emit(pockymoe_protocol::ThreadEventEnvelope {
             event_type: "thread.request.resolved".into(),
             thread_id: id.into(),
             timestamp: now_rfc3339(),
@@ -3767,7 +3767,7 @@ impl Supervisor {
             "this thread already has {open} unfinished agent threads, which is the \
              limit of {MAX_OPEN_AGENT_THREADS}. Do not retry: creating another will \
              fail the same way. Close delegates whose work you have collected with \
-             `remote-codex thread close NAME`, wait for running ones, or reuse an idle \
+             `pockymoe thread close NAME`, wait for running ones, or reuse an idle \
              peer instead of creating more."
         );
         Ok(Lineage {
@@ -3812,7 +3812,7 @@ impl Supervisor {
         };
         Some(format!(
             "[remoteCodex: {count} unread peer message{}.{urgency} Passive - handle at a natural \
-             checkpoint with `remote-codex inbox`, and acknowledge only what you have actually \
+             checkpoint with `pockymoe inbox`, and acknowledge only what you have actually \
              dealt with.\n{listed}{tail}]",
             if count == 1 { "" } else { "s" }
         ))
@@ -3889,7 +3889,7 @@ fn thread_from_row(row: &rusqlite::Row<'_>) -> ThreadDto {
     }
 }
 
-// Native Codex stores image blocks separately while RemoteCodex keeps PHOTO
+// Native Codex stores image blocks separately while Pockymoe keeps PHOTO
 // placeholders in display text. Compare their textual prompt within the same
 // turn time window, still requiring exactly one match.
 fn usage_prompt_key(text: &str) -> String {

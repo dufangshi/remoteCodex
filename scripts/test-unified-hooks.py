@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Real CLI/HTTP/restart regression against a PRIVATE fake Supervisor only.
 
-python3 scripts/test-unified-hooks.py --binary target/debug/remote-codex --port 18237
+python3 scripts/test-unified-hooks.py --binary target/debug/pockymoe --port 18237
 No inherited connection/relay configuration is used. All scripts and schedules are
 created inside a temporary directory, which is retained only with --keep.
 """
@@ -31,7 +31,7 @@ def until(fn, timeout=8):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--binary", default="target/debug/remote-codex")
+    parser.add_argument("--binary", default="target/debug/pockymoe")
     parser.add_argument("--port", type=int, default=18237)
     parser.add_argument("--keep", action="store_true")
     args = parser.parse_args()
@@ -39,8 +39,8 @@ def main():
     temp = tempfile.TemporaryDirectory(prefix="unified-hooks-cli-")
     root = Path(temp.name)
     base = f"http://127.0.0.1:{args.port}"
-    clean = {k: v for k, v in os.environ.items() if not k.startswith("REMOTE_CODEX_") and k not in ("DATABASE_URL", "WORKSPACE_ROOT")}
-    env = dict(clean, REMOTE_CODEX_MODE="local", REMOTE_CODEX_E2E_FAKE_RUNTIME="1", REMOTE_CODEX_DATABASE_PATH=str(root / "db.sqlite"), DATABASE_URL=str(root / "db.sqlite"), REMOTE_CODEX_WORKSPACE_ROOT=str(root), WORKSPACE_ROOT=str(root), HOST="127.0.0.1", PORT=str(args.port))
+    clean = {k: v for k, v in os.environ.items() if not k.startswith("POCKYMOE_") and k not in ("DATABASE_URL", "WORKSPACE_ROOT")}
+    env = dict(clean, POCKYMOE_MODE="local", POCKYMOE_E2E_FAKE_RUNTIME="1", POCKYMOE_DATABASE_PATH=str(root / "db.sqlite"), DATABASE_URL=str(root / "db.sqlite"), POCKYMOE_WORKSPACE_ROOT=str(root), WORKSPACE_ROOT=str(root), HOST="127.0.0.1", PORT=str(args.port))
     process = None
     cli_process = None
     script_pid = None
@@ -87,7 +87,7 @@ def main():
         workspace = api("/api/workspaces", {"absPath": str(root)})
         thread = api("/api/threads/start", {"workspaceId": workspace["id"], "provider": "codex", "model": "ios-e2e-stream", "approvalMode": "yolo"})
         thread_id = thread.get("id") or thread["thread"]["id"]
-        cli_env = dict(clean, REMOTE_CODEX_CLI_CONFIG=str(root / "db.cli.json"), REMOTE_CODEX_THREAD_ID=thread_id)
+        cli_env = dict(clean, POCKYMOE_CLI_CONFIG=str(root / "db.cli.json"), POCKYMOE_THREAD_ID=thread_id)
         assert cli("thread", "self")["threadId"] == thread_id
         for argv in [("automation", "--help"), ("hooks", "create", "--help"), ("command", "run", "--help")]:
             help_result = subprocess.run([binary, *argv], env=clean, text=True, capture_output=True, check=True)
@@ -107,7 +107,7 @@ def main():
         r = until(lambda: next((r for r in runs(a) if r["state"] == "completed"), None))
         assert r["turnId"] and r["deliveryReceipt"]["delivery"] == "queued"
         print("PASS CLI at prompt acceptance binds and completes a real fake-harness turn")
-        hook = create({"name": "CLI command hook", "trigger": {"kind": "commandEnded", "sourceThreadId": thread_id, "commandKey": "build"}, "condition": {"kind": "all", "conditions": [{"kind": "exitCodeEquals", "value": 0}, {"kind": "not", "condition": {"kind": "statusIn", "values": ["failed"]}}]}, "action": {"kind": "runScript", "shell": "printf x >> effect; test -z \"$REMOTE_CODEX_TOKEN$REMOTE_CODEX_URL$REMOTE_CODEX_CLI_CONFIG\"", "cwd": ".", "timeoutSeconds": 3}}, "build-hook")
+        hook = create({"name": "CLI command hook", "trigger": {"kind": "commandEnded", "sourceThreadId": thread_id, "commandKey": "build"}, "condition": {"kind": "all", "conditions": [{"kind": "exitCodeEquals", "value": 0}, {"kind": "not", "condition": {"kind": "statusIn", "values": ["failed"]}}]}, "action": {"kind": "runScript", "shell": "printf x >> effect; test -z \"$POCKYMOE_TOKEN$POCKYMOE_URL$POCKYMOE_CLI_CONFIG\"", "cwd": ".", "timeoutSeconds": 3}}, "build-hook")
         command_args = ("command", "run", "--command-key", "build", "--request-id", "build", "--cwd", ".", "--", "/bin/sh", "-c", "printf controlled")
         command = cli(*command_args)
         assert command["exitCode"] == 0 and command["stdout"] == "controlled"

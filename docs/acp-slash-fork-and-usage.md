@@ -64,7 +64,7 @@ recovery, command updates, HTTP actions and capability access. The focused
 `e2e/slash-fork-regression.spec.ts` with `--project=desktop-chromium` checks dynamic
 menu replacement, slash composition, fork navigation and reload.
 
-After `cargo build -p remote-codex`, `node scripts/verify-acp-forks.mjs` runs real
+After `cargo build -p pockymoe`, `node scripts/verify-acp-forks.mjs` runs real
 harnesses against an isolated database. It verifies inherited context, parent
 isolation, Codex historical boundaries, restart continuation and Grok usage
 backfill. It requires installed/authenticated harnesses and makes small real

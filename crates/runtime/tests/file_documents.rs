@@ -1,13 +1,13 @@
 #![cfg(target_os = "linux")]
-use remote_codex_protocol::{CreateWorkspaceInput, Provider};
-use remote_codex_runtime::file_documents::{Document, SaveDocument, MAX_BYTES};
-use remote_codex_runtime::{fake::FakeRuntime, Database, RuntimeConfig, Supervisor};
+use pockymoe_protocol::{CreateWorkspaceInput, Provider};
+use pockymoe_runtime::file_documents::{Document, SaveDocument, MAX_BYTES};
+use pockymoe_runtime::{fake::FakeRuntime, Database, RuntimeConfig, Supervisor};
 use serde_json::json;
 use std::{fs, sync::Arc};
 fn setup() -> (tempfile::TempDir, Arc<Supervisor>) {
     let dir = tempfile::tempdir().unwrap();
     let config = RuntimeConfig {
-        mode: remote_codex_protocol::Mode::Local,
+        mode: pockymoe_protocol::Mode::Local,
         host: "127.0.0.1".into(),
         port: 0,
         workspace_root: dir.path().into(),
@@ -183,7 +183,7 @@ fn interrupted_intent_remains_uncertain_after_reopen_and_is_never_replayed() {
     fs::write(dir.path().join("a.txt"), "base").unwrap();
     let doc = s.file_document(&ws, "a.txt").unwrap();
     let input = request(&doc, "mine");
-    let digest = remote_codex_runtime::file_documents::hash(&serde_json::to_vec(&input).unwrap());
+    let digest = pockymoe_runtime::file_documents::hash(&serde_json::to_vec(&input).unwrap());
     let uncertain = json!({"status":"uncertain","operationId":input.operation_id,"draftRevision":3,"path":"a.txt"});
     s.db.with(|conn| {conn.execute("INSERT INTO file_save_operations(actor,workspace_id,workspace_revision,operation_id,input_digest,result,created_at) VALUES(?1,?2,?3,?4,?5,?6,unixepoch())",rusqlite::params!["a",ws,doc.workspace_revision,input.operation_id,digest,uncertain.to_string()])?;Ok(())}).unwrap();
     let live = s.track_file_save("a", &ws, &input);
@@ -239,12 +239,12 @@ fn concurrent_managed_saves_have_one_winner_and_preview_read_is_bounded_strict_u
     let large = dir.path().join("big.txt");
     let file = fs::File::create(&large).unwrap();
     file.set_len(1_000_000_000).unwrap();
-    assert!(remote_codex_runtime::files::preview_file(dir.path(), "big.txt", 64 * 1024).is_err());
+    assert!(pockymoe_runtime::files::preview_file(dir.path(), "big.txt", 64 * 1024).is_err());
     fs::write(&large, "你好世界").unwrap();
-    let p = remote_codex_runtime::files::preview_file(dir.path(), "big.txt", 4).unwrap();
+    let p = pockymoe_runtime::files::preview_file(dir.path(), "big.txt", 4).unwrap();
     assert_eq!(p.content, "你");
     assert_eq!(p.next_offset, 3);
     assert!(p.truncated);
     fs::write(&large, [0xff]).unwrap();
-    assert!(remote_codex_runtime::files::preview_file(dir.path(), "big.txt", 4).is_err());
+    assert!(pockymoe_runtime::files::preview_file(dir.path(), "big.txt", 4).is_err());
 }

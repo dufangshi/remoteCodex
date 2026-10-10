@@ -3,7 +3,7 @@
 use crate::Supervisor;
 use anyhow::{ensure, Result};
 use base64::Engine;
-use remote_codex_protocol::{now_rfc3339, ThreadTurnDto};
+use pockymoe_protocol::{now_rfc3339, ThreadTurnDto};
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};

@@ -1,4 +1,4 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { ProductHeader } from '../components/ProductHeader';
 import { RelayNotifications } from '../components/RelayNotifications';
 import {
@@ -11,7 +11,7 @@ import { RefreshCw, Save, KeyRound } from 'lucide-react';
 import { FormEvent, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import type { RelaySessionDto } from '@remote-codex/shared';
+import type { RelaySessionDto } from '@pockymoe/shared';
 import {
   ApiError,
   enableRelayMode,

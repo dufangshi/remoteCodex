@@ -1,4 +1,4 @@
-# remoteCodex 与 NarraFork 代码对比及功能建议
+# Pockymoe 与 NarraFork 代码对比及功能建议
 
 对比日期：2026-10-07。本文回答三个问题：共同功能谁做得更好、我们有哪些它尚无对应实现的功能、它有哪些值得我们补充的功能。
 
@@ -6,8 +6,8 @@
 
 | 项目 | 固定版本 | 实际检查范围 |
 | --- | --- | --- |
-| remoteCodex | 0.12.68；94edcfadc8a6dda5ebc23271ee582709d32af171 | Rust runtime/supervisor/relay/CLI、Web 接入、协议、相关架构与运维文档 |
-| remoteCodex 共享 UI | 8e4c384d81012c229d1a780ea175fa2dbaa5c82b | packages/thread-ui/src 下的工作区、Monaco、文件标签、保存流程 |
+| Pockymoe | 0.12.68；94edcfadc8a6dda5ebc23271ee582709d32af171 | Rust runtime/supervisor/relay/CLI、Web 接入、协议、相关架构与运维文档 |
+| Pockymoe 共享 UI | 8e4c384d81012c229d1a780ea175fa2dbaa5c82b | packages/thread-ui/src 下的工作区、Monaco、文件标签、保存流程 |
 | NarraFork | 0.8.3；4e04d2f2e490bd57a5d8d712b709a574b905848a | AgentLoop、Provider、数据库与消息引用、上下文、Git、编辑器、任务、权限、插件、远程 executor、更新、VS Code 扩展 |
 
 NarraFork 已浅克隆到 .temp/research/NarraFork；该目录受现有 .temp/ 忽略规则覆盖。分析以固定提交的实现为准，未把 README 中列出的每个名称自动当作完整功能，也未把旧 TypeScript 代码自动视为当前 Rust 运行时能力。
@@ -20,7 +20,7 @@ NarraFork 已浅克隆到 .temp/research/NarraFork；该目录受现有 .temp/ �
 
 ## 2. 底层架构为何会产生这些差异
 
-| 维度 | remoteCodex | NarraFork | 对产品的影响 |
+| 维度 | Pockymoe | NarraFork | 对产品的影响 |
 | --- | --- | --- | --- |
 | Agent 执行 | 设备 Supervisor 经 ACP/薄适配器管理原生 harness | 服务端 AgentLoop 直接调用 Provider API、组织历史并执行工具 | 我们保留原生生态；它可以统一改写模型输入和工具策略 |
 | 模型与工具语义 | 由 harness 主导，控制面协商能力 | Provider 格式适配与内建工具由项目掌握 | 我们的能力因 harness 而异；它跨模型的 UI 和历史语义更统一 |

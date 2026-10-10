@@ -1,4 +1,4 @@
-# remote-codex guide devices
+# pockymoe guide devices
 
 Threads, files and mail on your other devices.
 
@@ -10,21 +10,21 @@ the relay. Use a relay device ID or a unique device name (case insensitive).
 `device list` works before opting in and reports this device's `peerAccess`.
 
 ```bash
-remote-codex device list
-remote-codex device access                    # inspect; managed threads can view
-remote-codex device access on                 # local machine credential required
-remote-codex device workspaces DEVICE
-remote-codex thread list --device DEVICE --workspace WORKSPACE_ID
-remote-codex thread backends --device DEVICE
-remote-codex thread models --device DEVICE --workspace WORKSPACE_ID
-remote-codex thread create --device DEVICE --workspace WORKSPACE_ID --title helper
-remote-codex thread status DEVICE/THREAD_UUID
-remote-codex transcript DEVICE/THREAD_UUID --limit 1
-remote-codex thread send DEVICE/THREAD_UUID --text 'Please inspect these files' \
+pockymoe device list
+pockymoe device access                    # inspect; managed threads can view
+pockymoe device access on                 # local machine credential required
+pockymoe device workspaces DEVICE
+pockymoe thread list --device DEVICE --workspace WORKSPACE_ID
+pockymoe thread backends --device DEVICE
+pockymoe thread models --device DEVICE --workspace WORKSPACE_ID
+pockymoe thread create --device DEVICE --workspace WORKSPACE_ID --title helper
+pockymoe thread status DEVICE/THREAD_UUID
+pockymoe transcript DEVICE/THREAD_UUID --limit 1
+pockymoe thread send DEVICE/THREAD_UUID --text 'Please inspect these files' \
   --attach ./report.txt --attach ./sources
-remote-codex fs ls DEVICE --workspace WORKSPACE_ID
-remote-codex fs get DEVICE --workspace WORKSPACE_ID path/to/file --out ./copy
-remote-codex outbox
+pockymoe fs ls DEVICE --workspace WORKSPACE_ID
+pockymoe fs get DEVICE --workspace WORKSPACE_ID path/to/file --out ./copy
+pockymoe outbox
 ```
 
 The delivery policy is the same across devices: queue needs `--kind task`, and
@@ -43,5 +43,5 @@ directory (or workspace `.temp/downloads/` without a caller).
 Retryable relay/offline/timeout failures save only inbox/queue sends in this device's
 outbox (`delivery: "outboxed"`); direct/steer and create fail immediately. Outboxed
 mail retries for seven days, then reports failure to the local sender's inbox.
-Identity changes stop delivery. Verify the peer's `remote-codex relay-fingerprint`
-before `remote-codex device trust DEVICE --reset` with a local machine credential.
+Identity changes stop delivery. Verify the peer's `pockymoe relay-fingerprint`
+before `pockymoe device trust DEVICE --reset` with a local machine credential.

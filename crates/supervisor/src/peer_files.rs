@@ -14,7 +14,7 @@ use axum::{
     Extension, Json,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
-use remote_codex_runtime::{files, Supervisor};
+use pockymoe_runtime::{files, Supervisor};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -987,8 +987,8 @@ mod tests {
     use super::*;
     use crate::{auth::TrustedRelayForward, router};
     use axum::{http::Request as HttpRequest, Router};
-    use remote_codex_protocol::{CreateThreadInput, CreateWorkspaceInput, Mode, Provider};
-    use remote_codex_runtime::{
+    use pockymoe_protocol::{CreateThreadInput, CreateWorkspaceInput, Mode, Provider};
+    use pockymoe_runtime::{
         fake::FakeRuntime, local_sessions::LocalSessionHomes, Database, RuntimeConfig,
     };
     use std::sync::atomic::{AtomicU8, Ordering};

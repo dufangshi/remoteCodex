@@ -112,7 +112,7 @@ try {
   record('cli-created', { threadId });
   const app = native('desktop-equivalent'); await app.init();
   await app.request('thread/resume', { threadId });
-  const supervisor = start('/repo/target/debug/remote-codex', ['supervisor'], 'supervisor', { PORT: '19878', HOST: '127.0.0.1', REMOTE_CODEX_MODE: 'local', DATABASE_URL: `${root}/supervisor.sqlite`, WORKSPACE_ROOT: `${root}/workspace`, REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'codex', REMOTE_CODEX_E2E_FAKE_RUNTIME: '0' });
+  const supervisor = start('/repo/target/debug/pockymoe', ['supervisor'], 'supervisor', { PORT: '19878', HOST: '127.0.0.1', POCKYMOE_MODE: 'local', DATABASE_URL: `${root}/supervisor.sqlite`, WORKSPACE_ROOT: `${root}/workspace`, POCKYMOE_ENABLED_AGENT_PROVIDERS: 'codex', POCKYMOE_E2E_FAKE_RUNTIME: '0' });
   supervisor.stdout.resume();
   for (let i = 0; ; i++) { try { await api('/healthz'); break; } catch (error) { if (i > 100) throw error; await pause(100); } }
   const imported = await api('/api/threads/import', { sessionId: threadId, provider: 'codex', agentId: 'codex' });

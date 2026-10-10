@@ -3,7 +3,7 @@
 //! is end-to-end encrypted to the target. Contract: docs/cross-device-peer.zh.md.
 use crate::{bounded_channel, secure_transport::client::Client};
 use anyhow::{anyhow, Result};
-use remote_codex_runtime::Supervisor;
+use pockymoe_runtime::Supervisor;
 use serde_json::{json, Map, Value};
 use std::{
     collections::HashMap,
@@ -44,7 +44,7 @@ pub(crate) enum PeerError {
     Offline(String),
     #[error("device {0} did not respond in time")]
     Timeout(String),
-    #[error("device identity changed for {0}; check `remote-codex relay-fingerprint` on that device, then run `remote-codex device trust {0} --reset`")]
+    #[error("device identity changed for {0}; check `pockymoe relay-fingerprint` on that device, then run `pockymoe device trust {0} --reset`")]
     IdentityChanged(String),
     #[error("{code}: {message}")]
     Remote {

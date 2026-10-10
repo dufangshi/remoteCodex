@@ -1,13 +1,13 @@
 node_modules
 dist
 coverage
-remote-codex-thread-ui
+pockymoe-thread-ui
 /remote-codex-app/
 .DS_Store
 .local
 target/
-npm/*/bin/remote-codex
-npm/*/bin/remote-codex.exe
+npm/*/bin/pockymoe
+npm/*/bin/pockymoe.exe
 npm/*/LICENSE
 npm/*/README.md
 !npm/remote-codex/README.md
@@ -38,7 +38,7 @@ apps/android/**/build/
 apps/android/local.properties
 apps/android/thread-web/dist/
 apps/android/app/src/main/assets/thread-ui/
-apps/ios/RemoteCodex/Resources/WebThreadDist/
+apps/ios/Pockymoe/Resources/WebThreadDist/
 apps/ios/build/
 apps/ios/.temp/
 apps/ios/**/xcuserdata/

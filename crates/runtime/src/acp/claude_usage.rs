@@ -128,7 +128,7 @@ impl ClaudeUsageReader {
         self.completion.abandoned_tools(error, delivered_text)
     }
 
-    pub fn background_subagents(&self) -> Vec<remote_codex_protocol::ThreadSubagentDto> {
+    pub fn background_subagents(&self) -> Vec<pockymoe_protocol::ThreadSubagentDto> {
         self.background.active()
     }
 

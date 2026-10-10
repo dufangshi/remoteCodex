@@ -1,12 +1,12 @@
 import { ThreadAutomationsControl } from './ThreadAutomationsControl';
-import { getLocale, translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { getLocale, translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { useId, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import {
   TokenUsageCost,
   type TokenUsageCostProps,
-} from '@remote-codex/thread-ui';
-import type { ThreadDto } from '@remote-codex/shared';
+} from '@pockymoe/thread-ui';
+import type { ThreadDto } from '@pockymoe/shared';
 
 export interface NativeWatch {
   id: string;

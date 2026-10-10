@@ -1,5 +1,5 @@
 // Opt-in: real Grok ACP with a synthetic upstream, in Treer and a fresh HOME.
-// node scripts/upstream-models-live.mjs /path/to/remote-codex /path/to/grok
+// node scripts/upstream-models-live.mjs /path/to/pockymoe /path/to/grok
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -66,7 +66,7 @@ await new Promise((r) => portProbe.close(r));
 const env = Object.fromEntries(
   Object.entries(process.env).filter(
     ([key]) =>
-      !/^(REMOTE_CODEX_|CODEX_|CLAUDE_|GROK_|GEMINI_|ANTHROPIC_|OPENAI_|XAI_|GOOGLE_|XDG_)/.test(
+      !/^(POCKYMOE_|CODEX_|CLAUDE_|GROK_|GEMINI_|ANTHROPIC_|OPENAI_|XAI_|GOOGLE_|XDG_)/.test(
         key,
       ),
   ),
@@ -78,12 +78,12 @@ Object.assign(env, {
   PATH: `${path.dirname(grok)}:${path.dirname(process.execPath)}:/usr/bin:/bin`,
   HOST: '127.0.0.1',
   PORT: String(port),
-  REMOTE_CODEX_MODE: 'local',
-  REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'acp',
-  REMOTE_CODEX_DATABASE_PATH: path.join(root, 'test.sqlite'),
-  REMOTE_CODEX_WORKSPACE_ROOT: workspace,
-  REMOTE_CODEX_ACP_STARTUP_TIMEOUT_MS: '30000',
-  REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG: path.join(root, 'unused.json'),
+  POCKYMOE_MODE: 'local',
+  POCKYMOE_ENABLED_AGENT_PROVIDERS: 'acp',
+  POCKYMOE_DATABASE_PATH: path.join(root, 'test.sqlite'),
+  POCKYMOE_WORKSPACE_ROOT: workspace,
+  POCKYMOE_ACP_STARTUP_TIMEOUT_MS: '30000',
+  POCKYMOE_RELAY_SUPERVISOR_CONFIG: path.join(root, 'unused.json'),
 });
 const log = fs.openSync(path.join(root, 'supervisor.log'), 'a');
 const child = spawn(binary, ['supervisor'], {

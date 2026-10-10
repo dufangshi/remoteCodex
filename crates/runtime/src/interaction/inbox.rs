@@ -1,6 +1,6 @@
 use crate::Supervisor;
 use anyhow::{ensure, Result};
-use remote_codex_protocol::now_rfc3339;
+use pockymoe_protocol::now_rfc3339;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
@@ -80,7 +80,7 @@ fn validate_kinds(kinds: &[String]) -> Result<()> {
     ensure!(
         kinds
             .iter()
-            .all(|k| remote_codex_protocol::MESSAGE_KINDS.contains(&k.as_str())),
+            .all(|k| pockymoe_protocol::MESSAGE_KINDS.contains(&k.as_str())),
         "kinds must contain only result, question, status or task"
     );
     Ok(())
@@ -226,9 +226,9 @@ impl Supervisor {
                     "waitedSeconds": started.elapsed().as_secs(),
                     "messages": matching,
                     "next": if found {
-                        "Handle these, then acknowledge them with `remote-codex inbox ack ID...`; unacknowledged mail satisfies the next wait immediately."
+                        "Handle these, then acknowledge them with `pockymoe inbox ack ID...`; unacknowledged mail satisfies the next wait immediately."
                     } else {
-                        "Nothing arrived. Wait again, or check `remote-codex thread tree` for delegates that are blocked or finished without writing."
+                        "Nothing arrived. Wait again, or check `pockymoe thread tree` for delegates that are blocked or finished without writing."
                     },
                 }));
             }
@@ -269,7 +269,7 @@ impl Supervisor {
                 message.as_object_mut().unwrap().remove("text");
             }
             messages.reverse();
-            Ok(json!({"threadId":thread,"messages":messages,"nextBefore":next,"readCommand":format!("remote-codex inbox read MESSAGE_ID --thread {thread}"),"acknowledgement":"Reading does not acknowledge a message. Use inbox ack after handling it."}))
+            Ok(json!({"threadId":thread,"messages":messages,"nextBefore":next,"readCommand":format!("pockymoe inbox read MESSAGE_ID --thread {thread}"),"acknowledgement":"Reading does not acknowledge a message. Use inbox ack after handling it."}))
         })
     }
     pub fn inbox_read(&self, thread: &str, query: &Value) -> Result<Value> {

@@ -13,7 +13,7 @@ test('private device ports support browser links, HTTP streaming, WebSocket and 
   const root = await mkdtemp(resolve('.local/port-preview-'));
   const processes: ChildProcess[] = [];
   const logs: string[] = [];
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('REMOTE_CODEX_')));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('POCKYMOE_')));
   const password = randomBytes(24).toString('hex');
   const freePort = async () => {
     const server = createServer();
@@ -24,14 +24,14 @@ test('private device ports support browser links, HTTP streaming, WebSocket and 
   };
   const rp = await freePort(), sp = await freePort();
   const base = `http://127.0.0.1:${rp}`;
-  const binaries = resolve(process.env.E2E_SECURITY_BINARY ?? 'target/debug/remote-codex');
+  const binaries = resolve(process.env.E2E_SECURITY_BINARY ?? 'target/debug/pockymoe');
   function start(command: string, extra: Record<string, string>) {
     const proc = spawn(binaries, [command], {
-      env: { ...env, HOST: '127.0.0.1', REMOTE_CODEX_E2E_FAKE_RUNTIME: '1',
-        RUST_LOG: 'info,remote_codex_relay::preview=debug,remote_codex_supervisor::ports=debug',
-        REMOTE_CODEX_ADMIN_USERNAME: 'admin', REMOTE_CODEX_ADMIN_PASSWORD: password,
-        REMOTE_CODEX_SESSION_SECRET: randomBytes(32).toString('hex'),
-        REMOTE_CODEX_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'), ...extra },
+      env: { ...env, HOST: '127.0.0.1', POCKYMOE_E2E_FAKE_RUNTIME: '1',
+        RUST_LOG: 'info,pockymoe_relay::preview=debug,pockymoe_supervisor::ports=debug',
+        POCKYMOE_ADMIN_USERNAME: 'admin', POCKYMOE_ADMIN_PASSWORD: password,
+        POCKYMOE_SESSION_SECRET: randomBytes(32).toString('hex'),
+        POCKYMOE_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'), ...extra },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     for (const output of [proc.stdout, proc.stderr]) output!.on('data', data => logs.push(String(data)));
@@ -99,17 +99,17 @@ test('private device ports support browser links, HTTP streaming, WebSocket and 
     req.on('error', reject); req.end(init.body);
   });
   try {
-    start('relay', { PORT: String(rp), REMOTE_CODEX_RELAY_DATA_DIR: join(root, 'relay'),
-      REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: 'true', REMOTE_CODEX_RELAY_WEB_DIST_DIR: resolve('apps/supervisor-web/dist'),
-      REMOTE_CODEX_PUBLIC_BASE_URL: base, REMOTE_CODEX_PORT_PREVIEW_BASE_URL: `http://preview.localhost:${rp}` });
+    start('relay', { PORT: String(rp), POCKYMOE_RELAY_DATA_DIR: join(root, 'relay'),
+      POCKYMOE_RELAY_REGISTRATION_ENABLED: 'true', POCKYMOE_RELAY_WEB_DIST_DIR: resolve('apps/supervisor-web/dist'),
+      POCKYMOE_PUBLIC_BASE_URL: base, POCKYMOE_PORT_PREVIEW_BASE_URL: `http://preview.localhost:${rp}` });
     await expect.poll(() => api('/healthz').then(r => r.status).catch(() => 0)).toBe(200);
     const owner = await account('owner'), other = await account('other');
     const created = await api('/relay/devices', 'POST', { name: 'Port preview device' }, owner);
     expect(created.status).toBe(200);
     const deviceId = created.data.device.id;
-    start('relay-supervisor', { PORT: String(sp), REMOTE_CODEX_RELAY_SUPERVISOR_PORT: String(sp),
-      REMOTE_CODEX_RELAY_SERVER_URL: base, REMOTE_CODEX_RELAY_AGENT_TOKEN: created.data.token,
-      REMOTE_CODEX_DATABASE_PATH: join(root, 'device.sqlite'), REMOTE_CODEX_WORKSPACE_ROOT: join(root, 'workspaces') });
+    start('relay-supervisor', { PORT: String(sp), POCKYMOE_RELAY_SUPERVISOR_PORT: String(sp),
+      POCKYMOE_RELAY_SERVER_URL: base, POCKYMOE_RELAY_AGENT_TOKEN: created.data.token,
+      POCKYMOE_DATABASE_PATH: join(root, 'device.sqlite'), POCKYMOE_WORKSPACE_ROOT: join(root, 'workspaces') });
     await expect.poll(() => api('/healthz').then(r => r.data.connectedSupervisors)).toBe(1);
     const deviceApi = `/relay/devices/${deviceId}/api`;
     // Real local CLI reserves a stable address while nothing is listening yet.

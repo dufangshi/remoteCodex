@@ -1,5 +1,5 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
-import { LanguageSwitcher } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
+import { LanguageSwitcher } from '@pockymoe/thread-ui/i18n';
 import { FormEvent, useState } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 
@@ -50,7 +50,7 @@ export function LoginPage({
               RC
             </span>
             <div>
-              <p className="text-sm font-semibold text-[var(--theme-fg)]">Remote Codex</p>
+              <p className="text-sm font-semibold text-[var(--theme-fg)]">Pockymoe</p>
               <p className="text-xs text-[var(--theme-fg-muted)]">{eyebrow}</p>
             </div>
           </div>

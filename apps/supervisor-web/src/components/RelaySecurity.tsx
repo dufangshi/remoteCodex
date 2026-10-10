@@ -1,5 +1,5 @@
-import { getLocale } from '@remote-codex/thread-ui/i18n';
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { getLocale } from '@pockymoe/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { FormDialog } from './FormDialog';
 import { useDialogLifecycle } from './useDialogLifecycle';
 import { request } from '../lib/api';
@@ -285,7 +285,7 @@ function RecoveryCodes({
   const [copied, setCopied] = useState(false),
     [saved, setSaved] = useState(false),
     [error, setError] = useState<string | null>(null);
-  const text = `Remote Codex recovery codes\nKeep these somewhere private. Each code works once.\n\n${codes.join('\n')}\n`;
+  const text = `Pockymoe recovery codes\nKeep these somewhere private. Each code works once.\n\n${codes.join('\n')}\n`;
   async function copy() {
     try {
       await navigator.clipboard.writeText(text);
@@ -299,7 +299,7 @@ function RecoveryCodes({
     const url = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'remote-codex-recovery-codes.txt';
+    a.download = 'pockymoe-recovery-codes.txt';
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     setSaved(true);

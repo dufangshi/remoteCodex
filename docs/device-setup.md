@@ -28,7 +28,7 @@ preserving the saved configuration and history. An already-online device is
 left running; setup does not rewrite or restart its service just for this repair.
 
 The parser regression can be run in an isolated Linux environment with Node and
-systemd installed: `REMOTE_CODEX_TEST_SYSTEMD=1 node --test scripts/setup.test.mjs`.
+systemd installed: `POCKYMOE_TEST_SYSTEMD=1 node --test scripts/setup.test.mjs`.
 It verifies generated units without starting a Supervisor or contacting a relay.
 
 Open a device's Settings to manage its Supervisor, harnesses and upstreams.

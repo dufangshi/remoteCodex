@@ -2,8 +2,8 @@
 
 日期：2026-09-03
 分支：`rust/acp-rewrite`
-范围：`apps/supervisor-web` 中由 Supervisor 维护的全部产品界面，以及 `@remote-codex/thread-ui` 的 Threads、Shared Workspace、设置与内置插件接入层。
-边界：聊天 timeline、composer 和消息渲染沿用 `remote-codex-thread-ui` 的 Rust 优化分支；本轮只调整它的产品壳层、主题一致性和插件管理行为。
+范围：`apps/supervisor-web` 中由 Supervisor 维护的全部产品界面，以及 `@pockymoe/thread-ui` 的 Threads、Shared Workspace、设置与内置插件接入层。
+边界：聊天 timeline、composer 和消息渲染沿用 `pockymoe-thread-ui` 的 Rust 优化分支；本轮只调整它的产品壳层、主题一致性和插件管理行为。
 
 ## 目标定义
 
@@ -150,13 +150,13 @@
 - [x] Docker 构建使用独立仓库 `remote-codex-thread-ui-rust` 的 `main`，不再依赖原仓库的长期功能分支或固定提交。
 - [x] Threads 主区改为连续产品表面：状态并入顶部信息行，最近线程使用单一列表和分隔线，不再嵌套浮卡。
 - [x] Shared Workspace、Rooms、线程行和顶栏改用与 Workspaces 一致的暖中性色与琥珀主色，移除冷蓝底色和多余阴影。
-- [x] 保留 Rust 分支已经优化的聊天 thread、composer、停止与消息样式，并重新构建 `@remote-codex/thread-ui` 的 `dist`。
+- [x] 保留 Rust 分支已经优化的聊天 thread、composer、停止与消息样式，并重新构建 `@pockymoe/thread-ui` 的 `dist`。
 
 ### F. 验收
 
-- [x] `pnpm --filter @remote-codex/supervisor-web typecheck` 通过。
-- [x] `pnpm --filter @remote-codex/supervisor-web test` 通过。
-- [x] `pnpm --filter @remote-codex/supervisor-web build` 通过。
+- [x] `pnpm --filter @pockymoe/supervisor-web typecheck` 通过。
+- [x] `pnpm --filter @pockymoe/supervisor-web test` 通过。
+- [x] `pnpm --filter @pockymoe/supervisor-web build` 通过。
 - [x] 定向 Playwright e2e 覆盖 workspace 创建、workspace 行操作、Relay Devices、New Thread 和 Import。
 - [x] 逐页检查 `320 / 375 / 390 / 768 / 1440px`，无非必要整页横向滚动或遮挡。
 - [x] 深色与亮色主题逐页截图检查。
@@ -173,9 +173,9 @@
 
 ## 最终验证记录
 
-- `pnpm --filter @remote-codex/supervisor-web typecheck`：通过。
-- `pnpm --filter @remote-codex/supervisor-web test`：通过；当前没有 Vitest 单测，实际行为由 Playwright 回归覆盖。
-- `pnpm --filter @remote-codex/supervisor-web build`：通过；仅保留既有 worker URL 和 chunk size 警告。
+- `pnpm --filter @pockymoe/supervisor-web typecheck`：通过。
+- `pnpm --filter @pockymoe/supervisor-web test`：通过；当前没有 Vitest 单测，实际行为由 Playwright 回归覆盖。
+- `pnpm --filter @pockymoe/supervisor-web build`：通过；仅保留既有 worker URL 和 chunk size 警告。
 - 本轮 product Playwright：14 项通过，2 项按项目设计跳过；新增 Terminal 插件关闭、恢复和服务端持久化回归。
 - `cargo test --workspace`：全部通过；覆盖 multipart manifest placeholder、图片扩展名、单一 ACP 图片块和插件开关持久化。
 - `docker build --platform linux/arm64 -f Dockerfile.relay .`：通过；构建日志确认拉取 `rust/acp-rewrite-composer-stop` 并只生成 Terminal builtin plugin。
@@ -183,8 +183,8 @@
 - 既有 `phase2`：5 项通过，1 项在 desktop 项目按设计跳过。
 - 390px 实测：Workspaces 和 Relay Devices 的 `scrollWidth` 等于 viewport，嵌套交互为 0，可见操作小于 44px 的数量为 0；Relay Guide 同样无横向溢出。
 - 主题对比度计算：亮色正文 15.64:1、亮色 muted 5.40:1、亮色主按钮 6.77:1；暗色正文 16.39:1、暗色 muted 5.81:1、暗色主按钮 9.07:1。
-- `@remote-codex/thread-ui` 使用 `remote-codex-thread-ui-rust/main`；插件开关、XYZ 删除、Shared Workspace 表面和主题修改均已在该代码线上重建并测试。
-- `@remote-codex/thread-ui` 最终 commit 为 `7b594e8`；该分支 67 个测试文件、350 项测试通过。
+- `@pockymoe/thread-ui` 使用 `remote-codex-thread-ui-rust/main`；插件开关、XYZ 删除、Shared Workspace 表面和主题修改均已在该代码线上重建并测试。
+- `@pockymoe/thread-ui` 最终 commit 为 `7b594e8`；该分支 67 个测试文件、350 项测试通过。
 - 当前 Rust relay 尚未实现 Admin 数据接口；前端已提供明确兼容性状态、Retry 和 Relay Home 恢复路径，不再显示裸 404。
 - 仓库的 `lint` 脚本仍缺 ESLint 依赖与配置，这是既有工具链缺口，不属于本轮 UI 运行时阻塞。
 - UI 主提交为 `5756c5f6`；Rust relay 可重复部署与回滚保护提交最终落在 `d8a546e5`。`Relay Deploy` run `33806743748` 全部通过，其中 Node image/deploy jobs 均为 skipped。
@@ -210,5 +210,5 @@
 4. Workspaces、Devices、Relay Home 和 Relay Guide 不再出现卡片嵌套；允许表格、dialog、code block 和真实交互组的单层边界。
 5. 每页只有一个明确主操作，危险操作不与主操作同权展示。
 6. 失败、加载、空态和成功反馈都在受影响区域内，并提供下一步或恢复路径。
-7. `remote-codex-thread-ui` 必须来自 Rust 优化分支，Supervisor 与 thread-ui 的构建和定向回归全部通过。
+7. `pockymoe-thread-ui` 必须来自 Rust 优化分支，Supervisor 与 thread-ui 的构建和定向回归全部通过。
 8. Settings 只显示实际可用的 Terminal 插件，关闭后刷新仍保持关闭；XYZ Viewer 不再出现在包、清单或运行时接口中。

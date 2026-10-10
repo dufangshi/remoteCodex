@@ -1,4 +1,4 @@
-use remote_codex_runtime::files::read_thread_image;
+use pockymoe_runtime::files::read_thread_image;
 
 #[test]
 fn thread_images_are_scoped_and_cannot_serve_active_content() {

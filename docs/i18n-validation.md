@@ -9,10 +9,10 @@
 以下命令均退出 0；共享 UI 构建完成后重新安装主 worktree 的 file 依赖。
 
 ```sh
-corepack pnpm --dir remote-codex-thread-ui --filter @remote-codex/thread-ui build
+corepack pnpm --dir pockymoe-thread-ui --filter @pockymoe/thread-ui build
 corepack pnpm install --offline --frozen-lockfile
-corepack pnpm --dir remote-codex-thread-ui --filter @remote-codex/thread-ui typecheck
-corepack pnpm --filter @remote-codex/supervisor-web typecheck
+corepack pnpm --dir pockymoe-thread-ui --filter @pockymoe/thread-ui typecheck
+corepack pnpm --filter @pockymoe/supervisor-web typecheck
 ```
 
 两个仓库的 `git diff --check` 通过。未改 Rust crates，未运行 Rust workspace
@@ -24,14 +24,14 @@ corepack pnpm --filter @remote-codex/supervisor-web typecheck
 
 | 工作目录 | 命令（pnpm 使用 corepack） | 结果 |
 | --- | --- | --- |
-| 共享 UI | `pnpm --filter @remote-codex/thread-ui test src/i18n/i18n.test.tsx src/components/GroupedThreadTabs.test.tsx src/components/composer/composerPresentation.test.ts src/components/graph-workspace/explorer/WorkspaceExplorerTree.test.tsx` | 4 文件，20 测试通过（当时 locale 8 测试） |
-| 共享 UI | `pnpm --filter @remote-codex/thread-ui test src/i18n/i18n.test.tsx src/components/GroupedThreadTabs.test.tsx src/components/composer/ComposerHooksPanel.test.tsx` | 3 文件，16 测试通过 |
-| 共享 UI | `pnpm --filter @remote-codex/thread-ui test src/i18n/i18n.test.tsx src/components/GroupedThreadTabs.test.tsx src/components/graph-workspace/GraphDrawioPreview.test.tsx` | 3 文件，15 测试通过（locale 已增至 9 测试） |
-| 主仓库 | `pnpm --filter @remote-codex/supervisor-web test src/components/ConversationSearch.test.tsx src/components/RuntimeManagement.test.tsx src/components/ThreadPublicLinks.test.tsx src/components/UpstreamManagement.test.tsx src/components/DeviceEncryptionStatus.test.tsx` | 5 文件，19 测试通过 |
-| 主仓库 | `pnpm --filter @remote-codex/supervisor-web test src/lib/transcriptExport.test.tsx` | 1 文件，2 测试通过 |
-| 共享 UI | `pnpm --filter @remote-codex/thread-ui test src/i18n/i18n.test.tsx src/components/composer/composerUtils.test.ts src/components/graph-chat/GraphChatMessageFrame.test.tsx` | 实际匹配 2 文件，40 测试通过；MessageFrame 测试文件不存在，未作为已验证文件统计 |
-| 共享 UI | `pnpm --filter @remote-codex/thread-ui test src/components/graph-chat/GraphChatCompactMessageItem.test.tsx` | 1 文件，5 测试通过；覆盖实际使用 MessageFrame 的组件 |
-| 主仓库 | `pnpm --filter @remote-codex/supervisor-web test src/lib/notificationWorker.test.ts src/components/ConversationSearch.test.tsx` | 2 文件，4 测试通过 |
+| 共享 UI | `pnpm --filter @pockymoe/thread-ui test src/i18n/i18n.test.tsx src/components/GroupedThreadTabs.test.tsx src/components/composer/composerPresentation.test.ts src/components/graph-workspace/explorer/WorkspaceExplorerTree.test.tsx` | 4 文件，20 测试通过（当时 locale 8 测试） |
+| 共享 UI | `pnpm --filter @pockymoe/thread-ui test src/i18n/i18n.test.tsx src/components/GroupedThreadTabs.test.tsx src/components/composer/ComposerHooksPanel.test.tsx` | 3 文件，16 测试通过 |
+| 共享 UI | `pnpm --filter @pockymoe/thread-ui test src/i18n/i18n.test.tsx src/components/GroupedThreadTabs.test.tsx src/components/graph-workspace/GraphDrawioPreview.test.tsx` | 3 文件，15 测试通过（locale 已增至 9 测试） |
+| 主仓库 | `pnpm --filter @pockymoe/supervisor-web test src/components/ConversationSearch.test.tsx src/components/RuntimeManagement.test.tsx src/components/ThreadPublicLinks.test.tsx src/components/UpstreamManagement.test.tsx src/components/DeviceEncryptionStatus.test.tsx` | 5 文件，19 测试通过 |
+| 主仓库 | `pnpm --filter @pockymoe/supervisor-web test src/lib/transcriptExport.test.tsx` | 1 文件，2 测试通过 |
+| 共享 UI | `pnpm --filter @pockymoe/thread-ui test src/i18n/i18n.test.tsx src/components/composer/composerUtils.test.ts src/components/graph-chat/GraphChatMessageFrame.test.tsx` | 实际匹配 2 文件，40 测试通过；MessageFrame 测试文件不存在，未作为已验证文件统计 |
+| 共享 UI | `pnpm --filter @pockymoe/thread-ui test src/components/graph-chat/GraphChatCompactMessageItem.test.tsx` | 1 文件，5 测试通过；覆盖实际使用 MessageFrame 的组件 |
+| 主仓库 | `pnpm --filter @pockymoe/supervisor-web test src/lib/notificationWorker.test.ts src/components/ConversationSearch.test.tsx` | 2 文件，4 测试通过 |
 
 Locale 的 9 个测试覆盖 aliases/unsupported fallback、浏览器检测/保存优先级、
 资源 key 和插值占位符一致、英语资源回退、插值不递归、复数、日期/数字、实时切换、
@@ -58,7 +58,7 @@ corepack pnpm exec playwright test e2e/i18n.spec.ts --project=desktop-chromium
 - 窄屏 390×844：`zh-SG` 浏览器初始化简体中文；通过移动导航打开设置并切换英语；
   刷新持久生效；不支持的已保存 `fr-FR` 明确回退英语。
 
-测试 Supervisor 用隔离数据库和工作区，配置清空正式 REMOTE_CODEX relay 参数。
+测试 Supervisor 用隔离数据库和工作区，配置清空正式 POCKYMOE relay 参数。
 fake ACP 使用 `ios-e2e-stream`；Rust 可执行文件来自固定主线已有构建的本地副本，
 没有重新编译无改动的 crates 或连接真实模型凭据。
 
@@ -86,7 +86,7 @@ Worked duration 的 memo 按 locale 重算。小范围同类审查补齐顶栏�
 共享 UI 执行：
 
 ```sh
-corepack pnpm --dir remote-codex-thread-ui --filter @remote-codex/thread-ui test \
+corepack pnpm --dir pockymoe-thread-ui --filter @pockymoe/thread-ui test \
   src/components/composer/useComposerMcpConfig.test.tsx \
   src/components/shell/shellEvents.test.ts \
   src/components/ThreadTimeline.test.tsx \
@@ -98,7 +98,7 @@ corepack pnpm --dir remote-codex-thread-ui --filter @remote-codex/thread-ui test
 修正期望后仅重跑该相关文件：
 
 ```sh
-corepack pnpm --dir remote-codex-thread-ui --filter @remote-codex/thread-ui test src/components/shell/shellEvents.test.ts
+corepack pnpm --dir pockymoe-thread-ui --filter @pockymoe/thread-ui test src/components/shell/shellEvents.test.ts
 ```
 
 26 测试通过。最终五个相关文件合计 77 测试全部通过（四文件保留首轮通过结果）。

@@ -4,4 +4,4 @@ export {
   type AgentBackendId,
   type AppShellNavContextValue,
   type ThemeMode,
-} from '@remote-codex/thread-ui';
+} from '@pockymoe/thread-ui';

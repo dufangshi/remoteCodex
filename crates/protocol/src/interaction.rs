@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 pub const THREAD_INTERACTION_SKILL: &str =
     include_str!("../../../skills/thread-interaction/SKILL.md");
 
-/// Topic guides behind the short skill: `remote-codex guide TOPIC`.
+/// Topic guides behind the short skill: `pockymoe guide TOPIC`.
 /// (name, one-line summary, text)
 pub const THREAD_INTERACTION_GUIDES: &[(&str, &str, &str)] = &[
     (

@@ -33,7 +33,7 @@ impl CodexBridge {
             std::env::current_exe()?.to_string_lossy().into_owned(),
         ));
         env.push((
-            "REMOTE_CODEX_APP_SERVER_BRIDGE",
+            "POCKYMOE_APP_SERVER_BRIDGE",
             json!({
                 "address": listener.local_addr()?.to_string(), "token": token, "command": command, "policy": super::codex_permissions::native_policy(policy)
             })
@@ -92,7 +92,7 @@ impl CodexBridge {
             ).await?;
             let result = async {
                 process.request("initialize", json!({
-                    "clientInfo":{"name":"remote-codex-fork","version":env!("CARGO_PKG_VERSION")},
+                    "clientInfo":{"name":"pockymoe-fork","version":env!("CARGO_PKG_VERSION")},
                     "capabilities":{"experimentalApi":true}
                 })).await?;
                 process.notify("initialized", json!({})).await?;
@@ -129,7 +129,7 @@ impl CodexBridge {
 }
 
 async fn request(stream: &mut BufReader<TcpStream>, method: &str, params: Value) -> Result<Value> {
-    let id = format!("remote-codex-fork-{}", uuid::Uuid::new_v4());
+    let id = format!("pockymoe-fork-{}", uuid::Uuid::new_v4());
     let message = json!({"jsonrpc":"2.0", "id":id, "method":method, "params":params});
     stream
         .get_mut()
@@ -151,7 +151,7 @@ async fn request(stream: &mut BufReader<TcpStream>, method: &str, params: Value)
 
 /// Hidden CLI entry point used as codex-acp's CODEX_PATH executable.
 pub async fn run() -> Result<()> {
-    let config: Value = serde_json::from_str(&std::env::var("REMOTE_CODEX_APP_SERVER_BRIDGE")?)?;
+    let config: Value = serde_json::from_str(&std::env::var("POCKYMOE_APP_SERVER_BRIDGE")?)?;
     let command = config["command"]
         .as_str()
         .context("missing native Codex command")?;
@@ -160,7 +160,7 @@ pub async fn run() -> Result<()> {
     crate::child_process::hide_tokio(&mut command);
     let mut child = command
         .args(parsed.args)
-        .env_remove("REMOTE_CODEX_APP_SERVER_BRIDGE")
+        .env_remove("POCKYMOE_APP_SERVER_BRIDGE")
         .env_remove("CODEX_PATH")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

@@ -1,6 +1,6 @@
-# Remote Codex (Rust rewrite)
+# Pockymoe (Rust rewrite)
 
-Self-hosted control plane for long-running coding agents. The supervisor is Rust. Harnesses speak **ACP** through thin adapters. The thread UI is still React (`remote-codex-thread-ui`).
+Self-hosted control plane for long-running coding agents. The supervisor is Rust. Harnesses speak **ACP** through thin adapters. The thread UI is still React (`pockymoe-thread-ui`).
 
 This branch replaces the TypeScript `supervisor-api` / `relay-server` / per-harness SDK stacks.
 
@@ -31,16 +31,16 @@ API or when the API is unavailable. See [the update and recovery design](docs/su
 - `crates/runtime` — journal, files, ACP catalog, thread service
 - `crates/supervisor` — HTTP + WebSocket
 - `crates/relay` — public relay
-- `crates/cli` — `remote-codex`
+- `crates/cli` — `pockymoe`
 - `apps/supervisor-web` — existing product UI
 
 ## Run
 
 ```bash
-cargo run -p remote-codex -- supervisor
+cargo run -p pockymoe -- supervisor
 # another terminal
 pnpm install
-pnpm --filter @remote-codex/supervisor-web exec vite --host localhost --port 5173
+pnpm --filter @pockymoe/supervisor-web exec vite --host localhost --port 5173
 ```
 
 Open `http://localhost:5173`. Local mode has no login.
@@ -48,7 +48,7 @@ Open `http://localhost:5173`. Local mode has no login.
 The native supervisor serves the Web UI itself. Copy a setup command from the
 Devices page: macOS/Linux use SH, Windows uses PowerShell. Both download the
 matching Rust executable directly from GitHub Releases and verify its SHA256 and
-actual version. No Node/npm is required to install or update Remote Codex.
+actual version. No Node/npm is required to install or update Pockymoe.
 
 GitHub Releases are the authoritative runtime versions. Each immutable release
 contains all four supported binaries, the pinned Web bundle, `runtime-version.txt`
@@ -63,22 +63,22 @@ npm installations require the one-time migration described in the runbook.
 Relay:
 
 ```bash
-cargo run -p remote-codex -- relay
-REMOTE_CODEX_MODE=relay REMOTE_CODEX_RELAY_SERVER_URL=ws://127.0.0.1:8788 \
-  REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_... cargo run -p remote-codex -- relay-supervisor
+cargo run -p pockymoe -- relay
+POCKYMOE_MODE=relay POCKYMOE_RELAY_SERVER_URL=ws://127.0.0.1:8788 \
+  POCKYMOE_RELAY_AGENT_TOKEN=rcd_... cargo run -p pockymoe -- relay-supervisor
 ```
 
 Before replacing a Node 0.11 relay, stop the Node process and inspect the
 existing data directory without changing it:
 
 ```bash
-remote-codex relay-migrate --data-dir /var/lib/remote-codex-relay --dry-run
-remote-codex relay-migrate --data-dir /var/lib/remote-codex-relay
+pockymoe relay-migrate --data-dir /var/lib/remote-codex-relay --dry-run
+pockymoe relay-migrate --data-dir /var/lib/remote-codex-relay
 ```
 
 The migration keeps `relay-store.sqlite`, writes an online-backup snapshot, and
 does not delete a legacy `relay.sqlite`. Normal relay startup refuses an
-unmigrated legacy store unless `REMOTE_CODEX_RELAY_AUTO_MIGRATE=1` is explicitly
+unmigrated legacy store unless `POCKYMOE_RELAY_AUTO_MIGRATE=1` is explicitly
 set.
 
 The local supervisor keeps the Node 0.11 tables in
@@ -90,7 +90,7 @@ backfilled when the Rust supervisor first opens the database.
 
 ```bash
 cargo test --workspace
-REMOTE_CODEX_E2E_FAKE_RUNTIME=1 pnpm test:e2e
+POCKYMOE_E2E_FAKE_RUNTIME=1 pnpm test:e2e
 ```
 
-Deterministic e2e uses `REMOTE_CODEX_E2E_FAKE_RUNTIME=1`. Production uses ACP (`codex-acp`, `claude-agent-acp`, `grok agent stdio`, `opencode acp`, …).
+Deterministic e2e uses `POCKYMOE_E2E_FAKE_RUNTIME=1`. Production uses ACP (`codex-acp`, `claude-agent-acp`, `grok agent stdio`, `opencode acp`, …).

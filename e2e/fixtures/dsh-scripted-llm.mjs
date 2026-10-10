@@ -2,7 +2,7 @@
 // makes one tool call, `TOOLS?` lists the tools DSH offered (the run mode's
 // tool set); otherwise it answers. Text and reasoning stream in small chunks
 // so bridge streaming is observable.
-export const name = 'remote-codex-e2e-scripted-llm';
+export const name = 'pockymoe-e2e-scripted-llm';
 export const inject = ['llm'];
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));

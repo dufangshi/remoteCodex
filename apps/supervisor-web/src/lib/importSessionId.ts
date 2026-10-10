@@ -1,4 +1,4 @@
-import type { AgentBackendIdDto } from '@remote-codex/shared';
+import type { AgentBackendIdDto } from '@pockymoe/shared';
 
 const AGENT_SCHEMES: Record<string, string> = {
   codex: 'codex',

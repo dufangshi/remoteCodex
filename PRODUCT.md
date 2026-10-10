@@ -1,4 +1,4 @@
-# Remote Codex Supervisor Product Context
+# Pockymoe Supervisor Product Context
 
 ## Register
 
@@ -6,7 +6,7 @@ product
 
 ## Product Purpose
 
-Remote Codex Supervisor is a single-user control surface for running and monitoring local Codex work from another device on a private Tailscale network. It exists to make active Codex threads, workspace selection, durable shells, runtime status, and recovery controls usable from a phone or secondary browser without exposing the local machine to the public internet.
+Pockymoe Supervisor is a single-user control surface for running and monitoring local Codex work from another device on a private Tailscale network. It exists to make active Codex threads, workspace selection, durable shells, runtime status, and recovery controls usable from a phone or secondary browser without exposing the local machine to the public internet.
 
 The interface should feel like a focused operator console, not a marketing site. It should reduce uncertainty during long-running agent work, make thread state visible at a glance, and preserve control when the user is away from the host machine.
 

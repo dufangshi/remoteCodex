@@ -1,6 +1,6 @@
 import { renderHook, act } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { ThreadDto } from '@remote-codex/shared';
+import type { ThreadDto } from '@pockymoe/shared';
 import { useThreadTabStatus } from './useThreadTabStatus';
 const favicon = () =>
   decodeURIComponent(

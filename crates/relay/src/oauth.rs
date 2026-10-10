@@ -86,48 +86,48 @@ impl Default for OAuthConfig {
 impl OAuthConfig {
     pub fn from_env() -> Self {
         let google = credentials(
-            "REMOTE_CODEX_GOOGLE_OAUTH_CLIENT_ID",
-            "REMOTE_CODEX_GOOGLE_OAUTH_CLIENT_SECRET",
+            "POCKYMOE_GOOGLE_OAUTH_CLIENT_ID",
+            "POCKYMOE_GOOGLE_OAUTH_CLIENT_SECRET",
         );
         let github = credentials(
-            "REMOTE_CODEX_GITHUB_OAUTH_CLIENT_ID",
-            "REMOTE_CODEX_GITHUB_OAUTH_CLIENT_SECRET",
+            "POCKYMOE_GITHUB_OAUTH_CLIENT_ID",
+            "POCKYMOE_GITHUB_OAUTH_CLIENT_SECRET",
         );
         Self {
-            public_base_url: nonempty_env("REMOTE_CODEX_PUBLIC_BASE_URL")
+            public_base_url: nonempty_env("POCKYMOE_PUBLIC_BASE_URL")
                 .map(|value| value.trim_end_matches('/').to_string()),
             google,
             github,
-            google_enabled_by_env: nonempty_env("REMOTE_CODEX_GOOGLE_OAUTH_ENABLED").as_deref()
+            google_enabled_by_env: nonempty_env("POCKYMOE_GOOGLE_OAUTH_ENABLED").as_deref()
                 != Some("false"),
-            github_enabled_by_env: nonempty_env("REMOTE_CODEX_GITHUB_OAUTH_ENABLED").as_deref()
+            github_enabled_by_env: nonempty_env("POCKYMOE_GITHUB_OAUTH_ENABLED").as_deref()
                 != Some("false"),
             google_authorize_url: endpoint(
-                "REMOTE_CODEX_GOOGLE_OAUTH_AUTHORIZE_URL",
+                "POCKYMOE_GOOGLE_OAUTH_AUTHORIZE_URL",
                 "https://accounts.google.com/o/oauth2/v2/auth",
             ),
             google_token_url: endpoint(
-                "REMOTE_CODEX_GOOGLE_OAUTH_TOKEN_URL",
+                "POCKYMOE_GOOGLE_OAUTH_TOKEN_URL",
                 "https://oauth2.googleapis.com/token",
             ),
             google_userinfo_url: endpoint(
-                "REMOTE_CODEX_GOOGLE_OAUTH_USERINFO_URL",
+                "POCKYMOE_GOOGLE_OAUTH_USERINFO_URL",
                 "https://openidconnect.googleapis.com/v1/userinfo",
             ),
             github_authorize_url: endpoint(
-                "REMOTE_CODEX_GITHUB_OAUTH_AUTHORIZE_URL",
+                "POCKYMOE_GITHUB_OAUTH_AUTHORIZE_URL",
                 "https://github.com/login/oauth/authorize",
             ),
             github_token_url: endpoint(
-                "REMOTE_CODEX_GITHUB_OAUTH_TOKEN_URL",
+                "POCKYMOE_GITHUB_OAUTH_TOKEN_URL",
                 "https://github.com/login/oauth/access_token",
             ),
             github_user_url: endpoint(
-                "REMOTE_CODEX_GITHUB_OAUTH_USER_URL",
+                "POCKYMOE_GITHUB_OAUTH_USER_URL",
                 "https://api.github.com/user",
             ),
             github_emails_url: endpoint(
-                "REMOTE_CODEX_GITHUB_OAUTH_EMAILS_URL",
+                "POCKYMOE_GITHUB_OAUTH_EMAILS_URL",
                 "https://api.github.com/user/emails",
             ),
         }
@@ -316,7 +316,7 @@ impl OAuthConfig {
             client
                 .get(url)
                 .header(header::ACCEPT, "application/vnd.github+json")
-                .header(header::USER_AGENT, "remote-codex-relay")
+                .header(header::USER_AGENT, "pockymoe-relay")
                 .bearer_auth(access_token.clone())
         };
         let (user, emails) = tokio::join!(

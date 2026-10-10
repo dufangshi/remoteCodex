@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
-import { ThreadTimeline, ThreadComposer, createWorkspacePathResolver, type ThreadComposerProps } from '@remote-codex/thread-ui';
-import { translate as t, useI18n } from '@remote-codex/thread-ui/i18n';
+import { ThreadTimeline, ThreadComposer, createWorkspacePathResolver, type ThreadComposerProps } from '@pockymoe/thread-ui';
+import { translate as t, useI18n } from '@pockymoe/thread-ui/i18n';
 import {
   buildThreadImageAssetUrl,
   fetchThreadHistoryItemDetail,

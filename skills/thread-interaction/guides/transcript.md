@@ -1,4 +1,4 @@
-# remote-codex guide transcript
+# pockymoe guide transcript
 
 Retrying sends safely and reading peer history progressively.
 
@@ -7,13 +7,13 @@ Retrying sends safely and reading peer history progressively.
 Use a stable `--request-id` for a send that might need retrying. Exact same target/sender/key/text/delivery/notification choices reuse its durable receipt and originally chosen route, even if the peer has since changed state; conflicting input is rejected. New messages need new keys. Without a key, inspect before resending after a lost connection. Deduplication applies to sends, not thread creation. Delivery defaults changed in 0.12.32: preserve explicit delivery choices in automation; inspect older receipts rather than blindly retrying a pre-upgrade request with new defaults.
 
 ```bash
-remote-codex transcript THREAD_ID
-remote-codex transcript THREAD_ID --limit 1
-remote-codex transcript THREAD_ID --before-turn TURN_ID --limit 3
-remote-codex transcript THREAD_ID --turn TURN_ID --view overview
-remote-codex transcript THREAD_ID --turn TURN_ID
-remote-codex transcript THREAD_ID --turn TURN_ID --item ITEM_ID
-remote-codex transcript THREAD_ID --turn TURN_ID --item ITEM_ID --raw
+pockymoe transcript THREAD_ID
+pockymoe transcript THREAD_ID --limit 1
+pockymoe transcript THREAD_ID --before-turn TURN_ID --limit 3
+pockymoe transcript THREAD_ID --turn TURN_ID --view overview
+pockymoe transcript THREAD_ID --turn TURN_ID
+pockymoe transcript THREAD_ID --turn TURN_ID --item ITEM_ID
+pockymoe transcript THREAD_ID --turn TURN_ID --item ITEM_ID --raw
 ```
 
 Default transcript: latest 3 turns, chronologically, with saved user input and **all** assistant progress/final text and available timestamps. `--limit` is capped at 20. `--before-turn` selects older turns and cannot be combined with `--turn`. Inbox mail appears in the inbox; merely reading it does not fabricate a user-message turn in the transcript.

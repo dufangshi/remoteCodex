@@ -1,6 +1,6 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ComposerSendShortcut } from '@remote-codex/thread-ui';
+import type { ComposerSendShortcut } from '@pockymoe/thread-ui';
 import { relayModeActive } from './api';
 import {
   fetchComposerPreferences,

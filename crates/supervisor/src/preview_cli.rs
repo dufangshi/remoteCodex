@@ -1,6 +1,6 @@
 //! Local CLI preview provisioning. Never returns account sessions or launch tickets.
 use anyhow::{bail, Context, Result};
-use remote_codex_runtime::Supervisor;
+use pockymoe_runtime::Supervisor;
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -41,7 +41,7 @@ fn describe(
     let identity = crate::peer_link::relay_identity(state)
         .context("Connect this Supervisor to a Relay first")?;
     let mut url = origin(identity.port_preview_base_url.as_deref().context(
-        "Port previews are unavailable. Enable REMOTE_CODEX_PORT_PREVIEW_BASE_URL on the Relay and reconnect this Supervisor; upgrade an older Relay if needed."
+        "Port previews are unavailable. Enable POCKYMOE_PORT_PREVIEW_BASE_URL on the Relay and reconnect this Supervisor; upgrade an older Relay if needed."
     )?)?;
     url.set_host(Some(&format!(
         "p-{}.{}",

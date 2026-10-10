@@ -91,22 +91,22 @@ async function encryptedRelayScenario(browser: Browser, context: BrowserContext,
     nextPassword = randomBytes(24).toString('hex');
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
-      ([key]) => !key.startsWith('REMOTE_CODEX_'),
+      ([key]) => !key.startsWith('POCKYMOE_'),
     ),
   );
   function start(command: string, extra: Record<string, string>) {
     const proc = spawn(
-      resolve(process.env.E2E_SECURITY_BINARY ?? 'target/debug/remote-codex'),
+      resolve(process.env.E2E_SECURITY_BINARY ?? 'target/debug/pockymoe'),
       [command],
       {
         env: {
           ...env,
           HOST: '127.0.0.1',
-          REMOTE_CODEX_ADMIN_USERNAME: 'testadmin',
-          REMOTE_CODEX_ADMIN_PASSWORD: password,
-          REMOTE_CODEX_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'),
-          REMOTE_CODEX_SESSION_SECRET: randomBytes(32).toString('hex'),
-          REMOTE_CODEX_E2E_FAKE_RUNTIME: '1',
+          POCKYMOE_ADMIN_USERNAME: 'testadmin',
+          POCKYMOE_ADMIN_PASSWORD: password,
+          POCKYMOE_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'),
+          POCKYMOE_SESSION_SECRET: randomBytes(32).toString('hex'),
+          POCKYMOE_E2E_FAKE_RUNTIME: '1',
           ...extra,
         },
         stdio: 'ignore',
@@ -178,10 +178,10 @@ async function encryptedRelayScenario(browser: Browser, context: BrowserContext,
   try {
     start('relay', {
       PORT: String(rp),
-      REMOTE_CODEX_RELAY_DATA_DIR: join(root, 'relay'),
-      REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: 'true',
-      REMOTE_CODEX_RELAY_WEB_DIST_DIR: resolve('apps/supervisor-web/dist'),
-      REMOTE_CODEX_PUBLIC_BASE_URL: base,
+      POCKYMOE_RELAY_DATA_DIR: join(root, 'relay'),
+      POCKYMOE_RELAY_REGISTRATION_ENABLED: 'true',
+      POCKYMOE_RELAY_WEB_DIST_DIR: resolve('apps/supervisor-web/dist'),
+      POCKYMOE_PUBLIC_BASE_URL: base,
     });
     await expect
       .poll(async () =>
@@ -202,11 +202,11 @@ async function encryptedRelayScenario(browser: Browser, context: BrowserContext,
     const api = `${base}/relay/devices/${device.device.id}/api`;
     const supervisorEnv = {
       PORT: String(sp),
-      REMOTE_CODEX_RELAY_SUPERVISOR_PORT: String(sp),
-      REMOTE_CODEX_RELAY_SERVER_URL: base,
-      REMOTE_CODEX_RELAY_AGENT_TOKEN: device.token,
-      REMOTE_CODEX_DATABASE_PATH: join(root, 'supervisor.sqlite'),
-      REMOTE_CODEX_WORKSPACE_ROOT: join(root, 'workspaces'),
+      POCKYMOE_RELAY_SUPERVISOR_PORT: String(sp),
+      POCKYMOE_RELAY_SERVER_URL: base,
+      POCKYMOE_RELAY_AGENT_TOKEN: device.token,
+      POCKYMOE_DATABASE_PATH: join(root, 'supervisor.sqlite'),
+      POCKYMOE_WORKSPACE_ROOT: join(root, 'workspaces'),
     };
     const supervisor = start('relay-supervisor', supervisorEnv);
     await expect

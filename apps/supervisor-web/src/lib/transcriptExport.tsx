@@ -1,13 +1,13 @@
-import { getLocale } from '@remote-codex/thread-ui/i18n';
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { getLocale } from '@pockymoe/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import {
   PublicTranscript,
   transcriptSnapshot,
   type PublicTranscriptSnapshot,
-} from '@remote-codex/thread-ui';
-import type { ExportThreadTranscriptInput, ThreadTurnDto } from '@remote-codex/shared';
+} from '@pockymoe/thread-ui';
+import type { ExportThreadTranscriptInput, ThreadTurnDto } from '@pockymoe/shared';
 import { downloadThreadImage, fetchThreadDetail, fetchThreadTurnDetail } from './api';
 import { standaloneImageViewer } from './standaloneImageViewer';
 

@@ -21,8 +21,8 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import type { ThreadDto, WorkspaceDto } from '@remote-codex/shared';
-import { translate as t, useI18n } from '@remote-codex/thread-ui/i18n';
+import type { ThreadDto, WorkspaceDto } from '@pockymoe/shared';
+import { translate as t, useI18n } from '@pockymoe/thread-ui/i18n';
 import {
   rankSplitDevices,
   rankSplitThreads,

@@ -1,4 +1,4 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { FloatingRoutePanel } from '../components/FloatingRoutePanel';

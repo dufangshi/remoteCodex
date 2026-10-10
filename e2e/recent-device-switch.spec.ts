@@ -8,12 +8,12 @@ import { createServer } from 'node:net';
 test('cross-device recent chats preserve complete agent families and navigation DOM', async ({ browser }) => {
   const root = await mkdtemp(resolve('.local/recent-switch-'));
   const processes: ChildProcess[] = [];
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('REMOTE_CODEX_')));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('POCKYMOE_')));
   const port = () => new Promise<number>(done => { const server = createServer(); server.listen(0, '127.0.0.1', () => { const value = (server.address() as { port: number }).port; server.close(() => done(value)); }); });
   const relay = `http://127.0.0.1:${await port()}`;
   const password = randomBytes(24).toString('hex');
   function start(command: string, extra: Record<string, string>) {
-    const child = spawn(resolve('target/debug/remote-codex'), [command], { env: { ...env, HOST: '127.0.0.1', REMOTE_CODEX_E2E_FAKE_RUNTIME: '1', REMOTE_CODEX_ADMIN_USERNAME: 'switchadmin', REMOTE_CODEX_ADMIN_PASSWORD: password, REMOTE_CODEX_SESSION_SECRET: randomBytes(32).toString('hex'), ...extra }, stdio: 'ignore' });
+    const child = spawn(resolve('target/debug/pockymoe'), [command], { env: { ...env, HOST: '127.0.0.1', POCKYMOE_E2E_FAKE_RUNTIME: '1', POCKYMOE_ADMIN_USERNAME: 'switchadmin', POCKYMOE_ADMIN_PASSWORD: password, POCKYMOE_SESSION_SECRET: randomBytes(32).toString('hex'), ...extra }, stdio: 'ignore' });
     processes.push(child);
   }
   async function api(base: string, path: string, method = 'GET', data?: unknown, token?: string) {
@@ -23,7 +23,7 @@ test('cross-device recent chats preserve complete agent families and navigation 
   }
   const context = await browser.newContext();
   try {
-    start('relay', { PORT: new URL(relay).port, REMOTE_CODEX_RELAY_DATA_DIR: join(root, 'relay'), REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: 'true', REMOTE_CODEX_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'), REMOTE_CODEX_RELAY_WEB_DIST_DIR: resolve('apps/supervisor-web/dist'), REMOTE_CODEX_PUBLIC_BASE_URL: relay });
+    start('relay', { PORT: new URL(relay).port, POCKYMOE_RELAY_DATA_DIR: join(root, 'relay'), POCKYMOE_RELAY_REGISTRATION_ENABLED: 'true', POCKYMOE_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'), POCKYMOE_RELAY_WEB_DIST_DIR: resolve('apps/supervisor-web/dist'), POCKYMOE_PUBLIC_BASE_URL: relay });
     await expect.poll(() => fetch(relay + '/healthz').then(r => r.status).catch(() => 0)).toBe(200);
     await api(relay, '/relay/auth/register', 'POST', { username: 'switchuser', email: 'switch@example.test', password });
     const { token } = await api(relay, '/relay/auth/login', 'POST', { username: 'switchuser', password });
@@ -35,7 +35,7 @@ test('cross-device recent chats preserve complete agent families and navigation 
       const local = `http://127.0.0.1:${number}`;
       const workspacePath = join(root, name);
       await mkdir(workspacePath);
-      start('relay-supervisor', { PORT: number, REMOTE_CODEX_RELAY_SUPERVISOR_PORT: number, REMOTE_CODEX_RELAY_SERVER_URL: relay, REMOTE_CODEX_RELAY_AGENT_TOKEN: created.token, REMOTE_CODEX_DATABASE_PATH: join(root, `${name}.sqlite`), REMOTE_CODEX_WORKSPACE_ROOT: workspacePath });
+      start('relay-supervisor', { PORT: number, POCKYMOE_RELAY_SUPERVISOR_PORT: number, POCKYMOE_RELAY_SERVER_URL: relay, POCKYMOE_RELAY_AGENT_TOKEN: created.token, POCKYMOE_DATABASE_PATH: join(root, `${name}.sqlite`), POCKYMOE_WORKSPACE_ROOT: workspacePath });
       await expect.poll(() => fetch(local + '/healthz').then(r => r.status).catch(() => 0)).toBe(200);
       const deviceApi = `${relay}/relay/devices/${created.device.id}`;
       await expect.poll(async () => (await api(relay, '/healthz')).connectedSupervisors).toBe(records.length + 1);

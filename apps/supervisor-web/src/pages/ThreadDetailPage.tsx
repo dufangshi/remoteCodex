@@ -4,11 +4,11 @@ import { WorkbenchThreadPicker } from '../components/WorkbenchThreadPicker';
 import { WorkbenchTerminal, terminalTargetKey, type TerminalOpenRequest } from '../components/WorkbenchTerminal';
 import { WorkbenchReferencePane } from '../components/WorkbenchReferencePane';
 import { WorkbenchCollaboration } from '../components/WorkbenchCollaboration';
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { DeviceMonitor } from '../components/DeviceMonitor';
 import { HarnessSettingsDialog, HarnessSettingsFields } from '../components/HarnessSettingsDialog';
 import { DshPluginPanel, type DshConsoleTarget, type DshPanelAction, type DshPanelResult } from '../components/DshHarnessPanel';
-import { DEEPSEEK_HARNESS_PANEL_KIND } from '@remote-codex/thread-ui/builtin-plugins';
+import { DEEPSEEK_HARNESS_PANEL_KIND } from '@pockymoe/thread-ui/builtin-plugins';
 import { ConversationSearch } from '../components/ConversationSearch';
 import { useSearchMessages } from '../components/searchMessages';
 import { useWorkbenchNavigation } from './useWorkbenchNavigation';
@@ -59,12 +59,12 @@ import {
   type ThreadShareSummary,
   type ThreadTimelineProps,
   type ThreadGraphWorkspaceFeatures,
-} from '@remote-codex/thread-ui';
+} from '@pockymoe/thread-ui';
 import {
   formatLongTimestamp,
   threadStatusLabel,
-} from '@remote-codex/thread-ui';
-import { usePlugins } from '@remote-codex/thread-ui';
+} from '@pockymoe/thread-ui';
+import { usePlugins } from '@pockymoe/thread-ui';
 import {
   ApiError,
   compactThread,
@@ -3318,7 +3318,7 @@ export function ThreadDetailPage() {
   const metaContent = detail ? (
     <dl className="space-y-4 text-sm">
       <div>
-        <dt className="text-[var(--theme-fg-muted)]">{translate("workbench.remoteCodexSessionID")}</dt>
+        <dt className="text-[var(--theme-fg-muted)]">{translate("workbench.pockymoeSessionID")}</dt>
         <dd className="mt-1 break-all text-[var(--theme-fg)]">{detail.thread.id}</dd>
       </div>
       <div className="relative pr-9">

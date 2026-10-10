@@ -1,1 +1,1 @@
-export { hasLikelyMarkdownSyntax } from '@remote-codex/thread-ui';
+export { hasLikelyMarkdownSyntax } from '@pockymoe/thread-ui';

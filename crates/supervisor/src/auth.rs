@@ -8,8 +8,8 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use chrono::{SecondsFormat, TimeZone, Utc};
 use hmac::{Hmac, Mac};
-use remote_codex_protocol::{ApiError, AuthSessionDto, Mode};
-use remote_codex_runtime::{RuntimeConfig, Supervisor};
+use pockymoe_protocol::{ApiError, AuthSessionDto, Mode};
+use pockymoe_runtime::{RuntimeConfig, Supervisor};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::sync::Arc;
@@ -51,7 +51,7 @@ pub fn validate_config(config: &RuntimeConfig) -> Result<()> {
         .is_none_or(|value| value.trim().is_empty())
     {
         bail!(
-            "{} mode requires REMOTE_CODEX_ADMIN_USERNAME",
+            "{} mode requires POCKYMOE_ADMIN_USERNAME",
             mode_name(config.mode)
         );
     }
@@ -61,7 +61,7 @@ pub fn validate_config(config: &RuntimeConfig) -> Result<()> {
         .is_none_or(|value| value.is_empty())
     {
         bail!(
-            "{} mode requires REMOTE_CODEX_ADMIN_PASSWORD",
+            "{} mode requires POCKYMOE_ADMIN_PASSWORD",
             mode_name(config.mode)
         );
     }
@@ -71,7 +71,7 @@ pub fn validate_config(config: &RuntimeConfig) -> Result<()> {
         .is_none_or(|value| value.len() < 16)
     {
         bail!(
-            "{} mode requires REMOTE_CODEX_SESSION_SECRET with at least 16 characters",
+            "{} mode requires POCKYMOE_SESSION_SECRET with at least 16 characters",
             mode_name(config.mode)
         );
     }
@@ -277,12 +277,12 @@ fn sign(secret: &str, payload_text: &str) -> Option<String> {
 }
 
 fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
-    let Ok(mut mac) = HmacSha256::new_from_slice(b"remote-codex-constant-time-compare") else {
+    let Ok(mut mac) = HmacSha256::new_from_slice(b"pockymoe-constant-time-compare") else {
         return false;
     };
     mac.update(left);
     let expected = mac.finalize().into_bytes();
-    let Ok(mut verifier) = HmacSha256::new_from_slice(b"remote-codex-constant-time-compare") else {
+    let Ok(mut verifier) = HmacSha256::new_from_slice(b"pockymoe-constant-time-compare") else {
         return false;
     };
     verifier.update(right);
@@ -315,7 +315,7 @@ fn cookie_token(headers: &HeaderMap) -> Option<String> {
 }
 
 fn session_ttl_seconds() -> i64 {
-    std::env::var("REMOTE_CODEX_SESSION_TTL_SECONDS")
+    std::env::var("POCKYMOE_SESSION_TTL_SECONDS")
         .ok()
         .and_then(|value| value.parse::<i64>().ok())
         .filter(|value| *value > 0)
@@ -354,8 +354,8 @@ mod tests {
                     .method("POST")
                     .uri("/api/peer/cli")
                     .header("content-type", "application/json")
-                    .header("x-remote-codex-relay-forwarded", "1")
-                    .header("x-remote-codex-peer-device", "remote-device");
+                    .header("x-pockymoe-relay-forwarded", "1")
+                    .header("x-pockymoe-peer-device", "remote-device");
                 if trusted {
                     request = request.extension(TrustedRelayForward);
                 }

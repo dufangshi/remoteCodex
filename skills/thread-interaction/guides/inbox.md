@@ -1,4 +1,4 @@
-# remote-codex guide inbox
+# pockymoe guide inbox
 
 When and how to read, wait for and acknowledge mail.
 
@@ -15,14 +15,14 @@ an already running turn. Batch reads at natural boundaries:
 - **After a meaningful build/test/batch finishes.** Mail may have arrived meanwhile;
   do not reread the entire inbox after every small tool call.
 - **When you have nothing else to do but expect mail:** block on it with
-  `remote-codex inbox wait` rather than ending your turn or looping.
+  `pockymoe inbox wait` rather than ending your turn or looping.
 
 ```bash
-remote-codex inbox list --kind question --kind task
-remote-codex inbox list --from-thread producer --kind result
-remote-codex inbox wait --kind result --kind question   # result or an upstream blocker
-remote-codex inbox wait --from-thread reviewer --kind result --kind question
-remote-codex inbox wait --new                           # deliberately defer old mail
+pockymoe inbox list --kind question --kind task
+pockymoe inbox list --from-thread producer --kind result
+pockymoe inbox wait --kind result --kind question   # result or an upstream blocker
+pockymoe inbox wait --from-thread reviewer --kind result --kind question
+pockymoe inbox wait --new                           # deliberately defer old mail
 ```
 
 `inbox wait` returns the matching messages with text inline. Unacknowledged mail
@@ -62,12 +62,12 @@ yourself direct messages; `wait` is cheaper than all of them.
 ## Read and acknowledge your inbox
 
 ```bash
-remote-codex inbox
-remote-codex inbox list --limit 10
-remote-codex inbox list --kind result --kind question --from-thread producer
-remote-codex inbox read MESSAGE_ID
-remote-codex inbox ack MESSAGE_ID
-remote-codex inbox list --all --limit 10
+pockymoe inbox
+pockymoe inbox list --limit 10
+pockymoe inbox list --kind result --kind question --from-thread producer
+pockymoe inbox read MESSAGE_ID
+pockymoe inbox ack MESSAGE_ID
+pockymoe inbox list --all --limit 10
 ```
 
 The caller's identity selects the mailbox. `--thread THREAD_ID` explicitly selects another mailbox, including from a shell without managed thread identity. IDs/URLs address the same local Supervisor; attribution is not a per-agent security boundary.
@@ -79,9 +79,9 @@ Read returns at most 8192 Unicode characters. Follow `nextTextOffset` with `inbo
 A reply uses the sender's `fromThreadId`:
 
 ```bash
-remote-codex thread send SENDER_ID --kind result --subject 'Requested build result' \
+pockymoe thread send SENDER_ID --kind result --subject 'Requested build result' \
   --in-reply-to MESSAGE_ID --text-file /tmp/result.txt
-remote-codex inbox ack MESSAGE_ID
+pockymoe inbox ack MESSAGE_ID
 ```
 
 An idle sender will not wake for a passive reply. The sender must collect or register

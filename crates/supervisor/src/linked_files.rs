@@ -56,7 +56,7 @@ pub(crate) async fn read(
             let mut bytes = Vec::new();
             file.take(limit as u64).read_to_end(&mut bytes).await?;
             let next = offset + bytes.len() as u64;
-            return Ok(Json(json!({"path":query.path,"name":name,"content":String::from_utf8_lossy(&bytes),"language":remote_codex_runtime::files::language_for(&name),"size":metadata.len(),"truncated":next<metadata.len(),"nextOffset":next})).into_response());
+            return Ok(Json(json!({"path":query.path,"name":name,"content":String::from_utf8_lossy(&bytes),"language":pockymoe_runtime::files::language_for(&name),"size":metadata.len(),"truncated":next<metadata.len(),"nextOffset":next})).into_response());
         }
         Ok(Response::builder()
             .status(StatusCode::OK)

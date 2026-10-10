@@ -1,5 +1,5 @@
 use super::*;
-use remote_codex_protocol::{ModelOptionDto, ReasoningEffortOptionDto};
+use pockymoe_protocol::{ModelOptionDto, ReasoningEffortOptionDto};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

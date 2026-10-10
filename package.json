@@ -1,5 +1,5 @@
 {
-  "name": "remote-codex",
+  "name": "pockymoe",
   "version": "0.12.76",
   "description": "Self-hosted control plane for coding agents. Rust supervisor, ACP runtimes, React thread UI.",
   "license": "MIT",
@@ -9,14 +9,14 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "cargo build --release && pnpm --filter @remote-codex/supervisor-web build",
-    "dev": "concurrently -k -n api,web -c blue,green \"REMOTE_CODEX_E2E_FAKE_RUNTIME=${REMOTE_CODEX_E2E_FAKE_RUNTIME:-} cargo run -p remote-codex -- supervisor\" \"pnpm --filter @remote-codex/supervisor-web exec vite --host localhost --port 5173\"",
+    "build": "cargo build --release && pnpm --filter @pockymoe/supervisor-web build",
+    "dev": "concurrently -k -n api,web -c blue,green \"POCKYMOE_E2E_FAKE_RUNTIME=${POCKYMOE_E2E_FAKE_RUNTIME:-} cargo run -p pockymoe -- supervisor\" \"pnpm --filter @pockymoe/supervisor-web exec vite --host localhost --port 5173\"",
     "test": "cargo test --workspace",
     "test:e2e": "playwright test --project=desktop-chromium",
     "test:e2e:relay": "playwright test e2e/relay-security.spec.ts e2e/relay-encryption.spec.ts --project=desktop-chromium",
     "npm:publish:test": "node --test scripts/publish-npm-release.test.mjs scripts/npm-launcher-download.test.mjs scripts/npm-launcher-relay.test.mjs scripts/supervisor-update.test.mjs scripts/installation.test.mjs",
     "version:set": "node scripts/set-version.mjs",
-    "typecheck": "pnpm --filter @remote-codex/supervisor-web typecheck",
+    "typecheck": "pnpm --filter @pockymoe/supervisor-web typecheck",
     "runtime:bootstrap:test": "node --test scripts/native-setup.test.mjs scripts/setup.test.mjs",
     "runtime:prepare": "python3 scripts/prepare-runtime-release.py"
   },

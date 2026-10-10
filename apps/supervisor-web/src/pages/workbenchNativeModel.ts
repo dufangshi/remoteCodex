@@ -2,7 +2,7 @@ import type {
   ThreadDetailDto,
   ThreadSubagentDto,
   ThreadTurnDto,
-} from '@remote-codex/shared';
+} from '@pockymoe/shared';
 export interface NativeSummary extends ThreadSubagentDto {
   target?: { turnId: string; itemId: string };
 }

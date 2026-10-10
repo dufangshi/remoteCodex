@@ -1,6 +1,6 @@
 # Device hooks / automations
 
-`remote-codex automation` (aliases `hooks`, `hook`), REST and the thread's
+`pockymoe automation` (aliases `hooks`, `hook`), REST and the thread's
 **Automations** button use one Rust Supervisor registry and SQLite execution
 ledger. This works with Codex and ACP harnesses as well as Claude. Native Claude
 watches stay a separate read-only projection: they are never imported or duplicated.
@@ -16,29 +16,29 @@ never starts execution. Existing queue/inbox/task/wake rules remain in force.
 
 ## CLI examples
 
-Read `remote-codex skill` and use `thread self` / `REMOTE_CODEX_THREAD_ID` for the
-Remote Codex thread ID. The following create schedules only when explicitly run.
+Read `pockymoe skill` and use `thread self` / `POCKYMOE_THREAD_ID` for the
+Pockymoe thread ID. The following create schedules only when explicitly run.
 They require an existing local device connection and an open target thread.
 Use disposable threads/workspaces when experimenting.
 
 ```sh
 # Every hour, starting an hour after registration. Busy ticks merge into one pending.
-remote-codex automation create --thread self --request-id hourly-check --json '{
+pockymoe automation create --thread self --request-id hourly-check --json '{
   "name":"Hourly check",
   "trigger":{"kind":"interval","everySeconds":3600},
   "action":{"kind":"prompt","text":"Check the authorized project and report findings."}
 }'
 
 # One UTC/offset date. Choose a future date explicitly.
-remote-codex hooks create --thread self --json '{
+pockymoe hooks create --thread self --json '{
   "name":"One reminder",
   "trigger":{"kind":"at","at":"2030-01-01T12:00:00Z"},
   "action":{"kind":"notifyInbox","subject":"Reminder","text":"Review the report.","messageKind":"status"}
 }'
 
 # Listen to another local thread, without knowing its current or future turn IDs.
-# Set SOURCE_THREAD_ID to its Remote Codex thread UUID first.
-remote-codex hooks create --thread self --request-id source-thread-results --json "{
+# Set SOURCE_THREAD_ID to its Pockymoe thread UUID first.
+pockymoe hooks create --thread self --request-id source-thread-results --json "{
   \"name\":\"Other thread results\",
   \"trigger\":{\"kind\":\"threadEnded\",\"sourceThreadId\":\"$SOURCE_THREAD_ID\"},
   \"condition\":{\"kind\":\"statusIn\",\"values\":[\"completed\",\"failed\",\"interrupted\"]},
@@ -58,11 +58,11 @@ cat > turn-hook.json <<EOF_JSON
   "action":{"kind":"notifyInbox","subject":"Build result","text":"The selected turn finished.","includeClosingMessage":true}
 }
 EOF_JSON
-remote-codex automation preview --thread self --file turn-hook.json
-remote-codex automation create --thread self --file turn-hook.json --request-id build-reminder
+pockymoe automation preview --thread self --file turn-hook.json
+pockymoe automation create --thread self --file turn-hook.json --request-id build-reminder
 
-# Successful lineage task #4: replace ROOT_ID with its root Remote Codex thread ID.
-remote-codex automation create --thread self --json "{
+# Successful lineage task #4: replace ROOT_ID with its root Pockymoe thread ID.
+pockymoe automation create --thread self --json "{
   \"name\":\"Task result\",
   \"trigger\":{\"kind\":\"taskEnded\",\"rootThreadId\":\"$ROOT_ID\",\"taskNumber\":4},
   \"condition\":{\"kind\":\"statusIn\",\"values\":[\"completed\"]},
@@ -92,31 +92,31 @@ resumes the subscription.
 cat > command-hook.json <<EOF_JSON
 {
   "name":"After build",
-  "trigger":{"kind":"commandEnded","sourceThreadId":"$REMOTE_CODEX_THREAD_ID","commandKey":"focused-build"},
+  "trigger":{"kind":"commandEnded","sourceThreadId":"$POCKYMOE_THREAD_ID","commandKey":"focused-build"},
   "condition":{"kind":"exitCodeEquals","value":0},
   "action":{"kind":"runScript","argv":["/bin/sh","scripts/report-build.sh"],"cwd":".","timeoutSeconds":60}
 }
 EOF_JSON
-remote-codex hooks create --file command-hook.json --request-id after-focused-build
-remote-codex command run --thread self --command-key focused-build --request-id build-1 \
-  --cwd . --timeout-seconds 120 -- cargo check -p remote-codex-runtime
+pockymoe hooks create --file command-hook.json --request-id after-focused-build
+pockymoe command run --thread self --command-key focused-build --request-id build-1 \
+  --cwd . --timeout-seconds 120 -- cargo check -p pockymoe-runtime
 # Inspect the commandId returned above; output and exit status persist.
-remote-codex command show --thread self COMMAND_ID
+pockymoe command show --thread self COMMAND_ID
 
 # Time and precise completion events can execute scripts too; explicit shell is supported.
-remote-codex automation create --json '{
+pockymoe automation create --json '{
   "name":"Hourly script",
   "trigger":{"kind":"interval","everySeconds":3600},
   "action":{"kind":"runScript","shell":"./scripts/check.sh > check-result.txt","cwd":".","timeoutSeconds":60}
 }'
 
-remote-codex automation list --thread self
-remote-codex automation show --thread self AUTOMATION_ID
-remote-codex automation runs --thread self AUTOMATION_ID --limit 20
-remote-codex automation pause --thread self AUTOMATION_ID
-remote-codex automation resume --thread self AUTOMATION_ID
-remote-codex automation cancel --thread self AUTOMATION_ID
-remote-codex inbox list --kind result --kind status
+pockymoe automation list --thread self
+pockymoe automation show --thread self AUTOMATION_ID
+pockymoe automation runs --thread self AUTOMATION_ID --limit 20
+pockymoe automation pause --thread self AUTOMATION_ID
+pockymoe automation resume --thread self AUTOMATION_ID
+pockymoe automation cancel --thread self AUTOMATION_ID
+pockymoe inbox list --kind result --kind status
 ```
 
 `argv` and `shell` are mutually exclusive. On Unix shell uses `/bin/sh -c`; on
@@ -231,7 +231,7 @@ For example, POST to `/api/threads/TARGET_A/automations` to monitor source B:
 }
 ```
 
-Replace TARGET_A/SOURCE_B with actual local Remote Codex thread IDs. The target
+Replace TARGET_A/SOURCE_B with actual local Pockymoe thread IDs. The target
 is selected by the URL; no turnId is required. The same trigger supports explicit
 prompt or runScript actions through the existing action and busy-turn rules.
 

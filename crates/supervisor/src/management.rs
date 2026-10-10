@@ -4,7 +4,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use remote_codex_runtime::{management, Supervisor};
+use pockymoe_runtime::{management, Supervisor};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -33,7 +33,7 @@ pub async fn harness_action(
 ) -> Response {
     if !matches!(body.action.as_str(), "restart" | "update" | "install")
         || !matches!(body.component.as_str(), "base" | "adapter")
-        || !remote_codex_runtime::acp::builtin_agents(state.config.acp_command.as_deref())
+        || !pockymoe_runtime::acp::builtin_agents(state.config.acp_command.as_deref())
             .iter()
             .any(|d| d.id == id)
     {

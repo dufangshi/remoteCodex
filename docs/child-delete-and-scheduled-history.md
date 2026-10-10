@@ -1,6 +1,6 @@
 # Parent cleanup and Claude timer verification
 
-`remote-codex thread delete CHILD_ID` deletes one finished or unused direct child.
+`pockymoe thread delete CHILD_ID` deletes one finished or unused direct child.
 The managed bearer token identifies its caller; a different `--from`, machine
 credential, sibling, ancestor, unrelated root or indirect descendant is refused.
 Active/recovering/queued work and descendants prevent deletion. No force or
@@ -32,13 +32,13 @@ stores passive inbox mail and does not wake a parent.
 Targeted checks:
 
 ```sh
-cargo test -p remote-codex-runtime --test thread_lineage --locked
-cargo test -p remote-codex-runtime --test thread_interaction --locked
-cargo test -p remote-codex-runtime claude_history --lib --locked
-cargo test -p remote-codex-runtime codex_fork_releases_writer_before_independent_load --lib --locked
-cargo test -p remote-codex-supervisor --test http_e2e cli_ --locked
-cargo test -p remote-codex child_delete_is --locked
-cargo check -p remote-codex-supervisor -p remote-codex --locked
+cargo test -p pockymoe-runtime --test thread_lineage --locked
+cargo test -p pockymoe-runtime --test thread_interaction --locked
+cargo test -p pockymoe-runtime claude_history --lib --locked
+cargo test -p pockymoe-runtime codex_fork_releases_writer_before_independent_load --lib --locked
+cargo test -p pockymoe-supervisor --test http_e2e cli_ --locked
+cargo test -p pockymoe child_delete_is --locked
+cargo check -p pockymoe-supervisor -p pockymoe --locked
 cargo fmt --all -- --check
 ```
 

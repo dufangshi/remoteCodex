@@ -3,7 +3,7 @@
 Exercises the actual native/launcher CLI and HTTP/KV boundaries, without models.
 """
 import json, os, pathlib, subprocess, time, urllib.request
-binary = os.environ.get('E2E_BINARY', '/build/debug/remote-codex')
+binary = os.environ.get('E2E_BINARY', '/build/debug/pockymoe')
 base = 'http://127.0.0.1:' + os.environ.get('PORT', '8787')
 state_dir = pathlib.Path(os.environ.get('E2E_STATE_DIR', '/test-state'))
 source_dir = pathlib.Path(os.environ.get('E2E_SOURCE_DIR', '/src'))
@@ -13,15 +13,15 @@ def api(path, body=None):
     return json.load(urllib.request.urlopen(req, timeout=10))
 def cli(*args, caller=None):
     env = dict(os.environ)
-    env.pop('REMOTE_CODEX_THREAD_ID', None)
-    if caller: env['REMOTE_CODEX_THREAD_ID'] = caller
+    env.pop('POCKYMOE_THREAD_ID', None)
+    if caller: env['POCKYMOE_THREAD_ID'] = caller
     result = subprocess.run([binary, *args], env=env, capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
 def rejected(*args, caller=None):
     env = dict(os.environ)
-    env.pop('REMOTE_CODEX_THREAD_ID', None)
-    if caller: env['REMOTE_CODEX_THREAD_ID'] = caller
+    env.pop('POCKYMOE_THREAD_ID', None)
+    if caller: env['POCKYMOE_THREAD_ID'] = caller
     result = subprocess.run([binary, *args], env=env, capture_output=True, text=True, timeout=20)
     assert result.returncode != 0, result.stdout
 def until(check):
@@ -80,7 +80,7 @@ assert cli(*steer_args,caller=b)['delivery']=='steered'
 assert len(cli('transcript',a)['turns'])==1
 assert 'Immediate correction' in json.dumps(cli('transcript',a,'--turn',turn,'--view','overview'))
 # Real npm launcher must expose native subcommand flags, not top-level help.
-env=dict(os.environ,REMOTE_CODEX_NATIVE_BINARY=binary)
+env=dict(os.environ,POCKYMOE_NATIVE_BINARY=binary)
 for args,expected in [(['thread','send','--help'],'--interrupt-reason'),(['inbox','list','--help'],'--from-thread'),(['inbox','read','--help'],'--text-offset'),(['transcript','--help'],'--before-turn')]:
     help_text=subprocess.check_output(['node',str(source_dir / 'npm/remote-codex/bin/remote-codex.mjs'),*args],env=env,text=True)
     assert expected in help_text

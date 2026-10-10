@@ -3,7 +3,7 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { deflateRawSync } from 'node:zlib';
 import path from 'node:path';
-import { drawioPreviewDocument } from '../remote-codex-thread-ui/packages/thread-ui/src/components/graph-workspace/GraphDrawioPreview';
+import { drawioPreviewDocument } from '../pockymoe-thread-ui/packages/thread-ui/src/components/graph-workspace/GraphDrawioPreview';
 
 const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
 test.use({ actionTimeout: 15_000 });

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
-use remote_codex_protocol::{AgentProviderCapabilitiesDto, ModelOptionDto};
+use pockymoe_protocol::{AgentProviderCapabilitiesDto, ModelOptionDto};
 use serde_json::{json, Value};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
@@ -46,7 +46,7 @@ pub(super) struct Composition {
 /// Find the Web bundle that ships with the `dsh` executable. Any doubt
 /// (unknown layout, version skew) keeps the plain ACP composition.
 pub(super) fn native_composition(executable: &Path) -> Option<Composition> {
-    let web_app = std::env::var_os("REMOTE_CODEX_DSH_WEB_APP")
+    let web_app = std::env::var_os("POCKYMOE_DSH_WEB_APP")
         .map(PathBuf::from)
         .or_else(|| {
             let package = dsh_package(executable)?;
@@ -584,7 +584,7 @@ impl PanelAction {
                 if !name.starts_with('/') {
                     bail!("A DSH command starts with /");
                 }
-                // Remote Codex owns these session controls; the panel must not desync them.
+                // Pockymoe owns these session controls; the panel must not desync them.
                 if PRODUCT_COMMANDS.contains(&&name[1..]) {
                     bail!("Use the thread's own control for {name}");
                 }
@@ -1084,7 +1084,7 @@ mod tests {
                 line: "/export now".into()
             }
         );
-        // Product-owned controls stay with Remote Codex.
+        // Product-owned controls stay with Pockymoe.
         assert!(PanelAction::parse(
             &json!({"kind":"command","line":"/permission danger-full-access"})
         )

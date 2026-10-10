@@ -1,4 +1,4 @@
-use remote_codex_protocol::{
+use pockymoe_protocol::{
     toolbox_from_capabilities, AgentProviderCapabilitiesDto, ModelOptionDto, ToolboxItemDto,
 };
 use serde_json::{json, Value};
@@ -428,7 +428,7 @@ fn cursor_model(model: &Value, index: usize) -> Option<ModelOptionDto> {
         .flat_map(select_options)
         .filter_map(|entry| {
             let raw = entry.get("value").and_then(Value::as_str)?;
-            Some(remote_codex_protocol::ReasoningEffortOptionDto {
+            Some(pockymoe_protocol::ReasoningEffortOptionDto {
                 reasoning_effort: grok::normalize_acp_effort(Some(raw))?,
                 description: entry
                     .get("description")

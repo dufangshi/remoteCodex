@@ -1,25 +1,25 @@
-# remote-codex guide automation
+# pockymoe guide automation
 
 Durable hooks: schedules, completion triggers and scripts.
 
 ## Durable device hooks (explicitly registered automations)
 
-Use `remote-codex automation` (aliases `hooks` / `hook`) for an authorized
+Use `pockymoe automation` (aliases `hooks` / `hook`) for an authorized
 interval/at prompt, other-thread completion, precise turn/task reminder, or script action.
 Definitions use typed JSON; use `automation create --file hook.json` or `--json`.
 Run `automation --help`, `automation create --help` and `command run --help` for
 current flags. The registry is shared with the Web Automations panel and REST.
 
 ```bash
-remote-codex automation create --thread self --request-id hourly-check --json '{"name":"Hourly check","trigger":{"kind":"interval","everySeconds":3600},"action":{"kind":"prompt","text":"Check the authorized project."}}'
-# Set SOURCE_THREAD_ID to the other local Remote Codex thread UUID; no turn ID needed.
-remote-codex automation create --thread self --request-id source-results --json "{\"name\":\"Other thread results\",\"trigger\":{\"kind\":\"threadEnded\",\"sourceThreadId\":\"$SOURCE_THREAD_ID\"},\"action\":{\"kind\":\"notifyInbox\",\"subject\":\"Source finished\",\"text\":\"Source turn ended.\",\"includeClosingMessage\":true}}"
-remote-codex automation list --thread self
-remote-codex automation runs --thread self AUTOMATION_ID
-remote-codex automation pause --thread self AUTOMATION_ID
-remote-codex automation resume --thread self AUTOMATION_ID
-remote-codex automation cancel --thread self AUTOMATION_ID
-remote-codex command run --thread self --command-key build --cwd . --timeout-seconds 120 -- cargo check -p remote-codex-runtime
+pockymoe automation create --thread self --request-id hourly-check --json '{"name":"Hourly check","trigger":{"kind":"interval","everySeconds":3600},"action":{"kind":"prompt","text":"Check the authorized project."}}'
+# Set SOURCE_THREAD_ID to the other local Pockymoe thread UUID; no turn ID needed.
+pockymoe automation create --thread self --request-id source-results --json "{\"name\":\"Other thread results\",\"trigger\":{\"kind\":\"threadEnded\",\"sourceThreadId\":\"$SOURCE_THREAD_ID\"},\"action\":{\"kind\":\"notifyInbox\",\"subject\":\"Source finished\",\"text\":\"Source turn ended.\",\"includeClosingMessage\":true}}"
+pockymoe automation list --thread self
+pockymoe automation runs --thread self AUTOMATION_ID
+pockymoe automation pause --thread self AUTOMATION_ID
+pockymoe automation resume --thread self AUTOMATION_ID
+pockymoe automation cancel --thread self AUTOMATION_ID
+pockymoe command run --thread self --command-key build --cwd . --timeout-seconds 120 -- cargo check -p pockymoe-runtime
 ```
 
 `threadEnded {sourceThreadId}` listens to each source turn ending after registration,
@@ -35,7 +35,7 @@ inbox. Busy schedules wait for the entire turn, coalesce extra ticks and survive
 Supervisor restarts. Pause/cancel removes only that hook's unexecuted entries;
 resume starts from future ticks. User Stop pauses prompt automations.
 
-Command events observe only real `remote-codex command run` wrapper executions,
+Command events observe only real `pockymoe command run` wrapper executions,
 never arbitrary PTY or transcript text. Scripts can be actions of time or completion
 triggers, with fixed argv or an explicit shell, cwd and timeout. Commands receive no
 automatic connection credentials. Inspect `uncertain` executions before retrying;

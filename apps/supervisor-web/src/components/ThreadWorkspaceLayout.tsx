@@ -1,7 +1,7 @@
 import {
   ThreadCards,
   ThreadWorkspaceLayout as SharedThreadWorkspaceLayout,
-} from '@remote-codex/thread-ui';
+} from '@pockymoe/thread-ui';
 import type { ComponentProps } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { DeviceMonitor } from './DeviceMonitor';

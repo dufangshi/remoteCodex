@@ -21,10 +21,10 @@ test('device locks are verified independently of browser visit history', async (
   const external = process.env.E2E_DEVICE_LOCK_RELAY;
   const base = external ?? `http://127.0.0.1:${await freePort()}`;
   const password = process.env.E2E_DEVICE_LOCK_PASSWORD ?? randomBytes(24).toString('hex');
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('REMOTE_CODEX_')));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('POCKYMOE_')));
   function start(command: string, extra: Record<string, string>) {
-    const proc = spawn(resolve('target/debug/remote-codex'), [command], {
-      env: { ...env, HOST: '127.0.0.1', REMOTE_CODEX_E2E_FAKE_RUNTIME: '1', REMOTE_CODEX_ADMIN_USERNAME: 'lockadmin', REMOTE_CODEX_ADMIN_PASSWORD: password, REMOTE_CODEX_SESSION_SECRET: randomBytes(32).toString('hex'), ...extra },
+    const proc = spawn(resolve('target/debug/pockymoe'), [command], {
+      env: { ...env, HOST: '127.0.0.1', POCKYMOE_E2E_FAKE_RUNTIME: '1', POCKYMOE_ADMIN_USERNAME: 'lockadmin', POCKYMOE_ADMIN_PASSWORD: password, POCKYMOE_SESSION_SECRET: randomBytes(32).toString('hex'), ...extra },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     proc.stdout?.on('data', chunk => processLogs.push(String(chunk)));
@@ -43,10 +43,10 @@ test('device locks are verified independently of browser visit history', async (
   try {
     if (!external) {
       start('relay', {
-        PORT: new URL(base).port, REMOTE_CODEX_RELAY_DATA_DIR: join(root, 'relay'),
-        REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: 'true', REMOTE_CODEX_ADMIN_USERNAME: 'lockadmin', REMOTE_CODEX_ADMIN_PASSWORD: password,
-        REMOTE_CODEX_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'),
-        REMOTE_CODEX_RELAY_WEB_DIST_DIR: resolve('apps/supervisor-web/dist'), REMOTE_CODEX_PUBLIC_BASE_URL: base,
+        PORT: new URL(base).port, POCKYMOE_RELAY_DATA_DIR: join(root, 'relay'),
+        POCKYMOE_RELAY_REGISTRATION_ENABLED: 'true', POCKYMOE_ADMIN_USERNAME: 'lockadmin', POCKYMOE_ADMIN_PASSWORD: password,
+        POCKYMOE_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'),
+        POCKYMOE_RELAY_WEB_DIST_DIR: resolve('apps/supervisor-web/dist'), POCKYMOE_PUBLIC_BASE_URL: base,
       });
     }
     await expect.poll(() => fetch(`${base}/healthz`).then(r => r.status).catch(() => 0)).toBe(200);
@@ -62,10 +62,10 @@ test('device locks are verified independently of browser visit history', async (
         devices.push(created.device);
         const port = String(await freePort());
         start('relay-supervisor', {
-          PORT: port, REMOTE_CODEX_RELAY_SUPERVISOR_PORT: port,
-          REMOTE_CODEX_RELAY_SERVER_URL: base, REMOTE_CODEX_RELAY_AGENT_TOKEN: created.token,
-          REMOTE_CODEX_DATABASE_PATH: join(root, `${created.device.id}.sqlite`),
-          REMOTE_CODEX_WORKSPACE_ROOT: join(root, 'workspaces'),
+          PORT: port, POCKYMOE_RELAY_SUPERVISOR_PORT: port,
+          POCKYMOE_RELAY_SERVER_URL: base, POCKYMOE_RELAY_AGENT_TOKEN: created.token,
+          POCKYMOE_DATABASE_PATH: join(root, `${created.device.id}.sqlite`),
+          POCKYMOE_WORKSPACE_ROOT: join(root, 'workspaces'),
         });
       }
     }

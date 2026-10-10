@@ -1,6 +1,6 @@
 @import "tailwindcss";
 @import "./matter-theme.css";
-@import "@remote-codex/thread-ui/settings.css";
+@import "@pockymoe/thread-ui/settings.css";
 .device-presence-dot { display: inline-block; width: 10px; height: 10px; flex-shrink: 0; border-radius: 50%; }
 .device-presence-dot.is-online { background: oklch(0.48 0.13 155); box-shadow: 0 0 0 3px oklch(0.48 0.13 155 / 14%); }
 .device-presence-dot.is-offline { border: 2px solid var(--theme-fg-muted); background: transparent; }
@@ -32,8 +32,8 @@
   .matter-topbar.is-search-open .matter-topbar-search { max-width: none; }
   .workbench-search-field input { font-size: 16px; }
 }
-@source "../../../remote-codex-thread-ui/packages/thread-ui/src/**/*.{ts,tsx}";
-@source "../../../../remote-codex-thread-ui/packages/thread-ui/src/**/*.{ts,tsx}";
+@source "../../../pockymoe-thread-ui/packages/thread-ui/src/**/*.{ts,tsx}";
+@source "../../../../pockymoe-thread-ui/packages/thread-ui/src/**/*.{ts,tsx}";
 @source "../../../node_modules/streamdown/dist/*.js";
 @source "../../../node_modules/@streamdown/code/dist/*.js";
 

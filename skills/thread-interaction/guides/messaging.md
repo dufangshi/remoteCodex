@@ -1,4 +1,4 @@
-# remote-codex guide messaging
+# pockymoe guide messaging
 
 Labels, delivery choice, batches, receipts and retries for thread send.
 
@@ -24,9 +24,9 @@ Do not hand-write `Subject:` or `Kind:` into the message text. The flags populat
 real envelope; prose in the body does not.
 
 ```bash
-remote-codex thread send PEER_ID --delivery queue --kind task --subject 'Port the auth tests' \
+pockymoe thread send PEER_ID --delivery queue --kind task --subject 'Port the auth tests' \
   --text-file /tmp/task.txt
-remote-codex thread send PEER_ID --kind question --subject 'Which staging key?' \
+pockymoe thread send PEER_ID --kind question --subject 'Which staging key?' \
   --in-reply-to MESSAGE_ID --text 'The task did not say which credential to use.'
 ```
 
@@ -90,7 +90,7 @@ work. Distinct financial, safety and independent verification results remain dis
 For a full replaceable progress snapshot, opt into status coalescing:
 
 ```bash
-remote-codex thread send PEER_ID --kind status --subject 'Simulation batch progress' \
+pockymoe thread send PEER_ID --kind status --subject 'Simulation batch progress' \
   --topic-key simulation-progress --request-id progress-r3 --text-file /tmp/progress.txt
 ```
 
@@ -112,11 +112,11 @@ each other's completion just to keep them active.
 ## Execution receipts and steering failures
 
 ```bash
-remote-codex thread send PEER_ID --kind result --subject 'Build artifact ready' \
+pockymoe thread send PEER_ID --kind result --subject 'Build artifact ready' \
   --text 'Artifact at /path/to/artifact.'
-remote-codex thread send PEER_ID --delivery queue --kind task --subject 'Port auth tests' \
+pockymoe thread send PEER_ID --delivery queue --kind task --subject 'Port auth tests' \
   --text-file /tmp/task.txt
-remote-codex thread send PEER_ID --delivery direct --kind task --subject 'Stop: wrong version' \
+pockymoe thread send PEER_ID --delivery direct --kind task --subject 'Stop: wrong version' \
   --interrupt-reason 'Publication is about to use an invalid version; waiting risks publishing it' \
   --text 'Pause publication: use the corrected version number.'
 ```

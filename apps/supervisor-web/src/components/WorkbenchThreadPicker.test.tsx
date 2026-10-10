@@ -6,8 +6,8 @@ import {
   within,
 } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ThreadDto, WorkspaceDto } from '@remote-codex/shared';
-import { setLocale } from '@remote-codex/thread-ui/i18n';
+import type { ThreadDto, WorkspaceDto } from '@pockymoe/shared';
+import { setLocale } from '@pockymoe/thread-ui/i18n';
 import { request } from '../lib/api';
 import { WorkbenchThreadPicker } from './WorkbenchThreadPicker';
 vi.mock('../lib/api', () => ({ request: vi.fn() }));

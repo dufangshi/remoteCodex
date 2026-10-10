@@ -1,7 +1,7 @@
 // Form sections / preset application adapted from CC Switch providers/forms.
 // Copyright (c) 2025 Jason Young. MIT; see THIRD_PARTY_NOTICES.md.
 import { useState } from 'react';
-import { translate } from '@remote-codex/thread-ui/i18n';
+import { translate } from '@pockymoe/thread-ui/i18n';
 import { upstreamPresets } from './upstreamPresets';
 import { UpstreamModelPicker } from './UpstreamModelPicker';
 import type { Profile } from './UpstreamManagement';

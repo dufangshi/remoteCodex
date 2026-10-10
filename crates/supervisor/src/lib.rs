@@ -25,7 +25,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Result;
-use remote_codex_runtime::Supervisor;
+use pockymoe_runtime::Supervisor;
 use tokio::net::TcpListener;
 
 pub use http::router;
@@ -54,7 +54,7 @@ pub async fn serve(state: Arc<Supervisor>) -> Result<()> {
         serde_json::to_string(&serde_json::json!({"url":cli.url,"token":cli.token}))?.as_bytes(),
     )?;
     tracing::info!("supervisor listening on {addr}");
-    if state.config.mode == remote_codex_protocol::Mode::Relay {
+    if state.config.mode == pockymoe_protocol::Mode::Relay {
         let tunnel_state = state.clone();
         tokio::spawn(async move {
             if let Err(err) = run_relay_tunnel(tunnel_state).await {

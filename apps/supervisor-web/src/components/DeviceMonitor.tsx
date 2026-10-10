@@ -1,7 +1,7 @@
-import { getLocale } from '@remote-codex/thread-ui/i18n';
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { getLocale } from '@pockymoe/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { useEffect, useState } from 'react';
-import type { DeviceMetricsDto, PowerReadingDto, TemperatureReadingDto } from '@remote-codex/shared';
+import type { DeviceMetricsDto, PowerReadingDto, TemperatureReadingDto } from '@pockymoe/shared';
 import { ApiError, request } from '../lib/api';
 import { FormDialog } from './FormDialog';
 import './device-monitor.css';

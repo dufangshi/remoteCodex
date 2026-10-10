@@ -1,4 +1,4 @@
-use remote_codex_protocol::{ModelOptionDto, ReasoningEffortOptionDto};
+use pockymoe_protocol::{ModelOptionDto, ReasoningEffortOptionDto};
 use serde_json::{json, Value};
 
 /// Grok's completion is a per-prompt snapshot. Its input already includes cache

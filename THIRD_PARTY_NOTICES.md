@@ -17,7 +17,7 @@ Adapted components and provider preset data:
 - Plan/stage/reread/rename conflict checks from `src-tauri/src/live/engine.rs`
   in `upstreams/write_engine.rs` and `upstreams.rs`.
 
-Remote Codex retains its profile store, backups, private atomic writes, harness
+Pockymoe retains its profile store, backups, private atomic writes, harness
 session gates and HTTP API. CC Switch's Tauri database, desktop services, local
 proxy, OAuth accounts and arbitrary supplier usage scripts are not copied.
 DSH YAML projection is an original adapter against the local DSH provider schema.

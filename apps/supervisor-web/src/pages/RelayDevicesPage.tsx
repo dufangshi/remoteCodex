@@ -1,5 +1,5 @@
-import { getLocale } from '@remote-codex/thread-ui/i18n';
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { getLocale } from '@pockymoe/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { SharedAccessCard } from '../components/SharedAccessCard';
 import { SecurityVerification } from '../components/RelaySecurity';
 import { securityRequest, type SecurityStatus } from '../lib/relaySecurity';
@@ -35,7 +35,7 @@ import type {
   RelaySessionShareDto,
   RelayThreadAccessDto,
   RelayWorkspaceAccessDto,
-} from '@remote-codex/shared';
+} from '@pockymoe/shared';
 import {
   ApiError,
   createRelayGrant,

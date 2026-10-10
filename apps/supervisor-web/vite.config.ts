@@ -71,7 +71,7 @@ export default defineConfig(({ mode }) => {
 
   const apiProxyTarget = process.env.VITE_API_PROXY_TARGET ?? 'http://127.0.0.1:8787';
   const wsProxyTarget = process.env.VITE_WS_PROXY_TARGET ?? 'ws://127.0.0.1:8787';
-  const threadUiRoot = path.resolve(__dirname, '../../remote-codex-thread-ui');
+  const threadUiRoot = path.resolve(__dirname, '../../pockymoe-thread-ui');
   const lucideReactEntry = require.resolve('lucide-react', { paths: [__dirname] });
   const threeDmolEntry = require.resolve('3dmol', { paths: [__dirname] });
   const threeDmolSource = require.resolve('3dmol/build/3Dmol-min.js', {
@@ -107,7 +107,7 @@ export default defineConfig(({ mode }) => {
       include: [
         'xterm',
         '@xterm/addon-fit',
-        '@remote-codex/thread-ui',
+        '@pockymoe/thread-ui',
         'use-sync-external-store/shim/with-selector',
       ],
     },
@@ -141,9 +141,9 @@ export default defineConfig(({ mode }) => {
       server: {
         deps: {
           inline: [
-            '@remote-codex/thread-ui',
-            '@remote-codex/plugin-runtime',
-            '@remote-codex/plugin-terminal',
+            '@pockymoe/thread-ui',
+            '@pockymoe/plugin-runtime',
+            '@pockymoe/plugin-terminal',
           ],
         },
       },
@@ -157,8 +157,8 @@ export default defineConfig(({ mode }) => {
         output: {
           manualChunks(id) {
             if (
-              id.includes('/remote-codex-thread-ui/packages/thread-ui/') ||
-              id.includes('/node_modules/@remote-codex/thread-ui/')
+              id.includes('/pockymoe-thread-ui/packages/thread-ui/') ||
+              id.includes('/node_modules/@pockymoe/thread-ui/')
             ) {
               return 'thread-ui';
             }

@@ -5,7 +5,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-} from '@remote-codex/thread-ui';
+} from '@pockymoe/thread-ui';
 
 export function FormDialog({
   title,

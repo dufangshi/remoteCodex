@@ -1,14 +1,14 @@
 # Agent notes
 
-This branch is a Rust rewrite of the Remote Codex control plane.
+This branch is a Rust rewrite of the Pockymoe control plane.
 
 - Runtime and HTTP live under `crates/`. Do not reintroduce the TypeScript supervisor or the 15-coordinator split.
 - ACP is the default harness path. Add a thin adapter under `crates/runtime/src/acp/` for command/capability differences (see `catalog.rs` for the command catalog and `capabilities.rs` for capability overlays).
-- Keep JSON field names camelCase. The React app in `apps/supervisor-web` still consumes `@remote-codex/shared`.
+- Keep JSON field names camelCase. The React app in `apps/supervisor-web` still consumes `@pockymoe/shared`.
 - After changing `crates/`, run relevant crate/test-name regressions and formatting/compilation checks in proportion to the change. Do not default to `cargo test --workspace` or a platform matrix.
 - Routine PR CI runs lightweight, path-selected checks only. Full compatibility checks, workspace-wide tests, full browser suites, and release dry-runs require an explicit user request for that validation (or an explicitly authorized release requiring its release gates). Do not dispatch them as extra insurance after targeted checks pass. See [CI scope and manual invocation](docs/ci.md).
 - Web E2E: follow the project [focused-e2e skill](.agents/skills/focused-e2e/SKILL.md) when selecting, writing, or running tests. Select relevant spec files/tests and an explicit browser project; do not run the full suite by default.
-- Treat `apps/windows-device-manager` as a stable, independently released bootstrap. A runtime, HTTP, ACP, model, or harness fix must not by itself bump the Device Manager version, change its bundled seed version, or create a `windows-device-manager-v*` release. Publish the new `remote-codex` runtime/GitHub version. Migrate legacy npm devices once through setup, then update using the Web device-scoped management API; existing Manager bootstrap updates remain independent.
+- Treat `apps/windows-device-manager` as a stable, independently released bootstrap. A runtime, HTTP, ACP, model, or harness fix must not by itself bump the Device Manager version, change its bundled seed version, or create a `windows-device-manager-v*` release. Publish the new `pockymoe` runtime/GitHub version. Migrate legacy npm devices once through setup, then update using the Web device-scoped management API; existing Manager bootstrap updates remain independent.
 - Bump or release Windows Device Manager only when its WinForms UI, installer, tray/startup behavior, self-update path, or other bootstrap-owned behavior changes. Keep the independent Manager release separate from runtime releases.
 - A versioned runtime release is immutable and includes the supported platform assets at one version. Path-filter PR CI to the affected code, but do not publish a partial replacement of one platform under an existing runtime version.
 - Do not copy Android/iOS/Windows sources into this tree.

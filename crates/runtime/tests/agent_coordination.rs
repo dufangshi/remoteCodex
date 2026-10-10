@@ -1,7 +1,7 @@
 //! Coordination primitives on top of the passive inbox: names, close, wait,
 //! inbox wait, the task board, wakes, roles and worktrees.
-use remote_codex_protocol::{CreateThreadInput, CreateWorkspaceInput, Provider};
-use remote_codex_runtime::{
+use pockymoe_protocol::{CreateThreadInput, CreateWorkspaceInput, Provider};
+use pockymoe_runtime::{
     fake::FakeRuntime,
     interaction::{load_role, AgentOptions, SendInput},
     Database, RuntimeConfig, Supervisor,
@@ -12,7 +12,7 @@ use std::{sync::Arc, time::Duration};
 fn setup() -> (tempfile::TempDir, Arc<Supervisor>) {
     let dir = tempfile::tempdir().unwrap();
     let config = RuntimeConfig {
-        mode: remote_codex_protocol::Mode::Local,
+        mode: pockymoe_protocol::Mode::Local,
         host: "127.0.0.1".into(),
         port: 0,
         workspace_root: dir.path().into(),
@@ -175,7 +175,7 @@ async fn idle_delegates_hold_their_slot_until_closed() {
     let ws = workspace(&s);
     let root = s.create_thread(input(&ws, None)).await.unwrap().id;
     let mut made = Vec::new();
-    for _ in 0..remote_codex_runtime::service::MAX_OPEN_AGENT_THREADS {
+    for _ in 0..pockymoe_runtime::service::MAX_OPEN_AGENT_THREADS {
         made.push(s.create_thread(input(&ws, Some(&root))).await.unwrap().id);
     }
     let refused = s
@@ -650,7 +650,7 @@ async fn a_wake_queues_one_turn_on_the_parent_once_delegates_settle() {
         })
         .unwrap();
     assert!(
-        prompt.contains("remoteCodex wake") && prompt.contains("a ("),
+        prompt.contains("Pockymoe wake") && prompt.contains("a ("),
         "{prompt}"
     );
     tokio::time::sleep(Duration::from_millis(600)).await;
@@ -888,10 +888,10 @@ fn a_reused_name_gets_a_fresh_default_worktree_branch() {
         "-m",
         "init",
     ]);
-    let first = remote_codex_runtime::interaction::create_worktree(&repo, "w", None).unwrap();
+    let first = pockymoe_runtime::interaction::create_worktree(&repo, "w", None).unwrap();
     assert_eq!(first.branch, "agent/w");
-    remote_codex_runtime::interaction::remove_worktree(&repo, &first.path).unwrap();
-    let second = remote_codex_runtime::interaction::create_worktree(&repo, "w", None).unwrap();
+    pockymoe_runtime::interaction::remove_worktree(&repo, &first.path).unwrap();
+    let second = pockymoe_runtime::interaction::create_worktree(&repo, "w", None).unwrap();
     assert_eq!(
         second.branch, "agent/w-2",
         "must not silently reuse stale agent/w"

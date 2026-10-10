@@ -29,14 +29,14 @@ fn identity(origin: &str, options: &SetupOptions) -> String {
     )
 }
 pub fn matches(saved: &Value, origin: &str, token: &str, port: u16) -> bool {
-    let stored = saved["REMOTE_CODEX_RELAY_SERVER_URL"]
+    let stored = saved["POCKYMOE_RELAY_SERVER_URL"]
         .as_str()
         .unwrap_or("")
         .replacen("wss:", "https:", 1)
         .replacen("ws:", "http:", 1);
     url::Url::parse(&stored).is_ok_and(|u| u.origin().ascii_serialization() == origin)
-        && saved["REMOTE_CODEX_RELAY_AGENT_TOKEN"] == token
-        && saved["REMOTE_CODEX_RELAY_SUPERVISOR_PORT"]
+        && saved["POCKYMOE_RELAY_AGENT_TOKEN"] == token
+        && saved["POCKYMOE_RELAY_SUPERVISOR_PORT"]
             .as_str()
             .unwrap_or("8787")
             .parse::<u16>()
@@ -53,7 +53,7 @@ fn local_client() -> Result<reqwest::Client> {
 pub async fn device_api(port: u16, saved: &Value, route: &str, post: bool) -> Result<Value> {
     let base = format!("http://127.0.0.1:{port}");
     let client = local_client()?;
-    let login = client.post(format!("{base}/api/auth/login")).json(&json!({"username":saved["REMOTE_CODEX_ADMIN_USERNAME"],"password":saved["REMOTE_CODEX_ADMIN_PASSWORD"]})).send().await?.error_for_status()?;
+    let login = client.post(format!("{base}/api/auth/login")).json(&json!({"username":saved["POCKYMOE_ADMIN_USERNAME"],"password":saved["POCKYMOE_ADMIN_PASSWORD"]})).send().await?.error_for_status()?;
     let cookie = login
         .headers()
         .get(reqwest::header::SET_COOKIE)
@@ -97,7 +97,7 @@ async fn online(port: u16, version: &str) -> Result<()> {
         if let Some(h) = health(port, "127.0.0.1").await {
             if h["status"] == "ok" && h["runningVersion"] == version && h["relayConnected"] == true
             {
-                println!("Device is online and running Remote Codex {version}.");
+                println!("Device is online and running Pockymoe {version}.");
                 return Ok(());
             }
         }
@@ -122,7 +122,7 @@ fn bridge(path: &Path, binary: &Path) -> Result<()> {
             .join("package.json"),
     )?;
     ensure!(
-        package["name"] == "remote-codex",
+        package["name"] == "pockymoe",
         "Unrecognized legacy launcher package"
     );
     let helper = path.with_file_name("supervisor-update.mjs");
@@ -190,7 +190,7 @@ pub async fn setup(options: SetupOptions) -> Result<()> {
     if occupied {
         let status = device_api(options.port, &saved, "/api/management/supervisor", false).await?;
         if status["runningVersion"] == version {
-            println!("Device is already running Remote Codex {version}.");
+            println!("Device is already running Pockymoe {version}.");
             return Ok(());
         }
         if status["manager"] != "github-release" {
@@ -230,23 +230,23 @@ pub async fn setup(options: SetupOptions) -> Result<()> {
                 .context("Invalid setup enrollment response")?
                 .into()
         };
-        saved["REMOTE_CODEX_RELAY_SERVER_URL"] = json!(origin
+        saved["POCKYMOE_RELAY_SERVER_URL"] = json!(origin
             .replacen("https:", "wss:", 1)
             .replacen("http:", "ws:", 1));
-        saved["REMOTE_CODEX_RELAY_AGENT_TOKEN"] = json!(token);
-        saved["REMOTE_CODEX_RELAY_SUPERVISOR_PORT"] = json!(options.port.to_string());
-        saved["REMOTE_CODEX_ADMIN_USERNAME"] = json!("admin");
-        saved["REMOTE_CODEX_ADMIN_PASSWORD"] = json!(format!(
+        saved["POCKYMOE_RELAY_AGENT_TOKEN"] = json!(token);
+        saved["POCKYMOE_RELAY_SUPERVISOR_PORT"] = json!(options.port.to_string());
+        saved["POCKYMOE_ADMIN_USERNAME"] = json!("admin");
+        saved["POCKYMOE_ADMIN_PASSWORD"] = json!(format!(
             "{}{}",
             uuid::Uuid::new_v4().simple(),
             uuid::Uuid::new_v4().simple()
         ));
-        saved["REMOTE_CODEX_SESSION_SECRET"] = json!(format!(
+        saved["POCKYMOE_SESSION_SECRET"] = json!(format!(
             "{}{}",
             uuid::Uuid::new_v4().simple(),
             uuid::Uuid::new_v4().simple()
         ));
-        saved["REMOTE_CODEX_DATABASE_PATH"] =
+        saved["POCKYMOE_DATABASE_PATH"] =
             json!(home().join(".remote-codex/relay-supervisor.sqlite"));
         write(&file, &saved)?;
         write(
@@ -266,28 +266,25 @@ pub fn load_environment(config: &Path) -> Result<BTreeMap<String, String>> {
     let saved: Value = read(config)?;
     let mut env = BTreeMap::new();
     for (key, value) in saved.as_object().context("Invalid device configuration")? {
-        if key.starts_with("REMOTE_CODEX_") {
+        if key.starts_with("POCKYMOE_") {
             if let Some(value) = value.as_str() {
                 env.insert(key.clone(), value.into());
             }
         }
     }
-    env.insert("REMOTE_CODEX_MODE".into(), "relay".into());
+    env.insert("POCKYMOE_MODE".into(), "relay".into());
+    env.insert("POCKYMOE_RELAY_SUPERVISOR_HOST".into(), "127.0.0.1".into());
     env.insert(
-        "REMOTE_CODEX_RELAY_SUPERVISOR_HOST".into(),
-        "127.0.0.1".into(),
-    );
-    env.insert(
-        "REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG".into(),
+        "POCKYMOE_RELAY_SUPERVISOR_CONFIG".into(),
         config.to_string_lossy().into_owned(),
     );
     ensure!(
-        env.get("REMOTE_CODEX_RELAY_AGENT_TOKEN")
+        env.get("POCKYMOE_RELAY_AGENT_TOKEN")
             .is_some_and(|t| !t.is_empty()),
         "Device token is missing from config"
     );
     let fallback = home().join(".remote-codex/relay-supervisor.sqlite");
-    let configured = saved["REMOTE_CODEX_DATABASE_PATH"]
+    let configured = saved["POCKYMOE_DATABASE_PATH"]
         .as_str()
         .or_else(|| saved["DATABASE_URL"].as_str())
         .filter(|v| !v.is_empty());
@@ -306,7 +303,7 @@ pub fn load_environment(config: &Path) -> Result<BTreeMap<String, String>> {
         "Device database path must be absolute"
     );
     env.insert(
-        "REMOTE_CODEX_DATABASE_PATH".into(),
+        "POCKYMOE_DATABASE_PATH".into(),
         database.to_string_lossy().into_owned(),
     );
     Ok(env)
@@ -329,8 +326,8 @@ fn is_database_url(value: &str) -> bool {
 }
 pub async fn run_device(config: PathBuf) -> Result<()> {
     let env = load_environment(&config)?;
-    for (key, _) in std::env::vars().filter(|(k, _)| k.starts_with("REMOTE_CODEX_")) {
-        if key != "REMOTE_CODEX_MANAGED_SERVICE" {
+    for (key, _) in std::env::vars().filter(|(k, _)| k.starts_with("POCKYMOE_")) {
+        if key != "POCKYMOE_MANAGED_SERVICE" {
             std::env::remove_var(key);
         }
     }
@@ -340,9 +337,9 @@ pub async fn run_device(config: PathBuf) -> Result<()> {
     std::env::remove_var("TMUX");
     std::env::remove_var("TMUX_PANE");
     if let Ok(installed) = releases::current() {
-        std::env::set_var("REMOTE_CODEX_WEB_DIST_DIR", installed.web_dist);
+        std::env::set_var("POCKYMOE_WEB_DIST_DIR", installed.web_dist);
     }
-    let state = remote_codex_runtime::boot().await?;
+    let state = pockymoe_runtime::boot().await?;
     crate::serve(state).await
 }
 #[cfg(test)]
@@ -350,7 +347,7 @@ mod tests {
     use super::*;
     #[test]
     fn native_setup_preserves_connection_identity_and_rejects_different_device() {
-        let saved = json!({"REMOTE_CODEX_RELAY_SERVER_URL":"wss://relay.example.test/","REMOTE_CODEX_RELAY_AGENT_TOKEN":"synthetic","REMOTE_CODEX_RELAY_SUPERVISOR_PORT":"8787"});
+        let saved = json!({"POCKYMOE_RELAY_SERVER_URL":"wss://relay.example.test/","POCKYMOE_RELAY_AGENT_TOKEN":"synthetic","POCKYMOE_RELAY_SUPERVISOR_PORT":"8787"});
         assert!(matches(
             &saved,
             "https://relay.example.test",
@@ -409,7 +406,8 @@ mod tests {
         let server = tokio::spawn(async move {
             axum::serve(listener, router).await.unwrap();
         });
-        let saved = json!({"REMOTE_CODEX_ADMIN_USERNAME":"admin","REMOTE_CODEX_ADMIN_PASSWORD":"synthetic"});
+        let saved =
+            json!({"POCKYMOE_ADMIN_USERNAME":"admin","POCKYMOE_ADMIN_PASSWORD":"synthetic"});
         assert_eq!(
             device_api(port, &saved, "/api/management/supervisor", false)
                 .await

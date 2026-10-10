@@ -16,8 +16,8 @@
 
 ## Relay 部署配置与备份
 
-- `REMOTE_CODEX_PUBLIC_BASE_URL` 固定为实际 HTTPS origin，例如 `https://remote.lnz-study.com`，用于 Cookie、Origin 验证、WebAuthn RP 和 OAuth callback。不要使用客户端传入的 forwarded-host 决定信任 origin。
-- `REMOTE_CODEX_RELAY_SESSION_SECRET` 至少 32 字符，使用密码学随机值。未配置时，在持久的 `REMOTE_CODEX_RELAY_DATA_DIR/session-secret` 自动创建随机值；Unix 权限 0600。禁止使用临时目录或每次部署重生成。
+- `POCKYMOE_PUBLIC_BASE_URL` 固定为实际 HTTPS origin，例如 `https://remote.lnz-study.com`，用于 Cookie、Origin 验证、WebAuthn RP 和 OAuth callback。不要使用客户端传入的 forwarded-host 决定信任 origin。
+- `POCKYMOE_RELAY_SESSION_SECRET` 至少 32 字符，使用密码学随机值。未配置时，在持久的 `POCKYMOE_RELAY_DATA_DIR/session-secret` 自动创建随机值；Unix 权限 0600。禁止使用临时目录或每次部署重生成。
 - 同时备份 relay 数据库 `relay-store.sqlite` 和上述 secret（环境变量形式也必须备份）。SQLite 使用一致性备份，不能只复制正在写入的主文件而漏掉 WAL。
 - **secret 同时派生 TOTP 和设备安装凭据的存储加密密钥。丢失／直接替换它会使这些凭据无法解密。** 迁移机器应恢复原 secret；不要把常规改密码当成更换 master secret。数据库和 secret 均按机密材料保存，分离访问权限。
 - 首次升级时，如果旧 session secret 不足 32 字符，必须先配置新的随机值，否则启动会明确拒绝；此时尚未登记本版本的 TOTP。启用 MFA 后不再直接替换 master secret，应保留原值迁移。
@@ -34,7 +34,7 @@ Supervisor 在其数据库同目录保存 `<数据库文件名去扩展名>.tran
 设备菜单或 thread 顶部的加密状态图标可查看 SHA-256 指纹。需要独立核对时，在**设备本机**执行：
 
 ```sh
-remote-codex relay-fingerprint --database /path/to/supervisor.sqlite
+pockymoe relay-fingerprint --database /path/to/supervisor.sqlite
 ```
 
 也可使用与运行 supervisor 相同的 `DATABASE_URL`／配置。该命令只读取身份，不启动服务。首次使用前可能尚未生成身份文件，应先让更新后的 supervisor 建立连接。

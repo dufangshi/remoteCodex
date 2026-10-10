@@ -3,9 +3,9 @@ import {
   ThreadShellPanel,
   type ThreadShellAdapter,
   type WorkbenchToolPanelControls,
-} from '@remote-codex/thread-ui';
-import { translate as t, useI18n } from '@remote-codex/thread-ui/i18n';
-import type { ThreadDetailDto } from '@remote-codex/shared';
+} from '@pockymoe/thread-ui';
+import { translate as t, useI18n } from '@pockymoe/thread-ui/i18n';
+import type { ThreadDetailDto } from '@pockymoe/shared';
 import {
   connectShellSocket,
   createThreadShell,
@@ -86,7 +86,7 @@ function TerminalTarget({
           effectiveTheme={effectiveTheme}
           isVisible={visible}
           targetLabel={target.label}
-          layoutStorageKey={`remote-codex:terminal-layout:${deviceId}:${threadId}`}
+          layoutStorageKey={`pockymoe:terminal-layout:${deviceId}:${threadId}`}
           {...(current && controls ? { panelControls: controls } : {})}
           openRequest={openRequest}
           {...(current ? { onLastTerminalClosed } : {})}

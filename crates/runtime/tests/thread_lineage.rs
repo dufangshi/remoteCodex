@@ -1,7 +1,7 @@
 //! Agent-spawned threads must group under the thread a person started, so a
 //! fan-out cannot flood a workspace listing.
-use remote_codex_protocol::{CreateThreadInput, CreateWorkspaceInput, Provider};
-use remote_codex_runtime::{
+use pockymoe_protocol::{CreateThreadInput, CreateWorkspaceInput, Provider};
+use pockymoe_runtime::{
     fake::FakeRuntime, interaction::SendInput, Database, RuntimeConfig, Supervisor,
 };
 use serde_json::json;
@@ -10,7 +10,7 @@ use std::sync::Arc;
 fn setup() -> (tempfile::TempDir, Arc<Supervisor>) {
     let dir = tempfile::tempdir().unwrap();
     let config = RuntimeConfig {
-        mode: remote_codex_protocol::Mode::Local,
+        mode: pockymoe_protocol::Mode::Local,
         host: "127.0.0.1".into(),
         port: 0,
         workspace_root: dir.path().into(),
@@ -54,7 +54,7 @@ fn workspace(s: &Supervisor) -> String {
         .id
 }
 
-async fn spawn(s: &Supervisor, ws: &str, parent: Option<&str>) -> remote_codex_protocol::ThreadDto {
+async fn spawn(s: &Supervisor, ws: &str, parent: Option<&str>) -> pockymoe_protocol::ThreadDto {
     s.create_thread(CreateThreadInput {
         workspace_id: ws.to_string(),
         title: None,
@@ -106,7 +106,7 @@ async fn nesting_is_bounded_and_an_unknown_parent_is_refused() {
 
     let mut current = spawn(&s, &ws, None).await.id;
     // depth 0 root, then 1, 2, 3 are allowed; the fourth generation is refused.
-    for _ in 0..remote_codex_runtime::service::MAX_LINEAGE_DEPTH {
+    for _ in 0..pockymoe_runtime::service::MAX_LINEAGE_DEPTH {
         current = spawn(&s, &ws, Some(&current)).await.id;
     }
     let too_deep = s
@@ -333,7 +333,7 @@ async fn a_burst_of_idle_agent_threads_is_capped_and_finished_ones_free_slots() 
     // Freshly created threads sit at `idle`, never having been prompted. A cap that
     // only counted `running` threads would let this burst through unbounded.
     let mut made = Vec::new();
-    for _ in 0..remote_codex_runtime::service::MAX_OPEN_AGENT_THREADS {
+    for _ in 0..pockymoe_runtime::service::MAX_OPEN_AGENT_THREADS {
         made.push(spawn(&s, &ws, Some(&root.id)).await.id);
     }
     let refused = s
@@ -426,7 +426,7 @@ async fn waiting_peer_mail_is_announced_to_the_agent_and_stays_passive() {
         notice.contains("Passive"),
         "the notice must say it is passive so the agent does not abandon its task          or acknowledge mail just to silence the reminder: {notice}"
     );
-    assert!(notice.contains("remote-codex inbox"), "got: {notice}");
+    assert!(notice.contains("pockymoe inbox"), "got: {notice}");
 
     // Pluralisation, and the sender's own inbox stays untouched.
     s.send_to_thread(

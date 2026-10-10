@@ -1,5 +1,5 @@
 [package]
-name = "remote-codex-supervisor"
+name = "pockymoe-supervisor"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -15,9 +15,9 @@ hmac.workspace = true
 portable-pty.workspace = true
 rand.workspace = true
 rand09 = { package = "rand", version = "0.9" }
-remote-codex-protocol.workspace = true
+pockymoe-protocol.workspace = true
 reqwest.workspace = true
-remote-codex-runtime.workspace = true
+pockymoe-runtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

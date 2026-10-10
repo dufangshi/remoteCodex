@@ -1,10 +1,10 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ThreadDetailDto, ThreadDto } from '@remote-codex/shared';
+import type { ThreadDetailDto, ThreadDto } from '@pockymoe/shared';
 import type {
   WorkbenchNotification,
   WorkbenchThread,
-} from '@remote-codex/thread-ui';
+} from '@pockymoe/thread-ui';
 import { ApiError, relayModeActive, request } from '../lib/api';
 import { threadHref } from '../lib/relayRoutes';
 

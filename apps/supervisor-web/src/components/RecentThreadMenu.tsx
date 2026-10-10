@@ -1,9 +1,9 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Copy, ExternalLink, MoreHorizontal, Pencil, Star, Trash2 } from 'lucide-react';
-import type { ThreadDetailDto } from '@remote-codex/shared';
-import type { WorkbenchThread } from '@remote-codex/thread-ui';
+import type { ThreadDetailDto } from '@pockymoe/shared';
+import type { WorkbenchThread } from '@pockymoe/thread-ui';
 import { fetchRelayAccess, request } from '../lib/api';
 import { RenameDialog } from './RenameDialog';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -67,7 +67,7 @@ export function RecentThreadMenu({ thread, onFavorite, onRenamed, onRemoved, onN
       <p className="recent-thread-menu-title">{thread.title}</p>
       <button disabled={busy} onClick={async () => { setBusy(true); try { await onFavorite(thread.key); setPosition(null); } finally { setBusy(false); } }}><Star size={15} fill={thread.favorite ? 'currentColor' : 'none'} />{thread.favorite ? translate("workbench.unstarThread") : translate("workbench.starThread")}</button>
       <button onClick={() => { setPosition(null); onNavigate(thread.href); }}><ExternalLink size={15} />{translate("workbench.openThread")}</button>
-      <button onClick={() => void copy(id)}><Copy size={15} />{translate("workbench.copyRemoteCodexSessionID")}</button>
+      <button onClick={() => void copy(id)}><Copy size={15} />{translate("workbench.copyPockymoeSessionID")}</button>
       <button disabled={!detail?.thread.providerSessionId} onClick={() => void copy(detail!.thread.providerSessionId!)}><Copy size={15} />{translate("workbench.copyHarnessSessionID")}</button>
       {detail?.thread.providerSessionId && (detail.thread.agentId === 'codex' || detail.thread.provider === 'codex') && <button onClick={() => void copy(`codex://threads/${encodeURIComponent(detail.thread.providerSessionId!)}`)}><Copy size={15} />{translate("workbench.copyCodexDeeplink")}</button>}
       {owner && <button onClick={() => { setTitle(detail?.thread.title ?? thread.title); setNotice(''); setPosition(null); setRenaming(true); }}><Pencil size={15} />{translate("workbench.renameThread")}</button>}
@@ -80,7 +80,7 @@ export function RecentThreadMenu({ thread, onFavorite, onRenamed, onRemoved, onN
       catch (error) { setNotice(error instanceof Error ? error.message : translate("workbench.couldNotRenameThread")); }
       finally { setBusy(false); }
     }} />
-    <ConfirmDialog open={deleting} title={translate("workbench.deleteThread_c8f2c4")} description={translate("workbench.deleteAndItsRemoteCodexHistoryThis", { value1: thread.title })} busy={busy} error={notice} onCancel={() => setDeleting(false)} onConfirm={async () => {
+    <ConfirmDialog open={deleting} title={translate("workbench.deleteThread_c8f2c4")} description={translate("workbench.deleteAndItsPockymoeHistoryThis", { value1: thread.title })} busy={busy} error={notice} onCancel={() => setDeleting(false)} onConfirm={async () => {
       setBusy(true); setNotice('');
       try {
         await request(base, { method: 'DELETE' });

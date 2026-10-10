@@ -1,7 +1,7 @@
 //! Opt-in real Claude acceptance. Separate session/workspace/database; never
 //! restarts the host Supervisor. Uses the cheapest advertised Haiku model.
-use remote_codex_protocol::{CreateThreadInput, CreateWorkspaceInput, Mode, Provider};
-use remote_codex_runtime::{
+use pockymoe_protocol::{CreateThreadInput, CreateWorkspaceInput, Mode, Provider};
+use pockymoe_runtime::{
     acp::AcpRuntime,
     actor::{AgentRuntime, StartTurnInput},
     Database, RuntimeConfig, Supervisor,
@@ -63,14 +63,14 @@ async fn haiku_reports_native_tokens_and_speed_during_first_tool_wait() {
         .unwrap();
     let turn_id = uuid::Uuid::new_v4().to_string();
     state.db.with(|conn| {
-        conn.execute("INSERT INTO thread_turns(id,thread_id,status,model,started_at,ordinal) VALUES(?1,?2,'inProgress',?3,?4,1)", rusqlite::params![turn_id,thread.id,model,remote_codex_protocol::now_rfc3339()])?;
+        conn.execute("INSERT INTO thread_turns(id,thread_id,status,model,started_at,ordinal) VALUES(?1,?2,'inProgress',?3,?4,1)", rusqlite::params![turn_id,thread.id,model,pockymoe_protocol::now_rfc3339()])?;
         Ok(())
     }).unwrap();
     let mut events = state.bus.subscribe();
     let cancel = CancellationToken::new();
     let input = StartTurnInput {
         provider_session_id: thread.provider_session_id.clone().unwrap(), thread_id:thread.id.clone(), turn_id:turn_id.clone(),
-        prompt:"This is an isolated throughput acceptance test. Do not edit files, create agents or call remote-codex. First write two short sentences. Then call Bash with exactly sleep 12 and wait for it to finish. Finally reply with CLAUDE_THROUGHPUT_DONE. Only one tool call is needed.".into(),
+        prompt:"This is an isolated throughput acceptance test. Do not edit files, create agents or call pockymoe. First write two short sentences. Then call Bash with exactly sleep 12 and wait for it to finish. Finally reply with CLAUDE_THROUGHPUT_DONE. Only one tool call is needed.".into(),
         model:Some(model.clone()), reasoning_effort:None, sandbox_mode:Some("danger-full-access".into()), collaboration_mode:None,
         approval_mode:Some("yolo".into()), performance_mode:None, hidden:false, images:vec![], title:None, context_delivered:false,
     };

@@ -4,7 +4,7 @@
 
 ## 1. 固化 Node 代码和发布物
 
-当前 Node main 基线为 `4bb48be4`（`remote-codex@0.11.64`）。在改变 main 前创建可维护分支和不可移动 tag：
+当前 Node main 基线为 `4bb48be4`（`pockymoe@0.11.64`）。在改变 main 前创建可维护分支和不可移动 tag：
 
 ```bash
 git branch legacy/node-0.11 4bb48be4
@@ -15,7 +15,7 @@ git push origin legacy/node-0.11 node-v0.11.64-final
 同时记录生产 Node relay 镜像 digest，不要只保留会被覆盖的 `latest` tag。npm 增加 `legacy` dist-tag，但保持 `latest` 指向 Node，直到 Rust stable gate 完成：
 
 ```bash
-npm dist-tag add remote-codex@0.11.64 legacy
+npm dist-tag add pockymoe@0.11.64 legacy
 ```
 
 Git 分支、tag、npm 包和容器镜像都只是代码/二进制备份，不包含任何用户数据库。
@@ -25,7 +25,7 @@ Git 分支、tag、npm 包和容器镜像都只是代码/二进制备份，不�
 必须全部满足：
 
 - Rust workspace 在 Linux、macOS、Windows 的固定 Rust 1.89 toolchain 通过。
-- 使用真实 `remote-codex@0.11.64` 生成的 supervisor 数据库完成升级、重复启动、新 turn、queued steer 和 Node 降级读取测试。
+- 使用真实 `pockymoe@0.11.64` 生成的 supervisor 数据库完成升级、重复启动、新 turn、queued steer 和 Node 降级读取测试。
 - npm 七个平台包齐全，launcher tarball 不包含源码，当前平台完成安装、Web/API、status/stop smoke。
 - relay 数据副本中的 hosted sandbox、OAuth identity 和 pending registration
   可直接读取；dry-run 不报告除邮件验证之外的未支持 auth setting。
@@ -41,9 +41,9 @@ Git 分支、tag、npm 包和容器镜像都只是代码/二进制备份，不�
 数据库迁移不能在 `npm install` 期间运行。用户先更新 `next`，再显式重启：
 
 ```bash
-npm install -g remote-codex@next
-remote-codex stop
-remote-codex start
+npm install -g pockymoe@next
+pockymoe stop
+pockymoe start
 ```
 
 首次打开 Node 数据库时，Rust 应先创建同目录 Online Backup，再在事务中执行 additive migration。迁移保留 Node 的 `__migrations`、旧表和旧列；Rust turn 同时写入兼容 metadata，使短期降级仍有可读数据。
@@ -60,7 +60,7 @@ Rust 不会隐式接管未带 `rustSchemaVersion` marker 的 Node `relay-store.s
 4. 用即将部署的同一个 Rust binary 执行只读检查：
 
 ```bash
-remote-codex relay-migrate \
+pockymoe relay-migrate \
   --data-dir /var/lib/remote-codex-relay \
   --dry-run
 ```
@@ -69,7 +69,7 @@ remote-codex relay-migrate \
 6. 执行显式迁移：
 
 ```bash
-remote-codex relay-migrate \
+pockymoe relay-migrate \
   --data-dir /var/lib/remote-codex-relay
 ```
 

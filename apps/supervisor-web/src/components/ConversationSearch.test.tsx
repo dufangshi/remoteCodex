@@ -1,8 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { setLocale } from '@remote-codex/thread-ui/i18n';
-import type { ThreadTurnDto } from '@remote-codex/shared';
+import { setLocale } from '@pockymoe/thread-ui/i18n';
+import type { ThreadTurnDto } from '@pockymoe/shared';
 import { ConversationSearch } from './ConversationSearch';
 import { fetchThreadConversationPage, fetchThreadTurnDetail, searchThreadMessages, searchConversations } from '../lib/api';
 

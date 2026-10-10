@@ -1,4 +1,4 @@
-use remote_codex_protocol::Provider;
+use pockymoe_protocol::Provider;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedSessionRef {

@@ -133,7 +133,7 @@ fn millis(at: &str) -> Option<i64> {
 impl Supervisor {
     pub(super) fn observe_generation_event(
         &self,
-        event: &remote_codex_protocol::ThreadEventEnvelope,
+        event: &pockymoe_protocol::ThreadEventEnvelope,
     ) -> Result<()> {
         let Some(at) = millis(&event.timestamp) else {
             return Ok(());
@@ -273,7 +273,7 @@ impl Supervisor {
             Ok(Some(json!({"turnId":key.1,"model":model,"reasoningEffort":effort,"tokenUsage":crate::usage::public_usage(&usage),"priceEstimate":usage["priceEstimate"]})))
         })?;
         if let Some(payload) = payload {
-            self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+            self.bus.emit(pockymoe_protocol::ThreadEventEnvelope {
                 event_type: "thread.turn.token.updated".into(),
                 thread_id: key.0.clone(),
                 timestamp: now_rfc3339(),

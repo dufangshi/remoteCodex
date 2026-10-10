@@ -6,10 +6,10 @@ import type {
   ThreadTurnDto,
 } from '../../shared/src/index';
 
-export type RemoteCodexPluginManifest = PluginManifestDto;
+export type PockymoePluginManifest = PluginManifestDto;
 
 export interface RegisteredPlugin {
-  manifest: RemoteCodexPluginManifest;
+  manifest: PockymoePluginManifest;
   enabledByDefault?: boolean;
   source?: 'builtin' | 'imported';
 }

@@ -303,7 +303,7 @@ impl Supervisor {
         }
         drop(live);
         if imported > 0 {
-            self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+            self.bus.emit(pockymoe_protocol::ThreadEventEnvelope {
                 event_type: "thread.updated".into(),
                 thread_id: id.into(),
                 timestamp: now_rfc3339(),

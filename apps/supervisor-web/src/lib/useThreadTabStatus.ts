@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import type { ThreadDto } from '@remote-codex/shared';
+import type { ThreadDto } from '@pockymoe/shared';
 
 export function tabState(status: string, completed: number, seen: number) {
   if (status === 'running') return 'working';

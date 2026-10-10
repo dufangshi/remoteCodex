@@ -1,30 +1,30 @@
 # Thread interaction
 
-The `remote-codex` CLI can create peer threads, send prompts, inspect runtime state, and progressively read stored conversations. These operations use the Supervisor's existing threads, prompt queue, turns and history items. No database tables or separate Task/Message lifecycle are added.
+The `pockymoe` CLI can create peer threads, send prompts, inspect runtime state, and progressively read stored conversations. These operations use the Supervisor's existing threads, prompt queue, turns and history items. No database tables or separate Task/Message lifecycle are added.
 
 ## Commands
 
 ```sh
-remote-codex skill
-remote-codex thread self
-remote-codex thread list --workspace WORKSPACE_ID
-remote-codex thread status THREAD_ID
-remote-codex thread delete CHILD_THREAD_ID
-remote-codex thread models --provider acp --agent grok
-remote-codex thread create --provider acp --agent grok \
+pockymoe skill
+pockymoe thread self
+pockymoe thread list --workspace WORKSPACE_ID
+pockymoe thread status THREAD_ID
+pockymoe thread delete CHILD_THREAD_ID
+pockymoe thread models --provider acp --agent grok
+pockymoe thread create --provider acp --agent grok \
   --model grok-4.6 --reasoning-effort xhigh --title helper
-remote-codex thread send THREAD_ID --delivery queue --kind task --text-file task.txt --notify-on-complete
-remote-codex transcript THREAD_ID
-remote-codex transcript THREAD_ID --limit 5 --before-turn TURN_ID
-remote-codex transcript THREAD_ID --turn TURN_ID
-remote-codex transcript THREAD_ID --turn TURN_ID --view overview
-remote-codex transcript THREAD_ID --turn TURN_ID --item ITEM_ID
-remote-codex transcript THREAD_ID --turn TURN_ID --item ITEM_ID --raw
+pockymoe thread send THREAD_ID --delivery queue --kind task --text-file task.txt --notify-on-complete
+pockymoe transcript THREAD_ID
+pockymoe transcript THREAD_ID --limit 5 --before-turn TURN_ID
+pockymoe transcript THREAD_ID --turn TURN_ID
+pockymoe transcript THREAD_ID --turn TURN_ID --view overview
+pockymoe transcript THREAD_ID --turn TURN_ID --item ITEM_ID
+pockymoe transcript THREAD_ID --turn TURN_ID --item ITEM_ID --raw
 ```
 
 `thread create` also accepts `--text` / `--text-file` for an initial prompt. Without a managed caller, specify `--workspace`. Model IDs and reasoning levels must be advertised by the target harness. Creation inherits the caller's workspace and approval mode unless explicitly overridden. It does not copy the caller's history.
 
-Ordinary `send` stores passive inbox mail and never starts or interrupts a turn. Explicit `queue --kind task` assigns executable work: idle recipients start automatically and busy recipients process it after current work. Urgent peer corrections/unblock requests may use direct/steer with an interrupt reason. The receiver sees the sender's remoteCodex thread ID and can use the same CLI to reply. `--request-id KEY` makes retries of the same send return the original receipt; reusing a key with different content is rejected. A send receipt does not mean execution has completed.
+Ordinary `send` stores passive inbox mail and never starts or interrupts a turn. Explicit `queue --kind task` assigns executable work: idle recipients start automatically and busy recipients process it after current work. Urgent peer corrections/unblock requests may use direct/steer with an interrupt reason. The receiver sees the sender's Pockymoe thread ID and can use the same CLI to reply. `--request-id KEY` makes retries of the same send return the original receipt; reusing a key with different content is rejected. A send receipt does not mean execution has completed.
 
 `--notify-on-complete` is optional per executable send. It requires a caller identity. When that receiving turn ends, the Supervisor stores a passive inbox result with the peer/turn IDs and completed, failed or interrupted status. It never wakes the caller or queues a turn. Multiple opted-in messages steered into one turn keep independent subscriptions; cancelling an unconsumed queued prompt removes its subscription.
 
@@ -45,7 +45,7 @@ new queued input arriving during harness release is rechecked and retained. Ther
 is no recursive/force deletion. A child's own independently loaded process is
 released; shared harness processes are refused to preserve other sessions.
 
-Deleting a helper removes its Remote Codex turns/history/mailbox, revokes its CLI
+Deleting a helper removes its Pockymoe turns/history/mailbox, revokes its CLI
 credential and updates parent/root group counts. Terminal completion results are
 delivered to the parent inbox before history removal. Existing result messages,
 workspace files, worktrees, branches and native harness logs remain intact.
@@ -63,11 +63,11 @@ Every response includes discovery/continuation commands when more content exists
 A serving Supervisor creates a private connection file next to its SQLite database, replacing the `.sqlite` suffix with `.cli.json`. Unix creation permissions are `0600`. A local shell can use:
 
 ```sh
-remote-codex --cli-config /path/to/supervisor.cli.json thread list
-remote-codex --cli-config /path/to/supervisor.cli.json --from THREAD_ID thread send OTHER_ID --text hello
+pockymoe --cli-config /path/to/supervisor.cli.json thread list
+pockymoe --cli-config /path/to/supervisor.cli.json --from THREAD_ID thread send OTHER_ID --text hello
 ```
 
-Managed ACP processes receive `REMOTE_CODEX_URL`, `REMOTE_CODEX_TOKEN` and `REMOTE_CODEX_THREAD_ID`, plus a PATH whose first entry provides `remote-codex` for the running binary. Release binaries carry a platform suffix, so the Supervisor links `remote-codex` in `<database>.cli-bin/`; otherwise an older global install could shadow newer commands. The same context reaches client-owned ACP terminal commands. Creation and session loading bind identity to the remoteCodex thread. A fork that shares a parent process is loaded independently when it needs a different CLI identity. The first user prompt in a loaded session includes a brief discovery hint for `remote-codex thread self`, `remote-codex skill` and passive inboxes. Later prompts are sent without that repeated prefix. Process reloads, identity changes and explicit context compaction rearm the hint; hidden control prompts never receive it. Automatic harness compaction relies on the harness preserving the summary, while the identity and CLI commands remain available through the process environment.
+Managed ACP processes receive `POCKYMOE_URL`, `POCKYMOE_TOKEN` and `POCKYMOE_THREAD_ID`, plus a PATH whose first entry provides `pockymoe` for the running binary. Release binaries carry a platform suffix, so the Supervisor links `pockymoe` in `<database>.cli-bin/`; otherwise an older global install could shadow newer commands. The same context reaches client-owned ACP terminal commands. Creation and session loading bind identity to the Pockymoe thread. A fork that shares a parent process is loaded independently when it needs a different CLI identity. The first user prompt in a loaded session includes a brief discovery hint for `pockymoe thread self`, `pockymoe skill` and passive inboxes. Later prompts are sent without that repeated prefix. Process reloads, identity changes and explicit context compaction rearm the hint; hidden control prompts never receive it. Automatic harness compaction relies on the harness preserving the summary, while the identity and CLI commands remain available through the process environment.
 
 CLI connections use a loopback HTTP URL. Managed processes receive an opaque thread-bound bearer credential; the local connection file holds a machine credential for discovery and messaging. `POST /api/cli` rejects missing/invalid credentials even in local mode and rejects trusted Relay-forwarded requests. Child deletion verifies the authenticated parent. Managed peer sends bind attribution to the credential: omitting `fromThreadId` cannot bypass delivery checks and a conflicting `--from` is rejected. Machine credentials still support explicit attribution. Shared filesystem access is not a per-agent isolation boundary. Do not publish or print the connection file/token. Full thread URLs use `info.relayDeviceId` (with legacy `deviceId` compatibility) to select local handling or another device.
 
@@ -81,18 +81,18 @@ device. `device list` works before opting in and reports this device's `peerAcce
 verification of the peer's `relay-fingerprint`.
 
 ```sh
-remote-codex device list
-remote-codex device workspaces DEVICE
-remote-codex thread list --device DEVICE
-remote-codex thread backends --device DEVICE
-remote-codex thread models --device DEVICE --workspace WORKSPACE_ID
-remote-codex thread create --device DEVICE --workspace WORKSPACE_ID --title helper
-remote-codex thread show DEVICE/THREAD_UUID
-remote-codex transcript DEVICE/THREAD_UUID --limit 1
-remote-codex thread send DEVICE/THREAD_UUID --text 'Review this' --attach ./file
-remote-codex fs ls DEVICE --workspace WORKSPACE_ID [PATH]
-remote-codex fs get DEVICE --workspace WORKSPACE_ID PATH --out ./download
-remote-codex outbox
+pockymoe device list
+pockymoe device workspaces DEVICE
+pockymoe thread list --device DEVICE
+pockymoe thread backends --device DEVICE
+pockymoe thread models --device DEVICE --workspace WORKSPACE_ID
+pockymoe thread create --device DEVICE --workspace WORKSPACE_ID --title helper
+pockymoe thread show DEVICE/THREAD_UUID
+pockymoe transcript DEVICE/THREAD_UUID --limit 1
+pockymoe thread send DEVICE/THREAD_UUID --text 'Review this' --attach ./file
+pockymoe fs ls DEVICE --workspace WORKSPACE_ID [PATH]
+pockymoe fs get DEVICE --workspace WORKSPACE_ID PATH --out ./download
+pockymoe outbox
 ```
 
 `DEVICE` is a relay ID or unique case-insensitive name. Qualified targets and Web
@@ -121,7 +121,7 @@ Optional notification subscriptions and explicit retry receipts use the existing
 
 ## Validation
 
-See [the Docker E2E record](thread-interaction-e2e.md). The [skill](../skills/thread-interaction/SKILL.md) teaches discovery, handoff, waiting, creation and progressive reads. `remote-codex skill` fetches the running Supervisor's embedded guide, falling back to the CLI's copy if offline or talking to an older Supervisor.
+See [the Docker E2E record](thread-interaction-e2e.md). The [skill](../skills/thread-interaction/SKILL.md) teaches discovery, handoff, waiting, creation and progressive reads. `pockymoe skill` fetches the running Supervisor's embedded guide, falling back to the CLI's copy if offline or talking to an older Supervisor.
 
 ## 0.12.32 delivery and inbox revision
 

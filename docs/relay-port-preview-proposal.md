@@ -21,7 +21,7 @@ port creates a new address. Supervisors predating this feature must be updated.
 Example configuration for the existing site:
 
 ```ini
-REMOTE_CODEX_PORT_PREVIEW_BASE_URL=https://lnz-study.com
+POCKYMOE_PORT_PREVIEW_BASE_URL=https://lnz-study.com
 ```
 
 This produces `https://p-<32-hex-mapping-id>.lnz-study.com`. Each mapping has its
@@ -67,7 +67,7 @@ wildcard origin certificate or change the zone's SSL mode.
 
 On the Relay host, Nginx Proxy Manager runs with host networking. Its mounted
 `/opt/nginx-proxy-manager/data/nginx/custom/http.conf` includes
-`/data/nginx/custom/remote-codex-preview.conf`. That separate file only matches
+`/data/nginx/custom/pockymoe-preview.conf`. That separate file only matches
 `p-<32 lowercase hex digits>.lnz-study.com`, preserving unrelated wildcard
 domains and existing NPM-managed services:
 
@@ -81,7 +81,7 @@ server {
     listen [::]:80;
     server_name "~^p-[a-f0-9]{32}\.lnz-study\.com$";
     access_log off;
-    error_log /data/logs/remote-codex-preview-error.log warn;
+    error_log /data/logs/pockymoe-preview-error.log warn;
     client_max_body_size 64m;
     location / {
         proxy_pass http://127.0.0.1:18791;
@@ -114,7 +114,7 @@ out of shared caches. Any Cloudflare cache rules must also respect this policy.
 Validate and gracefully reload with
 `docker exec nginx-proxy-manager-app-1 nginx -t` followed by
 `docker exec nginx-proxy-manager-app-1 nginx -s reload`. The Relay environment
-file contains `REMOTE_CODEX_PORT_PREVIEW_BASE_URL=https://lnz-study.com`; Relay
+file contains `POCKYMOE_PORT_PREVIEW_BASE_URL=https://lnz-study.com`; Relay
 deployments preserve that file. Only `remote-codex-rust-relay.service` needs a
 restart when changing this variable. Existing device Supervisors reconnect.
 
@@ -222,7 +222,7 @@ tests cover local link parsing, confirmation and unavailable configuration.
 
 ## Agent CLI workflow
 
-`remote-codex preview create --port 4013 --label "App preview"` reserves a
+`pockymoe preview create --port 4013 --label "App preview"` reserves a
 persistent address without requiring a listening service. Its JSON includes
 `id`, `port`, exact `hostname`, `origin`, stable `url`, and `openUrl`. The last
 URL enters the owner's browser login/open flow; it contains no account session
@@ -231,7 +231,7 @@ normal local Supervisor credential and obtains the configured base domain from
 the authenticated Relay connection, rather than guessing a hostname.
 
 Configure only required exact-host/origin entries, start HTTP on the mapped
-loopback port, then run `remote-codex preview check 4013`. Use
+loopback port, then run `pockymoe preview check 4013`. Use
 `--path /app` for a particular HTTP route, or `--websocket-path /ws` to test a
 known WebSocket handshake. Results distinguish connection failure/timeouts,
 explicit host-check rejection, ordinary HTTP errors and WebSocket failures.
@@ -243,4 +243,4 @@ requires a token/subprotocol, so do not diagnose it as a broken Relay by itself.
 Use `preview list` to recover addresses and `preview stop PORT_OR_ID` to revoke
 one. Stop does not terminate the application process. Shared-device access does
 not authorize preview access; the existing owner-only policy remains in force.
-The embedded `remote-codex skill` documents the required agent workflow.
+The embedded `pockymoe skill` documents the required agent workflow.

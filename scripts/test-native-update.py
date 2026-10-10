@@ -21,7 +21,7 @@ def smoke(binary):
         root = pathlib.Path(temporary)
         release = root / '.local/share/remote-codex/native/releases' / version
         release.mkdir(parents=True)
-        installed_binary = release / 'remote-codex'
+        installed_binary = release / 'pockymoe'
         shutil.copyfile(binary, installed_binary)
         installed_binary.chmod(0o700)
         (release / 'web').mkdir()
@@ -35,8 +35,8 @@ def smoke(binary):
         with socket.socket() as listener:
             listener.bind(('127.0.0.1', 0))
             port = listener.getsockname()[1]
-        env = {k: v for k, v in os.environ.items() if not k.startswith('REMOTE_CODEX_') and k not in ('DATABASE_URL', 'WORKSPACE_ROOT', 'TMUX', 'TMUX_PANE')}
-        env.update(HOME=str(root), USERPROFILE=str(root), REMOTE_CODEX_DATABASE_PATH=str(database), REMOTE_CODEX_WORKSPACE_ROOT=str(workspace), REMOTE_CODEX_E2E_FAKE_RUNTIME='1', REMOTE_CODEX_HOST='127.0.0.1', REMOTE_CODEX_PORT=str(port), HOST='127.0.0.1', PORT=str(port), REMOTE_CODEX_MODE='local')
+        env = {k: v for k, v in os.environ.items() if not k.startswith('POCKYMOE_') and k not in ('DATABASE_URL', 'WORKSPACE_ROOT', 'TMUX', 'TMUX_PANE')}
+        env.update(HOME=str(root), USERPROFILE=str(root), POCKYMOE_DATABASE_PATH=str(database), POCKYMOE_WORKSPACE_ROOT=str(workspace), POCKYMOE_E2E_FAKE_RUNTIME='1', POCKYMOE_HOST='127.0.0.1', POCKYMOE_PORT=str(port), HOST='127.0.0.1', PORT=str(port), POCKYMOE_MODE='local')
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         def request(route, post=False):
             query = urllib.request.Request(f'http://127.0.0.1:{port}{route}', data=b'{}' if post else None, headers={'Content-Type': 'application/json'})

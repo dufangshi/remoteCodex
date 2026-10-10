@@ -30,12 +30,12 @@ Unix 文档读取逐级使用 fd-relative O_NOFOLLOW，拒绝越界相对路径�
 在本 worktree 使用独立 `.temp/cargo-target`、自身 debug executable、自身 node_modules/shared UI dist。未跑 workspace 全测、平台矩阵或全浏览器套件。
 
 ```bash
-CARGO_TARGET_DIR="$PWD/.temp/cargo-target" cargo test -p remote-codex-runtime --test file_documents --test db_migration -j2
-CARGO_TARGET_DIR="$PWD/.temp/cargo-target" cargo test -p remote-codex-supervisor --test http_e2e file_document_http_conditional_save_conflict_and_receipt_use_real_disk -j2
-CARGO_TARGET_DIR="$PWD/.temp/cargo-target" cargo test -p remote-codex-supervisor file_receipts_bind_to_trusted_relay_actor_and_ignore_inner_actor_forgery -j2
-CARGO_TARGET_DIR="$PWD/.temp/cargo-target" cargo test -p remote-codex-relay route_acl::tests -j2
-CARGO_TARGET_DIR="$PWD/.temp/cargo-target" cargo check -p remote-codex-supervisor -p remote-codex-relay -j2
-CARGO_TARGET_DIR="$PWD/.temp/cargo-target" cargo build -p remote-codex -j2
+CARGO_TARGET_DIR="$PWD/.temp/cargo-target" cargo test -p pockymoe-runtime --test file_documents --test db_migration -j2
+CARGO_TARGET_DIR="$PWD/.temp/cargo-target" cargo test -p pockymoe-supervisor --test http_e2e file_document_http_conditional_save_conflict_and_receipt_use_real_disk -j2
+CARGO_TARGET_DIR="$PWD/.temp/cargo-target" cargo test -p pockymoe-supervisor file_receipts_bind_to_trusted_relay_actor_and_ignore_inner_actor_forgery -j2
+CARGO_TARGET_DIR="$PWD/.temp/cargo-target" cargo test -p pockymoe-relay route_acl::tests -j2
+CARGO_TARGET_DIR="$PWD/.temp/cargo-target" cargo check -p pockymoe-supervisor -p pockymoe-relay -j2
+CARGO_TARGET_DIR="$PWD/.temp/cargo-target" cargo build -p pockymoe -j2
 cargo fmt --all --check
 ```
 
@@ -43,14 +43,14 @@ cargo fmt --all --check
 
 ```bash
 # 在 nested UI worktree
-corepack pnpm --filter @remote-codex/thread-ui typecheck
-corepack pnpm --filter @remote-codex/thread-ui exec vitest run src/components/graph-workspace/explorer/workspaceDocuments.test.ts src/i18n/i18n.test.tsx
-corepack pnpm --filter @remote-codex/thread-ui build
+corepack pnpm --filter @pockymoe/thread-ui typecheck
+corepack pnpm --filter @pockymoe/thread-ui exec vitest run src/components/graph-workspace/explorer/workspaceDocuments.test.ts src/i18n/i18n.test.tsx
+corepack pnpm --filter @pockymoe/thread-ui build
 # 在主 worktree：刷新自身 file 依赖后验证消费者
 corepack pnpm install --offline --frozen-lockfile
-corepack pnpm --filter @remote-codex/supervisor-web typecheck
-corepack pnpm --filter @remote-codex/supervisor-web exec vitest run src/pages/useThreadWorkspaceAdapter.test.tsx
-corepack pnpm --filter @remote-codex/supervisor-web build
+corepack pnpm --filter @pockymoe/supervisor-web typecheck
+corepack pnpm --filter @pockymoe/supervisor-web exec vitest run src/pages/useThreadWorkspaceAdapter.test.tsx
+corepack pnpm --filter @pockymoe/supervisor-web build
 ```
 
 共享 UI state/i18n 12 项、Web adapter 2 项通过。typecheck、shared UI build 和消费者生产 Web build 通过；消费的 33 个 dist 文件逐个 hash 一致。Worker 从 package export 由宿主 Vite 显式打包，真实浏览器 diff 成功渲染。
@@ -74,7 +74,7 @@ corepack pnpm exec playwright test e2e/workspace-edit-safety.spec.ts \
   --project=mobile-chromium --grep 'mobile editor'
 ```
 
-桌面 4 项通过：草稿/undo/离页/隐藏后保护/保存关闭；真实 409/固定快照/二次冲突；真实已提交但丢响应/保存中新输入；原有下载/路径/rename/delete。手机 1 项通过：草稿、关闭选择、保存和无水平溢出。测试配置清空继承 REMOTE_CODEX_*，设置隔离数据库和工作区；未触及生产服务。fake harness 仅提供会话数据，文件接口和磁盘保存使用真实 Rust。没有运行线上 OAuth/多用户浏览器链路，relay 保障使用定向 ACL/tunnel 回归验证。
+桌面 4 项通过：草稿/undo/离页/隐藏后保护/保存关闭；真实 409/固定快照/二次冲突；真实已提交但丢响应/保存中新输入；原有下载/路径/rename/delete。手机 1 项通过：草稿、关闭选择、保存和无水平溢出。测试配置清空继承 POCKYMOE_*，设置隔离数据库和工作区；未触及生产服务。fake harness 仅提供会话数据，文件接口和磁盘保存使用真实 Rust。没有运行线上 OAuth/多用户浏览器链路，relay 保障使用定向 ACL/tunnel 回归验证。
 
 补充 pending 状态后只重跑受影响的定向浏览器用例（相同隔离端口/数据库/工作区环境）：`corepack pnpm exec playwright test e2e/workspace-edit-safety.spec.ts --project=desktop-chromium --grep 'lost save receipt'`，1 项通过；共享 UI draft-state 3 项也再次通过。
 

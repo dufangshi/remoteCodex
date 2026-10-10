@@ -29,10 +29,10 @@ http-body-util = "0.1"
 portable-pty = "0.9"
 rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-remote-codex-protocol = { path = "crates/protocol" }
-remote-codex-relay = { path = "crates/relay" }
-remote-codex-runtime = { path = "crates/runtime" }
-remote-codex-supervisor = { path = "crates/supervisor" }
+pockymoe-protocol = { path = "crates/protocol" }
+pockymoe-relay = { path = "crates/relay" }
+pockymoe-runtime = { path = "crates/runtime" }
+pockymoe-supervisor = { path = "crates/supervisor" }
 rusqlite = { version = "0.32", features = ["backup", "bundled", "functions"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

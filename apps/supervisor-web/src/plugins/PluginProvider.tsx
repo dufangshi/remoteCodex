@@ -1,1 +1,1 @@
-export { PluginProvider } from '@remote-codex/thread-ui';
+export { PluginProvider } from '@pockymoe/thread-ui';

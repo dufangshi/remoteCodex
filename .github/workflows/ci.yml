@@ -72,7 +72,7 @@ jobs:
         run: rustup toolchain install $env:RUST_VERSION --profile minimal
       - uses: Swatinem/rust-cache@v2
       - name: Test batch spawning and update diagnostics only
-        run: cargo +$env:RUST_VERSION test -p remote-codex-runtime --lib windows_ --locked
+        run: cargo +$env:RUST_VERSION test -p pockymoe-runtime --lib windows_ --locked
 
   workflows:
     name: Workflow syntax
@@ -119,16 +119,16 @@ jobs:
         with:
           version: 10.11.1
       - name: Check out thread UI dependency
-        run: git clone --depth 1 --branch main https://github.com/dufangshi/remote-codex-thread-ui-rust.git ./remote-codex-thread-ui
+        run: git clone --depth 1 --branch main https://github.com/dufangshi/remote-codex-thread-ui-rust.git ./pockymoe-thread-ui
       - name: Install thread UI dependencies
-        run: pnpm --dir ./remote-codex-thread-ui install --frozen-lockfile
+        run: pnpm --dir ./pockymoe-thread-ui install --frozen-lockfile
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
       - name: Typecheck and test Web
         run: |
-          pnpm --dir ./remote-codex-thread-ui --filter @remote-codex/thread-ui build
-          pnpm --filter @remote-codex/supervisor-web typecheck
-          pnpm --filter @remote-codex/supervisor-web test
+          pnpm --dir ./pockymoe-thread-ui --filter @pockymoe/thread-ui build
+          pnpm --filter @pockymoe/supervisor-web typecheck
+          pnpm --filter @pockymoe/supervisor-web test
 
   npm:
     name: npm launcher and updater unit tests
@@ -146,7 +146,7 @@ jobs:
         run: node --test scripts/publish-npm-release.test.mjs scripts/npm-launcher-download.test.mjs scripts/npm-launcher-relay.test.mjs scripts/supervisor-update.test.mjs
       - name: Check setup and real systemd unit parsing without starting services
         env:
-          REMOTE_CODEX_TEST_SYSTEMD: '1'
+          POCKYMOE_TEST_SYSTEMD: '1'
         run: |
           node --test scripts/setup.test.mjs scripts/native-setup.test.mjs
           python3 scripts/prepare-runtime-release.test.py

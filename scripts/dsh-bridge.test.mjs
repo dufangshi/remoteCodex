@@ -500,7 +500,7 @@ test('model-call usage is reported for the root session, subagents included', as
   } finally { await stop(server, dsh); }
 });
 
-test('tool approvals reach Remote Codex for the root session and fail closed', async () => {
+test('tool approvals reach Pockymoe for the root session and fail closed', async () => {
   const { server, port, connection } = await supervisor();
   const dsh = fakeDsh();
   const child = { id: 'child-1', session: { id: 'child-session' } };

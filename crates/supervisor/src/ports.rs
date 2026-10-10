@@ -8,7 +8,7 @@ use axum::{
     Json,
 };
 use futures_util::{SinkExt, StreamExt};
-use remote_codex_runtime::Supervisor;
+use pockymoe_runtime::Supervisor;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -69,10 +69,10 @@ pub(crate) async fn create(
 }
 
 fn changed(state: &Supervisor) {
-    state.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+    state.bus.emit(pockymoe_protocol::ThreadEventEnvelope {
         event_type: "device.ports.changed".into(),
         thread_id: String::new(),
-        timestamp: remote_codex_protocol::now_rfc3339(),
+        timestamp: pockymoe_protocol::now_rfc3339(),
         payload: json!({"reason":"port_mappings_changed"}),
     });
 }
@@ -86,7 +86,7 @@ pub(crate) fn create_mapping(state: &Supervisor, port: u16, label: &str) -> Resu
         let mut mappings: Vec<Mapping> = serde_json::from_str(&saved)?;
         if let Some(existing) = mappings.iter().find(|m| m.port == port) { return Ok(existing.clone()); }
         if mappings.len() >= 32 { bail!("At most 32 port mappings can be enabled on a device"); }
-        let mapping = Mapping { id: Uuid::new_v4().simple().to_string(), port, label: label.trim().to_string(), created_at: remote_codex_protocol::now_rfc3339() };
+        let mapping = Mapping { id: Uuid::new_v4().simple().to_string(), port, label: label.trim().to_string(), created_at: pockymoe_protocol::now_rfc3339() };
         mappings.push(mapping.clone());
         conn.execute("INSERT INTO kv(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [KEY, &serde_json::to_string(&mappings)?])?;
         Ok(mapping)

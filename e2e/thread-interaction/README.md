@@ -5,12 +5,12 @@ The disposable runtime image installs pinned Codex CLI 0.154.0, codex-acp 1.10.0
 Build from the repository root:
 
 ```sh
-docker build -f e2e/thread-interaction/Dockerfile -t remote-codex-thread-e2e:local .
+docker build -f e2e/thread-interaction/Dockerfile -t pockymoe-thread-e2e:local .
 ```
 
-Use an isolated writable state directory mounted at `/test-state`, a read-only checkout at `/src`, and a Cargo target volume at `/build`. Set `CARGO_TARGET_DIR=/build`, `CODEX_HOME=/test-state/codex`, `GROK_HOME=/test-state/grok`, `DATABASE_URL=/test-state/supervisor.sqlite`, `WORKSPACE_ROOT=/test-state/workspaces`, `HOST=0.0.0.0`, `PORT=8787` and `REMOTE_CODEX_ENABLED_AGENT_PROVIDERS=codex,acp`. Publish only a loopback host port. Copy authorized test authentication into the isolated homes; do not mount writable host agent homes or print tokens.
+Use an isolated writable state directory mounted at `/test-state`, a read-only checkout at `/src`, and a Cargo target volume at `/build`. Set `CARGO_TARGET_DIR=/build`, `CODEX_HOME=/test-state/codex`, `GROK_HOME=/test-state/grok`, `DATABASE_URL=/test-state/supervisor.sqlite`, `WORKSPACE_ROOT=/test-state/workspaces`, `HOST=0.0.0.0`, `PORT=8787` and `POCKYMOE_ENABLED_AGENT_PROVIDERS=codex,acp`. Publish only a loopback host port. Copy authorized test authentication into the isolated homes; do not mount writable host agent homes or print tokens.
 
-Inside the container, `cargo build -p remote-codex`, link `/build/debug/remote-codex` into `/usr/local/bin`, and run `remote-codex supervisor`. Model discovery must actually advertise `gpt-6-astra` and `grok-4.6` with `xhigh`; do not silently substitute.
+Inside the container, `cargo build -p pockymoe`, link `/build/debug/pockymoe` into `/usr/local/bin`, and run `pockymoe supervisor`. Model discovery must actually advertise `gpt-6-astra` and `grok-4.6` with `xhigh`; do not silently substitute.
 
 Place this file at `/test-state/workspaces/compile-demo/hello.c`:
 
@@ -41,13 +41,13 @@ The verifier is read-only and prints no credentials or full history. Keep live s
 
 ## Passive inbox and delivery modes (0.12.33)
 
-`inbox.py` exercises the actual CLI/HTTP/storage integration in the isolated Docker image with `REMOTE_CODEX_E2E_FAKE_RUNTIME=1`. Start the candidate Supervisor with `REMOTE_CODEX_DATABASE_PATH=/test-state/db.sqlite`, `REMOTE_CODEX_WORKSPACE_ROOT=/test-state/workspaces`, and `PORT=8787`, then execute:
+`inbox.py` exercises the actual CLI/HTTP/storage integration in the isolated Docker image with `POCKYMOE_E2E_FAKE_RUNTIME=1`. Start the candidate Supervisor with `POCKYMOE_DATABASE_PATH=/test-state/db.sqlite`, `POCKYMOE_WORKSPACE_ROOT=/test-state/workspaces`, and `PORT=8787`, then execute:
 
 ```sh
 python3 /src/e2e/thread-interaction/inbox.py
 ```
 
-The candidate binary defaults to `/build/debug/remote-codex` (`E2E_BINARY` overrides it); `/src` contains the launcher (`E2E_SOURCE_DIR` overrides it), and `/test-state` is disposable (`E2E_STATE_DIR` overrides it). The test creates its own workspace and Codex/ACP-Grok fixture threads. It checks passive mail/ack, idempotent sends, initial-task execution, passive completion, rejection of queued callbacks and ordinary report dispatch, explicit status coalescing, filtered list/wait, urgent same-turn steering and retry without duplicate execution, and launcher help. No model credentials/calls are used. It writes `result.json` under the state directory.
+The candidate binary defaults to `/build/debug/pockymoe` (`E2E_BINARY` overrides it); `/src` contains the launcher (`E2E_SOURCE_DIR` overrides it), and `/test-state` is disposable (`E2E_STATE_DIR` overrides it). The test creates its own workspace and Codex/ACP-Grok fixture threads. It checks passive mail/ack, idempotent sends, initial-task execution, passive completion, rejection of queued callbacks and ordinary report dispatch, explicit status coalescing, filtered list/wait, urgent same-turn steering and retry without duplicate execution, and launcher help. No model credentials/calls are used. It writes `result.json` under the state directory.
 
 Earlier real-model scenarios above describe historical defaults. Current assignments
 use `--delivery queue --kind task`; results stay in inbox and queued completion

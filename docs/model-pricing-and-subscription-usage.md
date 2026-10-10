@@ -65,7 +65,7 @@ credentials or rejected OAuth credentials clear the cache. The response includes
   inventing a 5h limit.
 - Claude: verify OAuth authentication with `claude auth status`, then read the
   account usage endpoint using the existing local OAuth access token. An expired
-  token hides the badge until the harness refreshes its credentials. Remote Codex
+  token hides the badge until the harness refreshes its credentials. Pockymoe
   does not rotate credentials or log tokens.
 
 ACP threads select the account adapter using their agent ID. Usage reflects the

@@ -1,7 +1,7 @@
 use std::env;
 use std::path::PathBuf;
 
-use remote_codex_protocol::{Mode, Provider};
+use pockymoe_protocol::{Mode, Provider};
 
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
@@ -27,13 +27,13 @@ pub struct RuntimeConfig {
 
 impl RuntimeConfig {
     pub fn from_env() -> Self {
-        let mode = match env::var("REMOTE_CODEX_MODE").unwrap_or_default().as_str() {
+        let mode = match env::var("POCKYMOE_MODE").unwrap_or_default().as_str() {
             "server" => Mode::Server,
             "relay" => Mode::Relay,
             _ => Mode::Local,
         };
         let port_names = if mode == Mode::Relay {
-            &["REMOTE_CODEX_RELAY_SUPERVISOR_PORT"][..]
+            &["POCKYMOE_RELAY_SUPERVISOR_PORT"][..]
         } else {
             &["PORT"][..]
         };
@@ -42,7 +42,7 @@ impl RuntimeConfig {
             .and_then(|v| v.parse().ok())
             .unwrap_or(8787);
         let host_names = if mode == Mode::Relay {
-            &["REMOTE_CODEX_RELAY_SUPERVISOR_HOST"][..]
+            &["POCKYMOE_RELAY_SUPERVISOR_HOST"][..]
         } else {
             &["HOST"][..]
         };
@@ -55,42 +55,38 @@ impl RuntimeConfig {
             })
         };
         let environment =
-            setting("REMOTE_CODEX_ENVIRONMENT", "NODE_ENV").unwrap_or_else(|| "development".into());
+            setting("POCKYMOE_ENVIRONMENT", "NODE_ENV").unwrap_or_else(|| "development".into());
         let workspace_root = PathBuf::from(
-            setting("REMOTE_CODEX_WORKSPACE_ROOT", "WORKSPACE_ROOT")
+            setting("POCKYMOE_WORKSPACE_ROOT", "WORKSPACE_ROOT")
                 .unwrap_or_else(|| default_workspace_root()),
         );
         let database_url = PathBuf::from(
-            setting("REMOTE_CODEX_DATABASE_PATH", "DATABASE_URL")
+            setting("POCKYMOE_DATABASE_PATH", "DATABASE_URL")
                 .unwrap_or_else(|| default_database_path(&environment, mode == Mode::Relay)),
         );
-        let enabled_providers = parse_providers(
-            env::var("REMOTE_CODEX_ENABLED_AGENT_PROVIDERS")
-                .ok()
-                .as_deref(),
-        );
-        let fake_runtime = env_flag("REMOTE_CODEX_E2E_FAKE_RUNTIME");
+        let enabled_providers =
+            parse_providers(env::var("POCKYMOE_ENABLED_AGENT_PROVIDERS").ok().as_deref());
+        let fake_runtime = env_flag("POCKYMOE_E2E_FAKE_RUNTIME");
         Self {
             mode,
             host,
             port,
             workspace_root,
             database_url,
-            app_name: setting("REMOTE_CODEX_APP_NAME", "APP_NAME")
-                .unwrap_or_else(|| "Remote Codex".into()),
-            app_version: remote_codex_protocol::APP_VERSION.to_string(),
+            app_name: setting("POCKYMOE_APP_NAME", "APP_NAME").unwrap_or_else(|| "Pockymoe".into()),
+            app_version: pockymoe_protocol::APP_VERSION.to_string(),
             environment,
             auth_required: mode != Mode::Local,
-            admin_username: env::var("REMOTE_CODEX_ADMIN_USERNAME").ok(),
-            admin_password: env::var("REMOTE_CODEX_ADMIN_PASSWORD").ok(),
-            session_secret: env::var("REMOTE_CODEX_SESSION_SECRET").ok(),
-            relay_server_url: env::var("REMOTE_CODEX_RELAY_SERVER_URL").ok(),
-            relay_agent_token: env::var("REMOTE_CODEX_RELAY_AGENT_TOKEN").ok(),
+            admin_username: env::var("POCKYMOE_ADMIN_USERNAME").ok(),
+            admin_password: env::var("POCKYMOE_ADMIN_PASSWORD").ok(),
+            session_secret: env::var("POCKYMOE_SESSION_SECRET").ok(),
+            relay_server_url: env::var("POCKYMOE_RELAY_SERVER_URL").ok(),
+            relay_agent_token: env::var("POCKYMOE_RELAY_AGENT_TOKEN").ok(),
             enabled_providers,
-            acp_command: setting("REMOTE_CODEX_ACP_COMMAND", "ACP_COMMAND")
+            acp_command: setting("POCKYMOE_ACP_COMMAND", "ACP_COMMAND")
                 .filter(|s| !s.trim().is_empty()),
             acp_startup_timeout_ms: setting(
-                "REMOTE_CODEX_ACP_STARTUP_TIMEOUT_MS",
+                "POCKYMOE_ACP_STARTUP_TIMEOUT_MS",
                 "ACP_STARTUP_TIMEOUT_MS",
             )
             .and_then(|v| v.parse().ok())

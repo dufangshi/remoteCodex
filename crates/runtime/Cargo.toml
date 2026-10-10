@@ -1,5 +1,5 @@
 [package]
-name = "remote-codex-runtime"
+name = "pockymoe-runtime"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,7 +13,7 @@ futures-util.workspace = true
 hostname.workspace = true
 hex.workspace = true
 sha2.workspace = true
-remote-codex-protocol.workspace = true
+pockymoe-protocol.workspace = true
 rusqlite.workspace = true
 reqwest.workspace = true
 serde.workspace = true

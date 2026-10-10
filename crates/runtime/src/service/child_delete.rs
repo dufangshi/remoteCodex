@@ -1,7 +1,7 @@
 use super::*;
 use crate::interaction::finish_notification;
 use anyhow::ensure;
-use remote_codex_protocol::ThreadEventEnvelope;
+use pockymoe_protocol::ThreadEventEnvelope;
 
 impl Supervisor {
     /// Delete one direct child only. Admission/completion and the DB transaction

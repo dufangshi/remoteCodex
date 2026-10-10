@@ -1,12 +1,12 @@
 # Managed ACP dependencies regression
 
-Build `remote-codex-thread-e2e:local` as described in `../thread-interaction/README.md`; it supplies pinned real Codex 0.154.0 and Node/npm. Build the candidate Linux binary into a Docker volume (for example `remote-codex-thread-cargo`, at `/target/debug/remote-codex`). Then:
+Build `pockymoe-thread-e2e:local` as described in `../thread-interaction/README.md`; it supplies pinned real Codex 0.154.0 and Node/npm. Build the candidate Linux binary into a Docker volume (for example `pockymoe-thread-cargo`, at `/target/debug/pockymoe`). Then:
 
 ```sh
-docker build -f e2e/managed-adapters/Dockerfile -t remote-codex-managed-adapters:ubuntu .
+docker build -f e2e/managed-adapters/Dockerfile -t pockymoe-managed-adapters:ubuntu .
 docker run -d --name rc-managed-ubuntu \
-  -v "$PWD:/src:ro" -v remote-codex-thread-cargo:/build:ro \
-  remote-codex-managed-adapters:ubuntu
+  -v "$PWD:/src:ro" -v pockymoe-thread-cargo:/build:ro \
+  pockymoe-managed-adapters:ubuntu
 docker exec rc-managed-ubuntu python3 /src/e2e/managed-adapters/verify.py
 docker rm -f rc-managed-ubuntu
 ```

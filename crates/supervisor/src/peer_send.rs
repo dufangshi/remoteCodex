@@ -2,7 +2,7 @@
 use crate::{peer_files, peer_link};
 use anyhow::{ensure, Context, Result};
 use chrono::{DateTime, Duration, Utc};
-use remote_codex_runtime::Supervisor;
+use pockymoe_runtime::Supervisor;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -190,7 +190,7 @@ pub(crate) async fn intercept(
     );
     ensure!(
         state.peer_access_enabled(),
-        "peer_access_disabled: enable this device with remote-codex device access on"
+        "peer_access_disabled: enable this device with pockymoe device access on"
     );
     let from = sender(caller, input);
     match operation {
@@ -317,8 +317,7 @@ fn retry_delay(attempts: u64) -> Duration {
 }
 
 async fn send(state: &Supervisor, target: String, mut request: Value) -> Result<Value> {
-    let body: remote_codex_runtime::interaction::SendInput =
-        serde_json::from_value(request.clone())?;
+    let body: pockymoe_runtime::interaction::SendInput = serde_json::from_value(request.clone())?;
     ensure!(
         request["threadId"]
             .as_str()
@@ -356,7 +355,7 @@ async fn send(state: &Supervisor, target: String, mut request: Value) -> Result<
     ensure!(
         body.kind
             .as_deref()
-            .is_none_or(|kind| remote_codex_protocol::MESSAGE_KINDS.contains(&kind)),
+            .is_none_or(|kind| pockymoe_protocol::MESSAGE_KINDS.contains(&kind)),
         "invalid message kind"
     );
     ensure!(
@@ -486,7 +485,7 @@ fn remove_record(state: &Supervisor, record: &OutboxRecord, failure: Option<&str
         {
             state.send_to_thread(
                 from,
-                remote_codex_runtime::interaction::SendInput {
+                pockymoe_runtime::interaction::SendInput {
                     text: format!(
                         "Cross-device message {} to {}/{} could not be delivered: {reason}",
                         record.id,
@@ -588,8 +587,8 @@ pub(crate) fn start_outbox_worker(state: &Arc<Supervisor>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use remote_codex_protocol::{CreateThreadInput, CreateWorkspaceInput, Mode, Provider};
-    use remote_codex_runtime::{
+    use pockymoe_protocol::{CreateThreadInput, CreateWorkspaceInput, Mode, Provider};
+    use pockymoe_runtime::{
         actor::SharedRuntime, config::RuntimeConfig, db::Database, fake::FakeRuntime,
         local_sessions::LocalSessionHomes,
     };

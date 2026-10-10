@@ -1,6 +1,6 @@
 # XP1 peer delivery audit, 2026-10-07
 
-Read-only audit of Remote Codex root `bf8cee0b-f8f6-4f33-bac6-40ae6713768c`
+Read-only audit of Pockymoe root `bf8cee0b-f8f6-4f33-bac6-40ae6713768c`
 and its A1–A6 children, covering approximately 12:00–18:44 UTC. Evidence comes
 from persisted peer input, actual sender commands, turn timestamps and inbox
 envelopes. The audit did not send instructions, acknowledge other agents' mail,

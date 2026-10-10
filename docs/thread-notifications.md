@@ -74,7 +74,7 @@ subscription registration cannot turn the Relay into an HTTP proxy.
 - HTTPS, Service Workers, Push API and notification permission are required
   (localhost is suitable for development). On iOS/iPadOS, install the site on
   the Home Screen before enabling Web Push.
-- Allow Remote Codex notifications in both browser and operating system settings.
+- Allow Pockymoe notifications in both browser and operating system settings.
   Focus/Do Not Disturb, power/network restrictions and push-service policies can
   delay or suppress display. Delivery after fully quitting a browser is outside
   this feature's guarantee.
@@ -99,7 +99,7 @@ Chromium's Service Worker push dispatcher. Only browser vendor subscription
 creation is mocked: automated Chromium has no vendor push credentials. This is
 not a live FCM/APNs delivery test or an OS notification click test.
 
-Build `cargo build -p remote-codex` and
-`pnpm --filter @remote-codex/supervisor-web build` first. Run the spec with explicit
+Build `cargo build -p pockymoe` and
+`pnpm --filter @pockymoe/supervisor-web build` first. Run the spec with explicit
 isolated `E2E_API_PORT`, `E2E_WEB_PORT`, `E2E_DATABASE_URL`, `E2E_WORKSPACE_ROOT`
 and `--project=desktop-chromium`, following the focused-e2e skill.

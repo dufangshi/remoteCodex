@@ -42,8 +42,8 @@ use axum::{Json, Router};
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
+use pockymoe_protocol::{now_rfc3339, ApiError};
 use rand::{rngs::OsRng, RngCore};
-use remote_codex_protocol::{now_rfc3339, ApiError};
 use rusqlite::backup::Backup;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use scrypt::{scrypt, Params as ScryptParams};
@@ -94,28 +94,28 @@ struct AppState {
 }
 
 pub async fn serve() -> Result<()> {
-    let data_dir = std::env::var("REMOTE_CODEX_RELAY_DATA_DIR")
-        .unwrap_or_else(|_| ".local/relay-server".into());
-    let admin_username = std::env::var("REMOTE_CODEX_ADMIN_USERNAME")
-        .map_err(|_| anyhow::anyhow!("REMOTE_CODEX_ADMIN_USERNAME is required"))?;
+    let data_dir =
+        std::env::var("POCKYMOE_RELAY_DATA_DIR").unwrap_or_else(|_| ".local/relay-server".into());
+    let admin_username = std::env::var("POCKYMOE_ADMIN_USERNAME")
+        .map_err(|_| anyhow::anyhow!("POCKYMOE_ADMIN_USERNAME is required"))?;
     let admin_username = normalize_username(&admin_username);
-    let admin_password = std::env::var("REMOTE_CODEX_ADMIN_PASSWORD")
-        .map_err(|_| anyhow::anyhow!("REMOTE_CODEX_ADMIN_PASSWORD is required"))?;
-    let admin_email = std::env::var("REMOTE_CODEX_ADMIN_EMAIL")
+    let admin_password = std::env::var("POCKYMOE_ADMIN_PASSWORD")
+        .map_err(|_| anyhow::anyhow!("POCKYMOE_ADMIN_PASSWORD is required"))?;
+    let admin_email = std::env::var("POCKYMOE_ADMIN_EMAIL")
         .unwrap_or_else(|_| format!("{admin_username}@relay.local"))
         .trim()
         .to_ascii_lowercase();
     if admin_username.len() < 3 {
-        bail!("REMOTE_CODEX_ADMIN_USERNAME must contain at least 3 supported characters");
+        bail!("POCKYMOE_ADMIN_USERNAME must contain at least 3 supported characters");
     }
     if admin_password.len() < 8 || (admin_username == "admin" && admin_password == "admin") {
-        bail!("REMOTE_CODEX_ADMIN_PASSWORD must be at least 8 characters and cannot use the default admin credential");
+        bail!("POCKYMOE_ADMIN_PASSWORD must be at least 8 characters and cannot use the default admin credential");
     }
     if !admin_email.contains('@') {
-        bail!("REMOTE_CODEX_ADMIN_EMAIL must be a valid email address");
+        bail!("POCKYMOE_ADMIN_EMAIL must be a valid email address");
     }
     let session_secret = security::session_secret(FsPath::new(&data_dir))?;
-    let auto_migrate = std::env::var("REMOTE_CODEX_RELAY_AUTO_MIGRATE")
+    let auto_migrate = std::env::var("POCKYMOE_RELAY_AUTO_MIGRATE")
         .ok()
         .is_some_and(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true"));
     let store = RelayStore::open_data_dir(FsPath::new(&data_dir), session_secret, auto_migrate)?;
@@ -145,18 +145,18 @@ pub async fn serve() -> Result<()> {
             )?;
         }
     }
-    let web_dist = std::env::var("REMOTE_CODEX_RELAY_WEB_DIST_DIR")
+    let web_dist = std::env::var("POCKYMOE_RELAY_WEB_DIST_DIR")
         .ok()
         .map(PathBuf::from);
-    let legacy_supervisor_token = std::env::var("REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN")
+    let legacy_supervisor_token = std::env::var("POCKYMOE_RELAY_SUPERVISOR_TOKEN")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
-    let registration_password = std::env::var("REMOTE_CODEX_RELAY_REGISTRATION_PASSWORD")
+    let registration_password = std::env::var("POCKYMOE_RELAY_REGISTRATION_PASSWORD")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
-    let registration_enabled = std::env::var("REMOTE_CODEX_RELAY_REGISTRATION_ENABLED")
+    let registration_enabled = std::env::var("POCKYMOE_RELAY_REGISTRATION_ENABLED")
         .ok()
         .map(|value| {
             matches!(
@@ -296,7 +296,7 @@ pub async fn serve() -> Result<()> {
             preview::middleware,
         ))
         .with_state(state);
-    let host = std::env::var("REMOTE_CODEX_RELAY_HOST")
+    let host = std::env::var("POCKYMOE_RELAY_HOST")
         .ok()
         .filter(|value| !value.trim().is_empty())
         .or_else(|| {
@@ -305,7 +305,7 @@ pub async fn serve() -> Result<()> {
                 .filter(|value| !value.trim().is_empty())
         })
         .unwrap_or_else(|| "0.0.0.0".into());
-    let port: u16 = std::env::var("REMOTE_CODEX_RELAY_PORT")
+    let port: u16 = std::env::var("POCKYMOE_RELAY_PORT")
         .ok()
         .and_then(|v| v.parse().ok())
         .or_else(|| std::env::var("PORT").ok().and_then(|v| v.parse().ok()))
@@ -1898,7 +1898,7 @@ fn relay_shares_for(conn: &Connection, column: &str, user_id: &str) -> Vec<Value
             "targetUserId": row.get::<_, String>(3)?,
             "targetUsername": row.get::<_, Option<String>>(4)?.unwrap_or_else(|| "unknown".to_string()),
             "deviceId": row.get::<_, String>(5)?,
-            "deviceName": row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "Remote Codex device".to_string()),
+            "deviceName": row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "Pockymoe device".to_string()),
             "threadId": row.get::<_, String>(7)?,
             "threadTitle": row.get::<_, Option<String>>(8)?,
             "workspaceId": row.get::<_, Option<String>>(9)?,
@@ -1940,7 +1940,7 @@ fn relay_grants_for(conn: &Connection, column: &str, user_id: &str) -> Vec<Value
             "targetUserId": row.get::<_, String>(3)?,
             "targetUsername": row.get::<_, Option<String>>(4)?.unwrap_or_else(|| "unknown".to_string()),
             "deviceId": row.get::<_, String>(5)?,
-            "deviceName": row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "Remote Codex device".to_string()),
+            "deviceName": row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "Pockymoe device".to_string()),
             "scope": row.get::<_, String>(7)?,
             "threadId": row.get::<_, Option<String>>(8)?,
             "threadTitle": row.get::<_, Option<String>>(9)?,
@@ -3886,7 +3886,8 @@ async fn forward_server_message_to_client(
     }
 }
 
-const RELAY_BOOTSTRAP: &str = r#"<script>window.__REMOTE_CODEX_BOOTSTRAP__={"mode":"relay","relayApiBase":"/relay"};</script>"#;
+const RELAY_BOOTSTRAP: &str =
+    r#"<script>window.__POCKYMOE_BOOTSTRAP__={"mode":"relay","relayApiBase":"/relay"};</script>"#;
 
 fn inject_bootstrap(html: &str) -> String {
     if html.contains("</head>") {
@@ -3927,10 +3928,7 @@ mod tests {
     use super::*;
 
     fn temporary_test_dir(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "remote-codex-relay-{name}-{}",
-            Uuid::new_v4().simple()
-        ))
+        std::env::temp_dir().join(format!("pockymoe-relay-{name}-{}", Uuid::new_v4().simple()))
     }
 
     pub(super) fn test_app_state(name: &str) -> (Arc<AppState>, PathBuf) {

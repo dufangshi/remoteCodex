@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn ordinary_brackets_keep_all_text() {
         let dir = tempfile::tempdir().unwrap();
-        let prompt = "[remoteCodex: pointer]\n\n[remoteCodex role: reviewer]\nbody\n\n[remoteCodex task from thread X | s]\nfix arr[0] and see [docs](http://x)";
+        let prompt = "[remoteCodex: pointer]\n\n[Pockymoe role: reviewer]\nbody\n\n[Pockymoe task from thread X | s]\nfix arr[0] and see [docs](http://x)";
         let blocks = build_prompt_blocks(prompt, dir.path(), true, &[]).unwrap();
         assert_eq!(texts(&blocks), prompt);
     }

@@ -70,7 +70,7 @@ pub fn lookup(model: &str) -> Option<ModelMeta> {
 
 fn load() -> Result<HashMap<String, ModelMeta>, String> {
     // Tests and diagnostics can point at a saved catalog instead of Codex.
-    if let Some(path) = std::env::var_os("REMOTE_CODEX_MODEL_CATALOG") {
+    if let Some(path) = std::env::var_os("POCKYMOE_MODEL_CATALOG") {
         let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
         return Ok(parse(
             &serde_json::from_slice(&bytes).map_err(|e| e.to_string())?,

@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const APP_NAME: &str = "remote-codex";
+pub const APP_NAME: &str = "pockymoe";
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -343,7 +343,7 @@ pub struct ThreadPendingSteerDto {
 
 /// A native subagent currently managed by the provider harness.
 /// Native Claude/Codex agents run inside the provider session and do not have
-/// their own Remote Codex thread id.
+/// their own Pockymoe thread id.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadSubagentDto {

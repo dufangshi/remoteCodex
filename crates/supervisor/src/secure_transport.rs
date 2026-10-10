@@ -13,8 +13,8 @@ use hpke::{
     Kem as KemTrait, OpModeR, Serializable,
 };
 use p256::ecdsa::{signature::Signer, Signature, SigningKey};
+use pockymoe_runtime::Supervisor;
 use rand::{rngs::OsRng, RngCore};
-use remote_codex_runtime::Supervisor;
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,

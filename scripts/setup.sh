@@ -40,7 +40,7 @@ trap 'exit 1' HUP INT TERM
 setup_repo=https://github.com/dufangshi/remoteCodex
 setup_asset="remote-codex-${setup_os}-${setup_arch}"
 [ "$setup_os" != linux ] || setup_asset="$setup_asset-gnu"
-echo 'Checking the latest Remote Codex GitHub release…'
+echo 'Checking the latest Pockymoe GitHub release…'
 if ! download "$setup_repo/releases/latest/download/runtime-version.txt" "$setup_tmp/version"; then
   echo 'Could not resolve the latest GitHub runtime release. Check your connection to github.com and retry.' >&2
   exit 1
@@ -51,28 +51,28 @@ if ! printf '%s\n' "$setup_version" | LC_ALL=C awk -F. 'NF != 3 {exit 1} {for (i
   echo 'GitHub returned an invalid runtime version.' >&2
   exit 1
 fi
-echo "Downloading Remote Codex $setup_version ($setup_os/$setup_arch)…"
+echo "Downloading Pockymoe $setup_version ($setup_os/$setup_arch)…"
 setup_base="$setup_repo/releases/download/v$setup_version"
 download "$setup_base/SHA256SUMS" "$setup_tmp/SHA256SUMS"
-download "$setup_base/$setup_asset" "$setup_tmp/remote-codex"
+download "$setup_base/$setup_asset" "$setup_tmp/pockymoe"
 setup_expected=$(awk -v name="$setup_asset" '$2 == name {count++; hash=$1} END {if(count == 1 && length(hash) == 64 && hash !~ /[^0-9a-fA-F]/) print tolower(hash); else exit 1}' "$setup_tmp/SHA256SUMS") || { echo 'Invalid or missing runtime checksum.' >&2; exit 1; }
 if command -v sha256sum >/dev/null 2>&1; then
-  setup_actual=$(sha256sum "$setup_tmp/remote-codex" | awk '{print $1}')
+  setup_actual=$(sha256sum "$setup_tmp/pockymoe" | awk '{print $1}')
 elif command -v shasum >/dev/null 2>&1; then
-  setup_actual=$(shasum -a 256 "$setup_tmp/remote-codex" | awk '{print $1}')
+  setup_actual=$(shasum -a 256 "$setup_tmp/pockymoe" | awk '{print $1}')
 else
   echo 'sha256sum or shasum is required to verify the runtime.' >&2; exit 1
 fi
 [ "$setup_actual" = "$setup_expected" ] || { echo 'Runtime checksum verification failed. Nothing has been installed.' >&2; exit 1; }
-chmod 700 "$setup_tmp/remote-codex"
-if ! setup_actual_version=$("$setup_tmp/remote-codex" version); then
+chmod 700 "$setup_tmp/pockymoe"
+if ! setup_actual_version=$("$setup_tmp/pockymoe" version); then
   echo 'Cannot execute the downloaded runtime. Linux requires glibc 2.28 or newer.' >&2; exit 1
 fi
 [ "$setup_actual_version" = "$setup_version" ] || { echo 'Runtime version verification failed.' >&2; exit 1; }
-echo "Configuring Remote Codex $setup_version…"
+echo "Configuring Pockymoe $setup_version…"
 # Do not exec: keep the cleanup trap alive until native setup finishes.
 if [ -n "$setup_token" ]; then
-  "$setup_tmp/remote-codex" setup --relay "$relay_url" --token "$setup_token" --port "$setup_port"
+  "$setup_tmp/pockymoe" setup --relay "$relay_url" --token "$setup_token" --port "$setup_port"
 else
-  "$setup_tmp/remote-codex" setup --relay "$relay_url" --code "$setup_code" --port "$setup_port"
+  "$setup_tmp/pockymoe" setup --relay "$relay_url" --code "$setup_code" --port "$setup_port"
 fi

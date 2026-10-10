@@ -11,14 +11,14 @@ use axum::middleware;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
-use remote_codex_protocol::{
+use pockymoe_protocol::{
     now_rfc3339, ApiError, AuthSessionDto, CreateThreadInput, CreateWorkspaceInput,
     ForkThreadInput, ImportThreadInput, PlatformCapabilitiesDto, Provider, RuntimeConfigDto,
     SendThreadPromptInput, ThreadWorkspaceTreeNodeDto, UpdateWorkspaceSettingsInput, VersionDto,
     APP_NAME, APP_VERSION,
 };
-use remote_codex_runtime::files::WorkspaceDownload;
-use remote_codex_runtime::{Supervisor, UploadedPromptAttachment};
+use pockymoe_runtime::files::WorkspaceDownload;
+use pockymoe_runtime::{Supervisor, UploadedPromptAttachment};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::io::AsyncReadExt;
@@ -341,10 +341,10 @@ pub fn router(state: AppState) -> Router {
 }
 
 fn webview_cors_layer() -> Option<CorsLayer> {
-    if std::env::var("REMOTE_CODEX_ENABLE_WEBVIEW_CORS").as_deref() != Ok("true") {
+    if std::env::var("POCKYMOE_ENABLE_WEBVIEW_CORS").as_deref() != Ok("true") {
         return None;
     }
-    let configured = std::env::var("REMOTE_CODEX_WEBVIEW_CORS_ORIGINS")
+    let configured = std::env::var("POCKYMOE_WEBVIEW_CORS_ORIGINS")
         .ok()
         .map(|raw| {
             raw.split(',')
@@ -381,7 +381,7 @@ fn webview_cors_layer() -> Option<CorsLayer> {
 }
 
 fn configured_web_dist() -> Option<PathBuf> {
-    std::env::var("REMOTE_CODEX_WEB_DIST_DIR")
+    std::env::var("POCKYMOE_WEB_DIST_DIR")
         .ok()
         .map(PathBuf::from)
         .or_else(|| {
@@ -434,7 +434,7 @@ async fn spa_fallback(State(state): State<AppState>, request: Request) -> Respon
     if request.method() != Method::GET && request.method() != Method::HEAD {
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
-    if state.config.mode == remote_codex_protocol::Mode::Relay {
+    if state.config.mode == pockymoe_protocol::Mode::Relay {
         return err(
             StatusCode::NOT_FOUND,
             "not_found",
@@ -965,7 +965,7 @@ async fn workspace_raw(
         .path
         .ok_or_else(|| err(StatusCode::BAD_REQUEST, "bad_request", "path is required"))?;
     let workspace = state.get_workspace(&id).map_err(map_err)?;
-    let path = remote_codex_runtime::files::assert_within(
+    let path = pockymoe_runtime::files::assert_within(
         std::path::Path::new(&workspace.abs_path),
         std::path::Path::new(&path),
     )
@@ -1070,9 +1070,9 @@ async fn workspace_delete_file(
     let path = query
         .path
         .ok_or_else(|| err(StatusCode::BAD_REQUEST, "bad_request", "path is required"))?;
-    let _gate = remote_codex_runtime::file_documents::mutation_guard();
+    let _gate = pockymoe_runtime::file_documents::mutation_guard();
     let ws = state.get_workspace(&id).map_err(map_err)?;
-    let abs = remote_codex_runtime::files::assert_mutation_within(
+    let abs = pockymoe_runtime::files::assert_mutation_within(
         std::path::Path::new(&ws.abs_path),
         std::path::Path::new(&path),
     )
@@ -1219,7 +1219,7 @@ async fn get_thread(
             .map_err(map_err)?,
     )
     .unwrap();
-    remote_codex_runtime::history::defer_tool_details(&mut value);
+    pockymoe_runtime::history::defer_tool_details(&mut value);
     Ok(Json(value))
 }
 
@@ -1317,7 +1317,7 @@ async fn thread_turn_detail(
             .map_err(map_err)?,
     )
     .unwrap();
-    remote_codex_runtime::history::defer_tool_details(&mut value);
+    pockymoe_runtime::history::defer_tool_details(&mut value);
     Ok(Json(value))
 }
 
@@ -1880,7 +1880,7 @@ async fn steer_pending_prompt(
 async fn create_publication(
     Path(id): Path<String>,
     State(state): State<AppState>,
-    Json(input): Json<remote_codex_runtime::publications::CreatePublication>,
+    Json(input): Json<pockymoe_runtime::publications::CreatePublication>,
 ) -> Result<Json<Value>, ApiErr> {
     Ok(Json(
         state
@@ -1939,7 +1939,7 @@ async fn export_html(
 }
 
 fn render_transcript_export(
-    detail: &remote_codex_protocol::ThreadDetailDto,
+    detail: &pockymoe_protocol::ThreadDetailDto,
     query: &ExportTranscriptQuery,
 ) -> Result<Response, ApiErr> {
     let mode = query.mode.as_deref().unwrap_or("latest");
@@ -1986,7 +1986,7 @@ fn render_transcript_export(
         .header(header::CONTENT_TYPE, content_type)
         .header(
             header::CONTENT_DISPOSITION,
-            format!("attachment; filename=\"remote-codex-{stem}.{extension}\""),
+            format!("attachment; filename=\"pockymoe-{stem}.{extension}\""),
         )
         .header(header::CACHE_CONTROL, "private, no-store")
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
@@ -2290,14 +2290,14 @@ async fn workspace_move(
     State(state): State<AppState>,
     Json(body): Json<MoveBody>,
 ) -> Result<Json<Value>, ApiErr> {
-    let _gate = remote_codex_runtime::file_documents::mutation_guard();
+    let _gate = pockymoe_runtime::file_documents::mutation_guard();
     let ws = state.get_workspace(&id).map_err(map_err)?;
-    let from = remote_codex_runtime::files::assert_mutation_within(
+    let from = pockymoe_runtime::files::assert_mutation_within(
         std::path::Path::new(&ws.abs_path),
         std::path::Path::new(&body.from_path),
     )
     .map_err(map_err)?;
-    let to = remote_codex_runtime::files::assert_mutation_within(
+    let to = pockymoe_runtime::files::assert_mutation_within(
         std::path::Path::new(&ws.abs_path),
         std::path::Path::new(&body.to_path),
     )
@@ -2375,10 +2375,10 @@ const DSH_PLUGIN_ID: &str = "remote-codex.deepseek-harness";
 /// Native DeepSeek Harness controls for DSH threads: run modes, DSH plugins
 /// and profile settings, commands and the native console.
 fn dsh_plugin(state: &Supervisor) -> Value {
-    let available = remote_codex_runtime::acp::builtin_agents(None)
+    let available = pockymoe_runtime::acp::builtin_agents(None)
         .iter()
         .find(|agent| agent.id == "deepseek")
-        .is_some_and(|agent| remote_codex_runtime::acp::command_available(&agent.base_command));
+        .is_some_and(|agent| pockymoe_runtime::acp::command_available(&agent.base_command));
     json!({
         "id": DSH_PLUGIN_ID,
         "name": "DeepSeek Harness",

@@ -387,7 +387,7 @@ mod tests {
     use super::*;
     #[test]
     fn dsh_home_environment_is_isolated_and_live_import_tracks_the_selected_protocol() {
-        const FLAG: &str = "REMOTE_CODEX_UPSTREAM_DSH_TEST_CHILD";
+        const FLAG: &str = "POCKYMOE_UPSTREAM_DSH_TEST_CHILD";
         if std::env::var_os(FLAG).is_some() {
             let root = PathBuf::from(std::env::var_os("DSH_HOME").unwrap());
             assert_eq!(home("deepseek"), root);

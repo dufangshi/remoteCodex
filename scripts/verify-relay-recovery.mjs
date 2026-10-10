@@ -8,7 +8,7 @@ import { once } from 'node:events';
 
 assert(existsSync('/.dockerenv'), 'Pause/recovery probes must run in an isolated container');
 const root = mkdtempSync('/tmp/relay-recovery-');
-const binary = '/repo/target/debug/remote-codex';
+const binary = '/repo/target/debug/pockymoe';
 const password = randomBytes(24).toString('hex');
 const relay = 'http://127.0.0.1:19877';
 const children = [];
@@ -16,10 +16,10 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 function start(mode, extra) {
   const child = spawn(binary, [mode], { stdio: 'ignore', env: {
     PATH: process.env.PATH, HOST: '127.0.0.1',
-    REMOTE_CODEX_E2E_FAKE_RUNTIME: '1',
-    REMOTE_CODEX_ADMIN_USERNAME: 'testadmin', REMOTE_CODEX_ADMIN_PASSWORD: password,
-    REMOTE_CODEX_SESSION_SECRET: randomBytes(32).toString('hex'),
-    REMOTE_CODEX_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'), ...extra,
+    POCKYMOE_E2E_FAKE_RUNTIME: '1',
+    POCKYMOE_ADMIN_USERNAME: 'testadmin', POCKYMOE_ADMIN_PASSWORD: password,
+    POCKYMOE_SESSION_SECRET: randomBytes(32).toString('hex'),
+    POCKYMOE_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'), ...extra,
   } });
   children.push(child);
   return child;
@@ -56,17 +56,17 @@ const proxy = createServer(client => {
 });
 let supervisor;
 try {
-  start('relay', { PORT: '19877', REMOTE_CODEX_RELAY_DATA_DIR: `${root}/relay`, REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: 'true' });
+  start('relay', { PORT: '19877', POCKYMOE_RELAY_DATA_DIR: `${root}/relay`, POCKYMOE_RELAY_REGISTRATION_ENABLED: 'true' });
   await until(() => api('/healthz'));
   await api('/relay/auth/register', { username: 'owner', email: 'owner@example.test', password });
   token = (await api('/relay/auth/login', { username: 'owner', password })).token;
   const device = await api('/relay/devices', { name: 'Recovery fixture' });
   await new Promise(resolve => proxy.listen(19878, '127.0.0.1', resolve));
   supervisor = start('relay-supervisor', {
-    PORT: '19879', REMOTE_CODEX_RELAY_SUPERVISOR_PORT: '19879',
-    REMOTE_CODEX_RELAY_SERVER_URL: 'http://127.0.0.1:19878',
-    REMOTE_CODEX_RELAY_AGENT_TOKEN: device.token,
-    REMOTE_CODEX_DATABASE_PATH: `${root}/supervisor.sqlite`, REMOTE_CODEX_WORKSPACE_ROOT: `${root}/workspaces`,
+    PORT: '19879', POCKYMOE_RELAY_SUPERVISOR_PORT: '19879',
+    POCKYMOE_RELAY_SERVER_URL: 'http://127.0.0.1:19878',
+    POCKYMOE_RELAY_AGENT_TOKEN: device.token,
+    POCKYMOE_DATABASE_PATH: `${root}/supervisor.sqlite`, POCKYMOE_WORKSPACE_ROOT: `${root}/workspaces`,
   });
   const prefix = `/relay/devices/${device.device.id}`;
   await until(async () => (await api(`${prefix}/presence`)).connected);

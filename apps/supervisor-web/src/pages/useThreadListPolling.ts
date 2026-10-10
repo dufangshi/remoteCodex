@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 
-import type { ThreadDto } from '@remote-codex/shared';
+import type { ThreadDto } from '@pockymoe/shared';
 import type { Dispatch, SetStateAction } from 'react';
 import { fetchThreads } from '../lib/api';
 

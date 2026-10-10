@@ -4,7 +4,7 @@ import type {
   RelayDeviceDto,
   ThreadDto,
   WorkspaceDto,
-} from '@remote-codex/shared';
+} from '@pockymoe/shared';
 import { request } from '../lib/api';
 import {
   rankSplitDevices,

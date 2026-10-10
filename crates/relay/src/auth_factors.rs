@@ -102,7 +102,7 @@ fn totp(secret: Vec<u8>, email: &str) -> Result<TOTP> {
         1,
         30,
         secret,
-        Some("Remote Codex".into()),
+        Some("Pockymoe".into()),
         email.replace(':', ""),
     )
     .map_err(Into::into)

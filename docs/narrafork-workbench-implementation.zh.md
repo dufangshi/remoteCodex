@@ -43,25 +43,25 @@
 
 ## 定向验证与截图复现
 
-Rust 无改动。浏览器使用本工作树的 `target/debug/remote-codex` 基线可执行副本，版本
+Rust 无改动。浏览器使用本工作树的 `target/debug/pockymoe` 基线可执行副本，版本
 `0.12.68`，SHA256 `ac818ba8392445fe3d1f7e3bfcfed3ef6afc0a4f0aaae6ac42cab88fbbaa930d`。
 没有重建无改动的 Rust，也没有运行 workspace 全测。
 
 先构建本分支 UI，并刷新主仓库 file 依赖：
 
 ```sh
-corepack pnpm --dir remote-codex-thread-ui --filter @remote-codex/thread-ui build
+corepack pnpm --dir pockymoe-thread-ui --filter @pockymoe/thread-ui build
 corepack pnpm install --offline --frozen-lockfile
-corepack pnpm --dir remote-codex-thread-ui --filter @remote-codex/thread-ui typecheck
-corepack pnpm --filter @remote-codex/supervisor-web typecheck
-corepack pnpm --dir remote-codex-thread-ui --filter @remote-codex/thread-ui exec vitest run src/components/workbench/presentation.test.ts src/i18n/i18n.test.tsx
-corepack pnpm --filter @remote-codex/supervisor-web exec vitest run src/pages/useThreadDrafts.test.tsx src/pages/workbenchNativeModel.test.ts
+corepack pnpm --dir pockymoe-thread-ui --filter @pockymoe/thread-ui typecheck
+corepack pnpm --filter @pockymoe/supervisor-web typecheck
+corepack pnpm --dir pockymoe-thread-ui --filter @pockymoe/thread-ui exec vitest run src/components/workbench/presentation.test.ts src/i18n/i18n.test.tsx
+corepack pnpm --filter @pockymoe/supervisor-web exec vitest run src/pages/useThreadDrafts.test.tsx src/pages/workbenchNativeModel.test.ts
 ```
 
 浏览器脚本 `scripts/verify-workbench-layout.sh` 只运行新增布局 spec 的两个桌面用例、已有
 thread-groups 的一个桌面用例，以及新增布局 spec 中一个手机用例。端口固定为默认
 18185/15185，数据在本工作树 `.temp/workbench/`；Playwright webServer 清空继承的
-REMOTE_CODEX 连接参数并覆盖高优先级数据库/工作目录环境变量。
+POCKYMOE 连接参数并覆盖高优先级数据库/工作目录环境变量。
 
 ```sh
 WORKBENCH_SCREENSHOT_DIR=/home/ubuntu/dev/remoteCodex/.temp/research/narrafork-implementation/screenshots/layout \

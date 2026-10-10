@@ -2,7 +2,7 @@
 //! Track the native launch receipt until its SDK-origin task notification.
 use std::collections::HashMap;
 
-use remote_codex_protocol::ThreadSubagentDto;
+use pockymoe_protocol::ThreadSubagentDto;
 use serde_json::Value;
 
 #[derive(Default)]

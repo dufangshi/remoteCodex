@@ -288,7 +288,7 @@ pub(super) fn accept(conn: &Connection, device: &str, event: &Value) -> Result<S
         |r| r.get(0),
     )?;
     let id = format!("{device}:{turn}");
-    let payload = json!({"title":"Remote Codex","body":if status=="completed" {"A thread turn completed. Click to view."} else {"A thread turn failed. Click to view."},"url":format!("/devices/{device}/threads/{thread}"),"tag":id,"userId":owner,"occurredAt":at});
+    let payload = json!({"title":"Pockymoe","body":if status=="completed" {"A thread turn completed. Click to view."} else {"A thread turn failed. Click to view."},"url":format!("/devices/{device}/threads/{thread}"),"tag":id,"userId":owner,"occurredAt":at});
     if tx.execute(
         "INSERT OR IGNORE INTO relay_push_events VALUES (?1,?2,?3,?4,?5)",
         params![id, device, owner, payload.to_string(), at],

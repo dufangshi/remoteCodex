@@ -1,1 +1,1 @@
-export { usePlugins } from '@remote-codex/thread-ui';
+export { usePlugins } from '@pockymoe/thread-ui';

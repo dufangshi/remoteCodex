@@ -1,5 +1,5 @@
 use anyhow::{bail, Result};
-use remote_codex_protocol::{ThreadDetailDto, ThreadHistoryItemDto, ThreadTurnDto};
+use pockymoe_protocol::{ThreadDetailDto, ThreadHistoryItemDto, ThreadTurnDto};
 
 const MAX_ITEM_CHARS: usize = 12_000;
 #[derive(Debug, Clone)]

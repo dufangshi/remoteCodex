@@ -8,7 +8,7 @@ import {
   type ThreadHistoryItemDto,
   type ThreadTurnPriceEstimateDto,
   type ThreadTurnTokenUsageDto,
-} from '@remote-codex/shared';
+} from '@pockymoe/shared';
 
 export function prependTurns(
   existing: ThreadDetailDto['turns'],

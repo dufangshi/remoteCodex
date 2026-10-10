@@ -13,11 +13,11 @@ test('left avatar menu opens shared settings and persists uploaded profile image
   await new Promise<void>(done => reservation.close(() => done()));
   const base = `http://127.0.0.1:${port}`;
   const password = randomBytes(20).toString('hex');
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('REMOTE_CODEX_')));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('POCKYMOE_')));
   const logs: string[] = [];
-  const relay = spawn(resolve('target/debug/remote-codex'), ['relay'], {
-    env: { ...env, HOST: '127.0.0.1', PORT: String(port), REMOTE_CODEX_PUBLIC_BASE_URL: `http://localhost:${process.env.E2E_WEB_PORT ?? 5173}`, REMOTE_CODEX_ADMIN_USERNAME: 'test-admin', REMOTE_CODEX_ADMIN_PASSWORD: password, REMOTE_CODEX_RELAY_DATA_DIR: directory,
-      REMOTE_CODEX_RELAY_DATABASE_PATH: join(directory, 'relay.sqlite'), REMOTE_CODEX_RELAY_SESSION_SECRET: randomBytes(32).toString('hex') },
+  const relay = spawn(resolve('target/debug/pockymoe'), ['relay'], {
+    env: { ...env, HOST: '127.0.0.1', PORT: String(port), POCKYMOE_PUBLIC_BASE_URL: `http://localhost:${process.env.E2E_WEB_PORT ?? 5173}`, POCKYMOE_ADMIN_USERNAME: 'test-admin', POCKYMOE_ADMIN_PASSWORD: password, POCKYMOE_RELAY_DATA_DIR: directory,
+      POCKYMOE_RELAY_DATABASE_PATH: join(directory, 'relay.sqlite'), POCKYMOE_RELAY_SESSION_SECRET: randomBytes(32).toString('hex') },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   relay.stdout.on('data', data => logs.push(String(data))); relay.stderr.on('data', data => logs.push(String(data)));

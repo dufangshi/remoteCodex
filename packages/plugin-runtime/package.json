@@ -1,5 +1,5 @@
 {
-  "name": "@remote-codex/plugin-runtime",
+  "name": "@pockymoe/plugin-runtime",
   "private": true,
   "version": "0.1.0",
   "type": "module",

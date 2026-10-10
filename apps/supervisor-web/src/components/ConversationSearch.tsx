@@ -4,8 +4,8 @@ import {
   ApiError, fetchThreadConversationPage, fetchThreadTurnDetail, searchThreadMessages,
   type ConversationSearchMatch, type GlobalConversationSearchMatch, searchConversations,
 } from '../lib/api';
-import type { ThreadTurnDto } from '@remote-codex/shared';
-import { ConversationSearchExcerpt, ConversationSearchScopePicker, type ConversationSearchScope } from '@remote-codex/thread-ui';
+import type { ThreadTurnDto } from '@pockymoe/shared';
+import { ConversationSearchExcerpt, ConversationSearchScopePicker, type ConversationSearchScope } from '@pockymoe/thread-ui';
 import { useSearchMessages } from './searchMessages';
 
 type SearchMatch = ConversationSearchMatch | GlobalConversationSearchMatch;

@@ -1,4 +1,4 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { ArrowLeft, CheckCircle2 } from 'lucide-react';
 import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
@@ -6,8 +6,8 @@ import { Link } from 'react-router-dom';
 import { enableRelayMode } from '../lib/api';
 
 const setupCommand = [
-  'curl -fsSL https://remote-codex.example.com/setup.sh | sh -s -- \\',
-  '  --relay https://remote-codex.example.com --token DEVICE_TOKEN --port 8787',
+  'curl -fsSL https://pockymoe.example.com/setup.sh | sh -s -- \\',
+  '  --relay https://pockymoe.example.com --token DEVICE_TOKEN --port 8787',
 ].join('\n');
 
 const connectionModes = [

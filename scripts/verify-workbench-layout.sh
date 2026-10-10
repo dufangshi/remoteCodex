@@ -13,8 +13,8 @@ exec corepack pnpm "$@"
 SHIM
 chmod +x .temp/bin/pnpm
 export PATH="$PWD/.temp/bin:$PATH"
-# The existing Playwright webServer clears inherited REMOTE_CODEX_* settings
+# The existing Playwright webServer clears inherited POCKYMOE_* settings
 # and overrides the high-priority DB/workspace settings for the fake Supervisor.
-./target/debug/remote-codex --version
+./target/debug/pockymoe --version
 corepack pnpm exec playwright test e2e/workbench-panels.spec.ts e2e/thread-groups.spec.ts --project=desktop-chromium
 corepack pnpm exec playwright test e2e/workbench-panels.spec.ts --grep 'comparison keeps' --project=mobile-chromium

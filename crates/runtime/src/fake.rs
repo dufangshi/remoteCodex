@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Result};
 use async_trait::async_trait;
-use remote_codex_protocol::{
+use pockymoe_protocol::{
     now_rfc3339, toolbox_from_capabilities, AgentBackendDto, AgentBackendInstallationDto,
     AgentBackendManagementSchemaDto, AgentCapabilitySnapshotDto, AgentProviderCapabilitiesDto,
     AgentRuntimeStatusDto, ModelOptionDto, Provider, ReasoningEffortOptionDto, ThreadEventEnvelope,
@@ -154,7 +154,7 @@ impl AgentRuntime for FakeRuntime {
             capabilities: caps,
             management_schema: schema,
             installation: AgentBackendInstallationDto {
-                package_name: Some("remote-codex-e2e-fake-runtime".into()),
+                package_name: Some("pockymoe-e2e-fake-runtime".into()),
                 installed: true,
                 installed_version: Some("test".into()),
                 latest_version: None,

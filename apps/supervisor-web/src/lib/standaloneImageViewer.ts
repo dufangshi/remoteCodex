@@ -1,4 +1,4 @@
-import { translate } from '@remote-codex/thread-ui/i18n';
+import { translate } from '@pockymoe/thread-ui/i18n';
 // Self-contained interaction for downloaded HTML. No React or network needed.
 export function standaloneImageViewer() { return `<style>
 .transcript-image-button{display:inline-block;padding:0;border:0;background:transparent;color:inherit;cursor:zoom-in;max-width:100%}

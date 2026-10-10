@@ -1,6 +1,6 @@
 # Execution state, message delivery, and Supervisor ownership
 
-The 2026-09-11 incident was caused by a test Supervisor inheriting the production `REMOTE_CODEX_DATABASE_PATH`. Its startup recovery rewrote a live turn as interrupted while the real Supervisor and backend continued running. The UI then mixed live output with an obsolete database snapshot, and a prompt endpoint acknowledged a request before its background admission failed.
+The 2026-09-11 incident was caused by a test Supervisor inheriting the production `POCKYMOE_DATABASE_PATH`. Its startup recovery rewrote a live turn as interrupted while the real Supervisor and backend continued running. The UI then mixed live output with an obsolete database snapshot, and a prompt endpoint acknowledged a request before its background admission failed.
 
 ## Ownership and state authority
 
@@ -37,4 +37,4 @@ Through the relay these endpoints are device scoped. Only effective device-owner
 - Component tests cover uptime, restart confirmation, route-bound requests, shared-access restrictions and truthful timeline labels.
 - `scripts/test-supervisor-restart-live.mjs` runs only in the isolated Linux machine. It starts the real Supervisor and independent restart worker with deterministic harnesses for all four providers, blocks external registry access, verifies PID change without version change, the original session IDs, queued delivery once, and no restart of an idle thread. This is separate from real ACP protocol fixture tests.
 
-Treer Apple Container evidence for this change: `/home/mac/remote-codex-update-test/restart-Mv3mUQ/result.json`. All four providers retained their sessions and each had one interrupted turn, one maintenance continuation and one queued turn. The host Supervisor was not restarted.
+Treer Apple Container evidence for this change: `/home/mac/pockymoe-update-test/restart-Mv3mUQ/result.json`. All four providers retained their sessions and each had one interrupted turn, one maintenance continuation and one queued turn. The host Supervisor was not restarted.

@@ -1,6 +1,6 @@
 import { useContext, useEffect, useMemo, type ReactNode } from 'react';
 import { UNSAFE_NavigationContext } from 'react-router-dom';
-import { confirmWorkspaceDocumentLeave } from '@remote-codex/thread-ui';
+import { confirmWorkspaceDocumentLeave } from '@pockymoe/thread-ui';
 
 /** BrowserRouter does not offer data-router blockers. Guard its navigator and
  * native popstate while preserving search/hash updates inside the same thread. */

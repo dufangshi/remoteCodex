@@ -1103,7 +1103,7 @@ pub struct Template {
 }
 pub fn parse_template(value: Value) -> Result<Template> {
     let t: Template = serde_json::from_value(value).map_err(|_| {
-        anyhow!("Expected a Remote Codex template with schemaVersion, harnesses and profiles")
+        anyhow!("Expected a Pockymoe template with schemaVersion, harnesses and profiles")
     })?;
     if t.schema_version != 1 || t.profiles.len() > 50 || t.harnesses.len() > 10 {
         bail!("Unsupported template version or too many entries");

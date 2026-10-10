@@ -20,14 +20,14 @@ import {
   DialogDescription,
   TokenUsageCost,
   type TokenUsageCostProps,
-} from '@remote-codex/thread-ui';
-import { useI18n, type TranslationKey } from '@remote-codex/thread-ui/i18n';
+} from '@pockymoe/thread-ui';
+import { useI18n, type TranslationKey } from '@pockymoe/thread-ui/i18n';
 import type {
   AutomationDto,
   AutomationRunDto,
   AutomationTrigger,
   ThreadDto,
-} from '@remote-codex/shared';
+} from '@pockymoe/shared';
 import { request } from '../lib/api';
 import {
   NativeWatchCard,

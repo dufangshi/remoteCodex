@@ -9,10 +9,10 @@ import shutil
 import zipfile
 
 PLATFORMS = {
-    'darwin-arm64': ('remote-codex', 'remote-codex-darwin-arm64'),
-    'linux-arm64-gnu': ('remote-codex', 'remote-codex-linux-arm64-gnu'),
-    'linux-x64-gnu': ('remote-codex', 'remote-codex-linux-x64-gnu'),
-    'win32-x64-msvc': ('remote-codex.exe', 'remote-codex-win32-x64-msvc-cli.exe'),
+    'darwin-arm64': ('pockymoe', 'remote-codex-darwin-arm64'),
+    'linux-arm64-gnu': ('pockymoe', 'remote-codex-linux-arm64-gnu'),
+    'linux-x64-gnu': ('pockymoe', 'remote-codex-linux-x64-gnu'),
+    'win32-x64-msvc': ('pockymoe.exe', 'remote-codex-win32-x64-msvc-cli.exe'),
 }
 
 def prepare(artifacts, web, out, version):

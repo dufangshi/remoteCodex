@@ -2,11 +2,11 @@
 
 - 状态：Complete
 - 最后审阅：2026-08-31
-- 适用范围：Remote Codex agent runtime、Supervisor conversation persistence、Web/iOS/Android thread surface
+- 适用范围：Pockymoe agent runtime、Supervisor conversation persistence、Web/iOS/Android thread surface
 
 ## 目标
 
-将 Remote Codex 的多 harness 接入收敛为以下长期结构：
+将 Pockymoe 的多 harness 接入收敛为以下长期结构：
 
 1. ACP 承担各 harness 语义真正一致的 session、prompt、事件、权限、配置和 usage 能力。
 2. 每个 harness 通过小型、版本化 adapter 补充 native 独有能力，不在 Supervisor 中复制整套 runtime。
@@ -61,14 +61,14 @@ Goal 模式每次推进后必须更新本节。只允许在对应 checklist 和�
 - 旧日期、旧分支或另一台机器留下的证据不能自动关闭当前实现的 gate。
 - 遇到 provider 版本不支持时，应记录探测结果和 blocker；不得通过硬编码 `capabilities=true` 绕过。
 - 不得输出、提交或记录 Codex auth、API key、Relay token、cookie 或完整敏感 prompt。
-- 修改 `packages/thread-ui/src` 后，必须在拥有该 package 的 thread-ui workspace 中先执行 `pnpm --filter @remote-codex/thread-ui build`，再验证 Supervisor Web。
+- 修改 `packages/thread-ui/src` 后，必须在拥有该 package 的 thread-ui workspace 中先执行 `pnpm --filter @pockymoe/thread-ui build`，再验证 Supervisor Web。
 - 未完成真实 E2E 时，Goal 状态必须保持 active 或明确 blocked，不得标记 complete。
 
 ## 当前事实基线
 
 ### Conversation persistence
 
-Remote Codex 已经为所有 provider 使用同一套本地 SQLite 投影：
+Pockymoe 已经为所有 provider 使用同一套本地 SQLite 投影：
 
 - `threads` 保存本地 thread 与 provider session 的绑定。
 - `thread_turn_metadata` 保存 display prompt、model、reasoning、usage 和时间信息。
@@ -85,9 +85,9 @@ Phase 0 的通用 ACP wrapper 已支持基础 prompt、interrupt、plan、permis
 - ACP session import 被显式禁用。
 - `session/load` 历史回放没有进入专用 hydration mapper。
 - streaming agent message 的 partial delta 在 item 封闭前主要存在于内存。
-- Codex ACP 已声明 steering，但 Remote Codex ACP runtime 没有 `sendInput`。
-- Codex ACP 已声明 goal extension，但 Remote Codex ACP runtime 将 goals 标记为 false。
-- Codex ACP 已声明 image prompt capability，但 Remote Codex ACP runtime 只发送 text block。
+- Codex ACP 已声明 steering，但 Pockymoe ACP runtime 没有 `sendInput`。
+- Codex ACP 已声明 goal extension，但 Pockymoe ACP runtime 将 goals 标记为 false。
+- Codex ACP 已声明 image prompt capability，但 Pockymoe ACP runtime 只发送 text block。
 - compact、fork、hard rollback、MCP management、skills、hooks、host config 和 fast mode 尚未通过 ACP 路径暴露。
 
 Phase 4 已关闭 steering、compact、goal 与 fast mode 差距。`codex-acp 1.6.2` 没有暴露 fork、rollback、MCP 管理、skills、hooks、hook trust 或 host config 管理 wire surface，这些能力经产品决策继续保留在 native Codex；详见 `docs/acp-codex-parity-2026-08-31.json`。执行时仍必须重新记录本机 `codex --version`、`codex-acp --version` 和 ACP initialize response；本节不是永久版本承诺。
@@ -96,7 +96,7 @@ Phase 4 已关闭 steering、compact、goal 与 fast mode 差距。`codex-acp 1.
 
 ### 1. 单一 session 与 process 所有者
 
-一个 Remote Codex thread 在任何时刻只能由一个 runtime connection 拥有。
+一个 Pockymoe thread 在任何时刻只能由一个 runtime connection 拥有。
 
 禁止以下实现：
 
@@ -128,7 +128,7 @@ Phase 4 已关闭 steering、compact、goal 与 fast mode 差距。`codex-acp 1.
 
 - base CLI、ACP server 和 adapter 的探测及安装元数据。
 - 认证环境、provider home 和启动参数。
-- native session ID 与 Remote Codex scoped session ID 的绑定。
+- native session ID 与 Pockymoe scoped session ID 的绑定。
 - extension capability 的版本声明和 method 映射。
 - native 特有 request/event 到统一类型的转换。
 - extension 错误归一化和可恢复性声明。
@@ -237,7 +237,7 @@ idempotency_key
 | 新建、prompt、interrupt | 支持 | 支持 | ACP core | 真实 ACP API + Web E2E |
 | 历史持久化 | provider transcript + Supervisor projection | Supervisor projection，load replay 未 hydrate | Journal core | 重启后无丢失、无重复 |
 | list/load/resume | 支持 | Codex ACP 已声明 | ACP core | 杀死 ACP/Supervisor 后继续上下文 |
-| 导入本地 thread | 支持 | Remote Codex 禁用 | Supervisor adopt + hydrate | 导入已有 Codex thread E2E |
+| 导入本地 thread | 支持 | Pockymoe 禁用 | Supervisor adopt + hydrate | 导入已有 Codex thread E2E |
 | 图片附件 | `localImage` | ACP 只发送 text | ACP prompt capability | 真图片理解 E2E |
 | running-turn steer | 支持 | 已通过 legacy extension 接入 | steer extension | 长 turn 中追加输入 E2E |
 | compact | 支持 | 已通过同一 ACP session 的 control prompt 接入 | compact extension | 触发后继续 prompt |
@@ -271,7 +271,7 @@ Parity 不要求 wire payload 完全一致，但要求用户可见结果、错�
 
 Phase gate：
 
-- [x] `@remote-codex/acp` unit tests 通过。
+- [x] `@pockymoe/acp` unit tests 通过。
 - [x] Supervisor history/detail focused tests 通过。
 - [x] capability snapshot 在 Codex ACP 不可用时返回 unsupported，而不是伪造支持。
 
@@ -374,7 +374,7 @@ Phase gate：
 
 Phase gate：
 
-- [x] 在 Supervisor 外通过真实 Codex ACP 创建 thread，Remote Codex 通过 ACP candidate/import API 导入成功。
+- [x] 在 Supervisor 外通过真实 Codex ACP 创建 thread，Pockymoe 通过 ACP candidate/import API 导入成功。
 - [x] 导入后的旧 transcript、cwd、title 和最后回复正确。
 - [x] 显式 Resume/Connect 后新 prompt 继续原上下文。
 - [x] Supervisor 重启后 imported thread 不重复、不丢失，assistant marker 各恰好一条。
@@ -385,7 +385,7 @@ Phase gate：
 
 - [x] Claude：列出 core、标准 fork、共享 steering/goal 与必须保留的 SDK management。
 - [x] OpenCode：列出 core 与标准 fork；compact 在没有协商 request contract 时保留 native。
-- [x] Grok/Cursor：验证 native ACP 无 Remote Codex extension 时只暴露协商到的基础能力。
+- [x] Grok/Cursor：验证 native ACP 无 Pockymoe extension 时只暴露协商到的基础能力。
 - [x] Gemini/Copilot/DeepSeek：按本机实际安装状态记录 capability，不伪造 parity。
 - [x] 将两个 harness 共同声明的 `session/fork`、steering 与 goal mapping 收敛到共享实现；native mapping 在受控切换前不提前删除。
 - [x] 保留无法安全迁移的 native adapter，并在 capability 报告记录退出条件。
@@ -425,7 +425,7 @@ Phase gate：
 - 使用唯一测试 thread title、prompt marker 和文件 marker。
 - 允许读取现有 Codex 登录态，但不得复制、打印或打包 auth 文件。
 - 测试结束清理临时 workspace、Supervisor DB 和测试产物；不得删除 provider 的非测试 session。
-- E2E 必须显式 opt in，例如 `REMOTE_CODEX_REAL_ACP_E2E=1`，普通单元测试不得意外调用真实模型。
+- E2E 必须显式 opt in，例如 `POCKYMOE_REAL_ACP_E2E=1`，普通单元测试不得意外调用真实模型。
 
 ### 必须新增或固化的入口
 
@@ -440,11 +440,11 @@ e2e/acp-codex-import.spec.ts
 推荐命令形态：
 
 ```bash
-REMOTE_CODEX_REAL_ACP_E2E=1 \
-REMOTE_CODEX_ENABLED_AGENT_PROVIDERS=codex,acp \
+POCKYMOE_REAL_ACP_E2E=1 \
+POCKYMOE_ENABLED_AGENT_PROVIDERS=codex,acp \
 pnpm exec tsx scripts/verify-acp-codex-restart.mts
 
-REMOTE_CODEX_REAL_ACP_E2E=1 \
+POCKYMOE_REAL_ACP_E2E=1 \
 pnpm exec playwright test e2e/acp-codex-parity.spec.ts \
   --project=desktop-chromium
 ```
@@ -466,10 +466,10 @@ pnpm exec playwright test e2e/acp-codex-parity.spec.ts \
 ### Focused checks
 
 ```bash
-pnpm --filter @remote-codex/acp typecheck
-pnpm --filter @remote-codex/acp test
-pnpm --filter @remote-codex/supervisor-api typecheck
-pnpm --filter @remote-codex/supervisor-api exec vitest run \
+pnpm --filter @pockymoe/acp typecheck
+pnpm --filter @pockymoe/acp test
+pnpm --filter @pockymoe/supervisor-api typecheck
+pnpm --filter @pockymoe/supervisor-api exec vitest run \
   src/thread-detail-assembler.test.ts \
   src/thread-history-items.test.ts
 ```
@@ -477,9 +477,9 @@ pnpm --filter @remote-codex/supervisor-api exec vitest run \
 ### Integration checks
 
 ```bash
-pnpm --filter @remote-codex/supervisor-api test
-pnpm --filter @remote-codex/supervisor-web typecheck
-pnpm --filter @remote-codex/supervisor-web test
+pnpm --filter @pockymoe/supervisor-api test
+pnpm --filter @pockymoe/supervisor-web typecheck
+pnpm --filter @pockymoe/supervisor-web test
 pnpm build
 ```
 
@@ -488,24 +488,24 @@ pnpm build
 真实 E2E 命令必须由实施阶段新增并保持可重复。最终至少运行：
 
 ```bash
-REMOTE_CODEX_REAL_ACP_E2E=1 \
+POCKYMOE_REAL_ACP_E2E=1 \
 pnpm exec tsx scripts/verify-acp-codex-restart.mts
 
-REMOTE_CODEX_REAL_ACP_E2E=1 \
+POCKYMOE_REAL_ACP_E2E=1 \
 pnpm exec playwright test e2e/acp-codex-parity.spec.ts \
   --project=desktop-chromium
 ```
 
-如果变更影响 `@remote-codex/thread-ui`：
+如果变更影响 `@pockymoe/thread-ui`：
 
 ```bash
 (
-  cd ../remote-codex-thread-ui
-  pnpm --filter @remote-codex/thread-ui build
-  pnpm --filter @remote-codex/thread-ui test
+  cd ../pockymoe-thread-ui
+  pnpm --filter @pockymoe/thread-ui build
+  pnpm --filter @pockymoe/thread-ui test
 )
-pnpm --filter @remote-codex/supervisor-web test
-pnpm --filter @remote-codex/supervisor-web build
+pnpm --filter @pockymoe/supervisor-web test
+pnpm --filter @pockymoe/supervisor-web build
 ```
 
 如果变更影响移动端 contract、WebThread 或用户可见 capability：
@@ -548,12 +548,12 @@ ACP protocol：`1`<br>
 能力快照：`docs/acp-capability-baseline-2026-08-31.json`<br>
 命令与结果：
 
-- `REMOTE_CODEX_ACP_COMMAND=codex-acp pnpm exec tsx scripts/inspect-acp-capabilities.mts`：成功，确认 list/load/resume/close/delete、image、MCP、steering 和 goal 协商结果。
-- `pnpm --filter @remote-codex/acp typecheck`：成功。
-- `pnpm --filter @remote-codex/acp test`：8 files、23 tests 通过。
-- `pnpm --filter @remote-codex/supervisor-api typecheck`：成功。
-- `pnpm --filter @remote-codex/supervisor-api exec vitest run src/thread-detail-assembler.test.ts src/thread-history-items.test.ts src/thread-history-persistence-coordinator.test.ts`：3 files、26 tests 通过。
-- `pnpm --filter @remote-codex/db typecheck`：成功。
+- `POCKYMOE_ACP_COMMAND=codex-acp pnpm exec tsx scripts/inspect-acp-capabilities.mts`：成功，确认 list/load/resume/close/delete、image、MCP、steering 和 goal 协商结果。
+- `pnpm --filter @pockymoe/acp typecheck`：成功。
+- `pnpm --filter @pockymoe/acp test`：8 files、23 tests 通过。
+- `pnpm --filter @pockymoe/supervisor-api typecheck`：成功。
+- `pnpm --filter @pockymoe/supervisor-api exec vitest run src/thread-detail-assembler.test.ts src/thread-history-items.test.ts src/thread-history-persistence-coordinator.test.ts`：3 files、26 tests 通过。
+- `pnpm --filter @pockymoe/db typecheck`：成功。
 
 检查：capability snapshot 不含 credentials、session ID 或 message content；测试临时 SQLite 和 fake ACP state 已由测试 teardown 清理。本证据只关闭 Phase 0，不替代后续真实 Codex ACP restart/Web E2E。
 
@@ -567,11 +567,11 @@ Commit 基线：`ea4764b3c08343f9720b773830dc45b9b9b980fd` 加当前 worktree �
 ACP protocol：`1`<br>
 命令与结果：
 
-- `pnpm --filter @remote-codex/acp typecheck && pnpm --filter @remote-codex/acp test`：9 files、27 tests 通过。
-- `pnpm --filter @remote-codex/supervisor-api typecheck`：成功。
-- `pnpm --filter @remote-codex/supervisor-api exec vitest run src/thread-detail-assembler.test.ts src/thread-history-items.test.ts src/thread-history-persistence-coordinator.test.ts`：3 files、28 tests 通过。
+- `pnpm --filter @pockymoe/acp typecheck && pnpm --filter @pockymoe/acp test`：9 files、27 tests 通过。
+- `pnpm --filter @pockymoe/supervisor-api typecheck`：成功。
+- `pnpm --filter @pockymoe/supervisor-api exec vitest run src/thread-detail-assembler.test.ts src/thread-history-items.test.ts src/thread-history-persistence-coordinator.test.ts`：3 files、28 tests 通过。
 - `pnpm exec tsx scripts/verify-fake-acp-supervisor-restart.mts`：在 assistant streaming 中 `SIGKILL` Supervisor 后，Supervisor-only fallback 恢复成功；resume/hydrate 后 matching turn 为 1、assistant item 为 1、无重复。
-- `REMOTE_CODEX_ACP_COMMAND=codex-acp REMOTE_CODEX_ACP_TIMEOUT_MS=180000 pnpm exec tsx scripts/verify-acp-codex-restart.mts`：真实 Codex ACP seed marker、单 turn hydrate、零 live replay 和 provider context continuation 均成功，测试 provider session 已通过 `session/delete` 清理。
+- `POCKYMOE_ACP_COMMAND=codex-acp POCKYMOE_ACP_TIMEOUT_MS=180000 pnpm exec tsx scripts/verify-acp-codex-restart.mts`：真实 Codex ACP seed marker、单 turn hydrate、零 live replay 和 provider context continuation 均成功，测试 provider session 已通过 `session/delete` 清理。
 
 实现检查：hydrate turn/item 会与 Supervisor live checkpoint 做保守语义对齐；ACP v1 缺少权威历史总数时明确返回 `historyCoverage.completeness=unknown`，不伪造 complete。fake/真实 verifier 均删除临时 workspace/state；输出不含 session ID、凭据或消息正文。
 
@@ -584,13 +584,13 @@ Commit 基线：`ea4764b3c08343f9720b773830dc45b9b9b980fd` 加当前 worktree �
 `codex-acp --version`：`@agentclientprotocol/codex-acp 1.6.2`<br>
 命令与结果：
 
-- `pnpm --filter @remote-codex/acp typecheck && pnpm --filter @remote-codex/acp test`：11 files、33 tests 通过；覆盖 full/minimal negotiation、typed image/audio/resource、config rollback、workspace symlink escape 和 terminal boundary。
-- `pnpm --filter @remote-codex/supervisor-api typecheck`：成功。
-- `pnpm --filter @remote-codex/supervisor-web typecheck`：成功。
-- `pnpm --filter @remote-codex/supervisor-web exec vitest run src/pages/ThreadDetailPage.test.tsx src/lib/api.test.ts`：2 files、64 tests 通过。
+- `pnpm --filter @pockymoe/acp typecheck && pnpm --filter @pockymoe/acp test`：11 files、33 tests 通过；覆盖 full/minimal negotiation、typed image/audio/resource、config rollback、workspace symlink escape 和 terminal boundary。
+- `pnpm --filter @pockymoe/supervisor-api typecheck`：成功。
+- `pnpm --filter @pockymoe/supervisor-web typecheck`：成功。
+- `pnpm --filter @pockymoe/supervisor-web exec vitest run src/pages/ThreadDetailPage.test.tsx src/lib/api.test.ts`：2 files、64 tests 通过。
 - `pnpm exec tsx scripts/verify-fake-acp-supervisor-restart.mts`：child negotiated lifecycle 经 Supervisor API 可见，streaming crash/restart 仍无重复。
-- `REMOTE_CODEX_ACP_CORE_E2E=1 ... pnpm exec playwright test e2e/acp-core-capability.spec.ts --project=desktop-chromium`：1 test 通过；Web timeline、model=`fixture-fast`、reasoning=`high`、context usage 和 reload 后单 turn 均正确。
-- 使用隔离 `CODEX_HOME` 运行 `REMOTE_CODEX_ACP_COMMAND=codex-acp REMOTE_CODEX_ACP_TIMEOUT_MS=180000 pnpm exec tsx scripts/verify-acp-codex-restart.mts`：真实图片识别、1 次 guarded permission、文件写入、重启上下文和两个 session 删除均成功。
+- `POCKYMOE_ACP_CORE_E2E=1 ... pnpm exec playwright test e2e/acp-core-capability.spec.ts --project=desktop-chromium`：1 test 通过；Web timeline、model=`fixture-fast`、reasoning=`high`、context usage 和 reload 后单 turn 均正确。
+- 使用隔离 `CODEX_HOME` 运行 `POCKYMOE_ACP_COMMAND=codex-acp POCKYMOE_ACP_TIMEOUT_MS=180000 pnpm exec tsx scripts/verify-acp-codex-restart.mts`：真实图片识别、1 次 guarded permission、文件写入、重启上下文和两个 session 删除均成功。
 
 实现检查：per-agent capability snapshot 在 unavailable 时返回 `effectiveCapabilities=null`；Web 使用全 false capability 并显示 adapter 修复信息。FS、write 和 terminal cwd 均限制在 session workspace，审计事件只包含 operation/session/path，不包含文件内容。
 
@@ -603,9 +603,9 @@ Commit 基线：`ea4764b3c08343f9720b773830dc45b9b9b980fd` 加当前 worktree �
 平台：macOS arm64<br>
 命令与结果：
 
-- `pnpm --filter @remote-codex/acp typecheck && pnpm --filter @remote-codex/acp test`：12 files、37 tests 通过。
-- `pnpm --filter @remote-codex/supervisor-api typecheck`：成功。
-- `pnpm --filter @remote-codex/supervisor-api exec vitest run src/thread-runtime-event-projector.test.ts src/thread-detail-assembler.test.ts src/thread-history-items.test.ts src/thread-history-persistence-coordinator.test.ts`：4 files、29 tests 通过。
+- `pnpm --filter @pockymoe/acp typecheck && pnpm --filter @pockymoe/acp test`：12 files、37 tests 通过。
+- `pnpm --filter @pockymoe/supervisor-api typecheck`：成功。
+- `pnpm --filter @pockymoe/supervisor-api exec vitest run src/thread-runtime-event-projector.test.ts src/thread-detail-assembler.test.ts src/thread-history-items.test.ts src/thread-history-persistence-coordinator.test.ts`：4 files、29 tests 通过。
 - fake ACP stdio extension `fixture.session/v1/compact`：method response 成功，公共 extension event notification 被 runtime 接收并转为 `harness.extension`。
 - Registry contract：重复 idempotency key 只执行一次；不同 operation 复用 key 返回 conflict；timeout 触发 cooperative abort 且允许显式 retry；v2 请求不会命中仅注册 v1 的 adapter。
 - Supervisor projector：extension event 经标准 `ThreadRuntimeEventProjector` 写入 `thread_history_items`，只保存规范化摘要，不持久化测试中的敏感 payload。
@@ -622,8 +622,8 @@ Commit 基线：`ea4764b3c08343f9720b773830dc45b9b9b980fd` 加当前 worktree �
 ACP protocol：`1`<br>
 命令与结果：
 
-- `pnpm --filter @remote-codex/acp typecheck && pnpm --filter @remote-codex/acp test`：12 files、39 tests 通过。
-- `REMOTE_CODEX_ACP_COMMAND=codex-acp REMOTE_CODEX_ACP_TIMEOUT_MS=180000 pnpm exec tsx scripts/verify-acp-codex-restart.mts`：真实 running-turn steering、同 session compact 后继续、goal set/pause/resume/clear、fast config 与后续 usage、图片、guarded permission、重启上下文均通过。
+- `pnpm --filter @pockymoe/acp typecheck && pnpm --filter @pockymoe/acp test`：12 files、39 tests 通过。
+- `POCKYMOE_ACP_COMMAND=codex-acp POCKYMOE_ACP_TIMEOUT_MS=180000 pnpm exec tsx scripts/verify-acp-codex-restart.mts`：真实 running-turn steering、同 session compact 后继续、goal set/pause/resume/clear、fast config 与后续 usage、图片、guarded permission、重启上下文均通过。
 - `docs/acp-codex-parity-2026-08-31.json`：fork、rollback、MCP management、skills、hooks、hook trust、host config 与 billing tier metadata 均有显式 native fallback 或限制说明；`unapprovedRegressions=[]`。
 
 实现检查：steering/goal 使用 initialize `_meta` 中的 method/action 协商；compact 通过同一 ACP session 的隐藏 `/compact` turn 执行；未启动第二个 app-server owner。测试 session、隔离 Codex home 和 workspace 已清理，输出不含 session ID、凭据或消息正文。
@@ -635,9 +635,9 @@ Commit 基线：`ea4764b3c08343f9720b773830dc45b9b9b980fd` 加当前 worktree �
 平台：macOS arm64<br>
 命令与结果：
 
-- `pnpm --filter @remote-codex/supervisor-api exec vitest run src/app.test.ts`：156 tests 全部通过。
-- `pnpm --filter @remote-codex/supervisor-web exec vitest run src/pages/ThreadImportPage.test.tsx src/lib/api.test.ts`：2 files、18 tests 通过。
-- `REMOTE_CODEX_REAL_ACP_E2E=1 REMOTE_CODEX_ACP_COMMAND=codex-acp pnpm exec tsx scripts/verify-acp-codex-import.mts`：Supervisor 外创建真实会话、unmanaged candidate discovery、`agentId`/cwd/history 导入、重复 import 复用、显式连接、上下文续接与 Supervisor 重启全部通过；重启后 seed/continuation assistant marker 各 1 条。
+- `pnpm --filter @pockymoe/supervisor-api exec vitest run src/app.test.ts`：156 tests 全部通过。
+- `pnpm --filter @pockymoe/supervisor-web exec vitest run src/pages/ThreadImportPage.test.tsx src/lib/api.test.ts`：2 files、18 tests 通过。
+- `POCKYMOE_REAL_ACP_E2E=1 POCKYMOE_ACP_COMMAND=codex-acp pnpm exec tsx scripts/verify-acp-codex-import.mts`：Supervisor 外创建真实会话、unmanaged candidate discovery、`agentId`/cwd/history 导入、重复 import 复用、显式连接、上下文续接与 Supervisor 重启全部通过；重启后 seed/continuation assistant marker 各 1 条。
 
 实现检查：Import 页面只启动所选 ACP child；候选列表过滤已管理 session；runtime import 使用 `local_provider_import`，断开时拒绝 prompt。provider replay 包含 developer instructions 时使用有长度下限的 containment 对齐 visible prompt，修复真实重启后的重复 turn。临时 DB、workspace 和隔离 Codex home 已清理。
 
@@ -651,8 +651,8 @@ Commit 基线：`ea4764b3c08343f9720b773830dc45b9b9b980fd` 加当前 worktree �
 
 - 实际版本探测：Claude Code `2.1.251` / Claude Agent ACP `0.70.0`；OpenCode `1.17.11`；Grok `1.0.13`；Cursor Agent `2026.08.11-e8db854`；Gemini/Copilot base missing；DeepSeek Harness `0.1.2-alpha.2` 但 `dsh-acp` missing。
 - 分别对 `claude-agent-acp`、`opencode acp`、`grok agent stdio`、`cursor-agent acp` 运行 initialize inspector，均成功记录协议 1 的真实协商能力。
-- `pnpm --filter @remote-codex/acp typecheck && pnpm --filter @remote-codex/acp test`：13 files、43 tests 通过；Codex profile 与 portable fork profile 共用 `assertAcpHarnessContract`。
-- `REMOTE_CODEX_REAL_ACP_E2E=1 REMOTE_CODEX_ACP_COMMAND=claude-agent-acp ... pnpm exec tsx scripts/verify-acp-non-codex-harness.mts`：真实 create/prompt/process restart/hydrate/context continuation、标准 session fork、fork context continuation 和 session cleanup 全部通过。
+- `pnpm --filter @pockymoe/acp typecheck && pnpm --filter @pockymoe/acp test`：13 files、43 tests 通过；Codex profile 与 portable fork profile 共用 `assertAcpHarnessContract`。
+- `POCKYMOE_REAL_ACP_E2E=1 POCKYMOE_ACP_COMMAND=claude-agent-acp ... pnpm exec tsx scripts/verify-acp-non-codex-harness.mts`：真实 create/prompt/process restart/hydrate/context continuation、标准 session fork、fork context continuation 和 session cleanup 全部通过。
 - 共享 contract checker 接入后重新运行真实 Codex verifier：restart、steer、compact、goal、fast、image、approval 全部通过。
 
 实现检查：Claude/OpenCode 同时声明的 unstable `session/fork` 晋升 ACP core；Codex/Claude 同 contract steering/goal 复用协商 adapter；Codex `/compact` 未泄漏给其他 harness。Claude fork 的 provider load 返回空 transcript 时，child journal 使用已 hydrate source snapshot，随后用真实 nonce follow-up 独立证明 fork provider context。测试 session 与 workspace 已清理，报告不含凭据、session ID 或消息正文。
@@ -668,7 +668,7 @@ Commit 基线：`ea4764b3c08343f9720b773830dc45b9b9b980fd` 加当前 worktree �
 - 同一 wrapper 的 `--project=mobile-chromium`：1 passed；真实 prompt/reload 与 composer viewport boundary 通过。
 - Android debug APK：Gradle build/install 成功；`e2e/android-acp-codex-smoke.mjs` 在 local、authenticated server 和 relay 三种模式均通过，`agentId=codex`、`gpt-5.6-sol/xhigh`、status idle、WebView marker/reload 和 Codex-only capability 过滤正确。
 - Server auth：匿名 `/api/workspaces` 返回 401，登录 token 可用。Relay：`Dockerfile.relay` image build 成功，`supervisorConnected=true`，forwarded `/api/workspaces` 200，Android Relay WebView prompt/reload 成功。
-- iOS `testLiveLocalAcpThreadShowsAgentAndSubmitsPrompt`：Xcode 27，1 test、0 skip、0 failure；真实 Codex ACP prompt 后 terminate/relaunch，同一 marker 恢复。证据：`.local/mobile-parity/evidence/RemoteCodexRealProvidersFinal.xcresult`。
+- iOS `testLiveLocalAcpThreadShowsAgentAndSubmitsPrompt`：Xcode 27，1 test、0 skip、0 failure；真实 Codex ACP prompt 后 terminate/relaunch，同一 marker 恢复。证据：`.local/mobile-parity/evidence/PockymoeRealProvidersFinal.xcresult`。
 - `pnpm exec tsx scripts/verify-native-codex-fallback.mts`：native 与 ACP 同时 selectable，native thread owner 保持、Supervisor restart、显式 Resume、transcript 与 provider context continuation 全部通过。
 - 最终 checks：ACP 13 files / 44 tests；Supervisor 18 files / 225 tests；Web 20 files / 320 tests；Android unit 与 release assemble；iOS unit 72 tests；`pnpm build` 全 workspace 成功。
 
@@ -691,8 +691,8 @@ Commit 基线：`ea4764b3c08343f9720b773830dc45b9b9b980fd` 加 `codex/acp-harnes
 
 本轮重新执行的命令与结果：
 
-- `pnpm --filter @remote-codex/acp test`：13 files、53 tests 通过；ACP typecheck 与 lint 通过。
-- `pnpm --filter @remote-codex/supervisor-api test`：19 files、226 tests 通过；`pnpm --filter @remote-codex/supervisor-web test`：20 files、320 tests 通过。
+- `pnpm --filter @pockymoe/acp test`：13 files、53 tests 通过；ACP typecheck 与 lint 通过。
+- `pnpm --filter @pockymoe/supervisor-api test`：19 files、226 tests 通过；`pnpm --filter @pockymoe/supervisor-web test`：20 files、320 tests 通过。
 - `pnpm typecheck` 与 `pnpm build`：全 workspace 成功，包含 Supervisor Web、Android WebThread 和 iOS WebThread。
 - 真实 Codex restart verifier：hydrate 无 live replay、provider context、image、steer、compact、goal、fast usage、guarded approval/file write 和 session delete 全部通过。
 - 真实 Claude shared-contract verifier：restart/hydrate/context、标准 fork、fork context、steering、goal 和 session delete 全部通过。

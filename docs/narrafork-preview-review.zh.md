@@ -72,7 +72,7 @@ Relay 权限按右侧目标 threadId 单独查询。权限未确认、失败或 
 | 独立共享 UI | `preview/narrafork-editor-workbench-ui` · `692202ac34f5d0a6a7ecc41280962cf790e5b615` |
 
 目录：`/home/ubuntu/dev/remoteCodex.worktrees/nf-combined-preview`，其嵌套
-`remote-codex-thread-ui` 是独立仓库。最终主仓 SHA 与源码/日志索引见本轮交付
+`pockymoe-thread-ui` 是独立仓库。最终主仓 SHA 与源码/日志索引见本轮交付
 `/home/ubuntu/dev/remoteCodex/.temp/research/narrafork-implementation/revision/ui-result.md`。
 
 ## 本轮验证
@@ -89,13 +89,13 @@ Relay 权限按右侧目标 threadId 单独查询。权限未确认、失败或 
   编辑、保存与关闭保护。
 
 ```sh
-corepack pnpm --dir remote-codex-thread-ui --filter @remote-codex/thread-ui build
+corepack pnpm --dir pockymoe-thread-ui --filter @pockymoe/thread-ui build
 corepack pnpm install --offline --frozen-lockfile
-corepack pnpm --dir remote-codex-thread-ui --filter @remote-codex/thread-ui typecheck
-corepack pnpm --filter @remote-codex/supervisor-web typecheck
-corepack pnpm --filter @remote-codex/supervisor-web build
-corepack pnpm --dir remote-codex-thread-ui --filter @remote-codex/thread-ui exec vitest run src/components/workbench/presentation.test.ts src/i18n/i18n.test.tsx
-corepack pnpm --filter @remote-codex/supervisor-web exec vitest run src/pages/useThreadDrafts.test.tsx src/pages/useWorkbenchReference.test.tsx
+corepack pnpm --dir pockymoe-thread-ui --filter @pockymoe/thread-ui typecheck
+corepack pnpm --filter @pockymoe/supervisor-web typecheck
+corepack pnpm --filter @pockymoe/supervisor-web build
+corepack pnpm --dir pockymoe-thread-ui --filter @pockymoe/thread-ui exec vitest run src/components/workbench/presentation.test.ts src/i18n/i18n.test.tsx
+corepack pnpm --filter @pockymoe/supervisor-web exec vitest run src/pages/useThreadDrafts.test.tsx src/pages/useWorkbenchReference.test.tsx
 ```
 
 浏览器环境与准确范围：

@@ -3,8 +3,8 @@ use std::sync::Arc;
 use crate::bounded_channel as mpsc;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{SinkExt, StreamExt};
-use remote_codex_protocol::{now_rfc3339, SupervisorConnectedEnvelope};
-use remote_codex_runtime::Supervisor;
+use pockymoe_protocol::{now_rfc3339, SupervisorConnectedEnvelope};
+use pockymoe_runtime::Supervisor;
 use serde_json::{json, Value};
 use uuid::Uuid;
 

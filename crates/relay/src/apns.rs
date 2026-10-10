@@ -15,10 +15,10 @@ pub(super) struct Subscription {
 
 pub(super) fn configured() -> bool {
     [
-        "REMOTE_CODEX_APNS_KEY_PATH",
-        "REMOTE_CODEX_APNS_KEY_ID",
-        "REMOTE_CODEX_APNS_TEAM_ID",
-        "REMOTE_CODEX_APNS_TOPIC",
+        "POCKYMOE_APNS_KEY_PATH",
+        "POCKYMOE_APNS_KEY_ID",
+        "POCKYMOE_APNS_TEAM_ID",
+        "POCKYMOE_APNS_TOPIC",
     ]
     .iter()
     .all(|key| std::env::var(key).is_ok_and(|v| !v.trim().is_empty()))
@@ -66,11 +66,11 @@ pub(super) async fn deliver(
     payload: &str,
 ) -> Result<StatusCode> {
     validate(sub)?;
-    let pem = std::fs::read(std::env::var("REMOTE_CODEX_APNS_KEY_PATH")?)?;
+    let pem = std::fs::read(std::env::var("POCKYMOE_APNS_KEY_PATH")?)?;
     let token = jwt(
         &pem,
-        &std::env::var("REMOTE_CODEX_APNS_KEY_ID")?,
-        &std::env::var("REMOTE_CODEX_APNS_TEAM_ID")?,
+        &std::env::var("POCKYMOE_APNS_KEY_ID")?,
+        &std::env::var("POCKYMOE_APNS_TEAM_ID")?,
         chrono::Utc::now().timestamp(),
     )?;
     let event: Value = serde_json::from_str(payload)?;
@@ -87,7 +87,7 @@ pub(super) async fn deliver(
     let reply = http.post(format!("https://{host}/3/device/{}", sub.device_token))
         .version(reqwest::Version::HTTP_2)
         .bearer_auth(token)
-        .header("apns-topic", std::env::var("REMOTE_CODEX_APNS_TOPIC")?)
+        .header("apns-topic", std::env::var("POCKYMOE_APNS_TOPIC")?)
         .header("apns-push-type", "alert")
         .header("apns-priority", "10")
         .header("apns-expiration", (chrono::Utc::now().timestamp() + 86400).to_string())

@@ -13,7 +13,7 @@ pub use transcript::TranscriptQuery;
 
 use crate::Supervisor;
 use anyhow::{ensure, Result};
-use remote_codex_protocol::{now_rfc3339, ThreadEventEnvelope};
+use pockymoe_protocol::{now_rfc3339, ThreadEventEnvelope};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -31,19 +31,19 @@ use uuid::Uuid;
 pub struct CliContext {
     pub url: String,
     pub token: String,
-    /// Holds a `remote-codex` that runs this executable; first on managed PATHs.
+    /// Holds a `pockymoe` that runs this executable; first on managed PATHs.
     pub bin_dir: Option<std::path::PathBuf>,
 }
 
-/// Agents run `remote-codex`, but release executables carry a platform suffix
+/// Agents run `pockymoe`, but release executables carry a platform suffix
 /// (`remote-codex-linux-x64-gnu`). Prepending only the executable's directory let
 /// PATH fall through to an older global install that lacks newer commands.
 fn cli_bin_dir(database: &std::path::Path) -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let name = if cfg!(windows) {
-        "remote-codex.exe"
+        "pockymoe.exe"
     } else {
-        "remote-codex"
+        "pockymoe"
     };
     if exe.file_name()? == name {
         return exe.parent().map(std::path::Path::to_path_buf);
@@ -64,7 +64,7 @@ fn cli_bin_dir(database: &std::path::Path) -> Option<std::path::PathBuf> {
     match linked {
         Ok(()) => Some(dir),
         Err(error) => {
-            tracing::warn!(%error, "managed agents may resolve another remote-codex on PATH");
+            tracing::warn!(%error, "managed agents may resolve another pockymoe on PATH");
             None
         }
     }
@@ -82,7 +82,7 @@ pub struct InteractionState {
     started: AtomicBool,
 }
 
-pub use remote_codex_protocol::ThreadSendInput as SendInput;
+pub use pockymoe_protocol::ThreadSendInput as SendInput;
 
 impl Supervisor {
     /// Managed callers receive an opaque identity-bound credential. A shell's
@@ -126,12 +126,9 @@ impl Supervisor {
         let env = context
             .map(|c| {
                 let mut env = vec![
-                    ("REMOTE_CODEX_URL".into(), c.url),
-                    (
-                        "REMOTE_CODEX_TOKEN".into(),
-                        self.cli_thread_token(thread_id),
-                    ),
-                    ("REMOTE_CODEX_THREAD_ID".into(), thread_id.into()),
+                    ("POCKYMOE_URL".into(), c.url),
+                    ("POCKYMOE_TOKEN".into(), self.cli_thread_token(thread_id)),
+                    ("POCKYMOE_THREAD_ID".into(), thread_id.into()),
                 ];
                 if let Ok(exe) = std::env::current_exe() {
                     if let Some(dir) = exe.parent() {
@@ -171,7 +168,7 @@ impl Supervisor {
         );
         ensure!(
             input.notify_delivery == "inbox",
-            "notifyDelivery must be inbox; completion notifications are passive and cannot wake the caller. Read them with remote-codex inbox."
+            "notifyDelivery must be inbox; completion notifications are passive and cannot wake the caller. Read them with pockymoe inbox."
         );
         if input.delivery != "inbox" {
             self.ensure_prompt_allowed(&thread)?;
@@ -211,9 +208,9 @@ impl Supervisor {
         }
         let kind = input.kind.as_deref().unwrap_or("status");
         ensure!(
-            remote_codex_protocol::MESSAGE_KINDS.contains(&kind),
+            pockymoe_protocol::MESSAGE_KINDS.contains(&kind),
             "kind must be one of {}",
-            remote_codex_protocol::MESSAGE_KINDS.join(", ")
+            pockymoe_protocol::MESSAGE_KINDS.join(", ")
         );
         if let Some(parent) = &input.in_reply_to {
             ensure!(!parent.trim().is_empty(), "inReplyTo must be a message id");
@@ -285,7 +282,7 @@ impl Supervisor {
                     .map(|value| format!("\nImmediate handling needed: {value}"))
                     .unwrap_or_default();
                 format!(
-                    "[remoteCodex {kind} from {from}{subject}]{reply}{reason}\n{}",
+                    "[Pockymoe {kind} from {from}{subject}]{reply}{reason}\n{}",
                     input.text
                 )
             }
@@ -645,7 +642,7 @@ pub(crate) fn finish_notification(
             } else {
                 ""
             };
-            let text = format!("[remoteCodex turn notification]\nThread {thread}, turn {turn} ended with status {status} at {now}. This describes execution status, not business success - check the result below before acting on it. Full detail: remote-codex transcript {target} --turn {turn} --view overview{device_hint}{summary}");
+            let text = format!("[Pockymoe turn notification]\nThread {thread}, turn {turn} ended with status {status} at {now}. This describes execution status, not business success - check the result below before acting on it. Full detail: pockymoe transcript {target} --turn {turn} --view overview{device_hint}{summary}");
             let message_id = Uuid::new_v4().to_string();
             let subject = format!("Delegate turn {status}");
             if let Some(device) = remote_device {

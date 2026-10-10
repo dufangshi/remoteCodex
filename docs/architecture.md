@@ -1,6 +1,6 @@
 # Architecture
 
-Remote Codex is a Treer-shaped control plane for personal coding-agent sessions.
+Pockymoe is a Treer-shaped control plane for personal coding-agent sessions.
 
 ```text
 Browser / mobile WebView / native macOS app
@@ -20,7 +20,7 @@ Browser / mobile WebView / native macOS app
 | `crates/runtime` | SQLite journal, workspace files, ACP catalog, fake runtime, thread service |
 | `crates/supervisor` | HTTP + WebSocket + relay tunnel client |
 | `crates/relay` | Public accounts, devices, shares |
-| `crates/cli` | `remote-codex` binary |
+| `crates/cli` | `pockymoe` binary |
 
 ## Module layout
 
@@ -42,8 +42,8 @@ current size inventory and the modules that most need it.
 
 Native Android/iOS/Windows clients are not duplicated in this rewrite. They keep
 talking to the same HTTP/WS contract from `main`. The React thread surface stays
-in `remote-codex-thread-ui`, consumed by `apps/supervisor-web` as
-`@remote-codex/thread-ui` and `@remote-codex/shared`.
+in `pockymoe-thread-ui`, consumed by `apps/supervisor-web` as
+`@pockymoe/thread-ui` and `@pockymoe/shared`.
 
 The native macOS/iOS/Android client apps live in a separate repository
 (`remote-codex-app`), not in this tree — `apps/ios` and `apps/android` here hold

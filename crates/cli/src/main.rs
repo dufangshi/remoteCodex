@@ -4,11 +4,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(
-    name = "remote-codex",
-    version,
-    about = "Remote Codex supervisor and relay"
-)]
+#[command(name = "pockymoe", version, about = "Pockymoe supervisor and relay")]
 struct Cli {
     #[command(flatten)]
     connection: threads::Connection,
@@ -24,7 +20,7 @@ mod tests {
     fn preview_cli_reserves_before_startup_and_rejects_invalid_ports() {
         for port in ["0", "65536", "-1", "abc"] {
             assert!(
-                Cli::try_parse_from(["remote-codex", "preview", "create", "--port", port]).is_err()
+                Cli::try_parse_from(["pockymoe", "preview", "create", "--port", port]).is_err()
             );
         }
         for args in [
@@ -33,14 +29,14 @@ mod tests {
             vec!["preview", "check", "4013", "--websocket-path", "/ws"],
             vec!["preview", "stop", "4013"],
         ] {
-            assert!(Cli::try_parse_from(std::iter::once("remote-codex").chain(args)).is_ok());
+            assert!(Cli::try_parse_from(std::iter::once("pockymoe").chain(args)).is_ok());
         }
     }
 
     #[test]
     fn peer_send_accepts_explicit_interrupt_reason_and_status_topic() {
         let cli = Cli::try_parse_from([
-            "remote-codex",
+            "pockymoe",
             "thread",
             "send",
             "worker",
@@ -65,7 +61,7 @@ mod tests {
             Some("Invalid inputs would waste the active calculation")
         );
         let cli = Cli::try_parse_from([
-            "remote-codex",
+            "pockymoe",
             "thread",
             "send",
             "worker",
@@ -89,7 +85,7 @@ mod tests {
     #[test]
     fn inbox_listing_supports_repeatable_sender_and_kind_filters() {
         let cli = Cli::try_parse_from([
-            "remote-codex",
+            "pockymoe",
             "inbox",
             "list",
             "--from-thread",
@@ -118,7 +114,7 @@ mod tests {
     #[test]
     fn child_delete_is_a_single_target_command_without_force_or_recursive_flags() {
         let cli = Cli::try_parse_from([
-            "remote-codex",
+            "pockymoe",
             "thread",
             "delete",
             "00000000-0000-0000-0000-000000000001",
@@ -136,7 +132,7 @@ mod tests {
             "00000000-0000-0000-0000-000000000002",
         ] {
             assert!(Cli::try_parse_from([
-                "remote-codex",
+                "pockymoe",
                 "thread",
                 "delete",
                 "00000000-0000-0000-0000-000000000001",
@@ -191,11 +187,11 @@ mod tests {
             ],
             vec!["outbox"],
         ] {
-            let argv = std::iter::once("remote-codex").chain(args.iter().copied());
+            let argv = std::iter::once("pockymoe").chain(args.iter().copied());
             assert!(Cli::try_parse_from(argv).is_ok(), "{args:?}");
         }
         let cli = Cli::try_parse_from([
-            "remote-codex",
+            "pockymoe",
             "thread",
             "send",
             "Treer/00000000-0000-0000-0000-000000000001",
@@ -233,7 +229,7 @@ mod tests {
             vec!["inbox", "--device", "Treer"],
         ] {
             assert!(
-                Cli::try_parse_from(std::iter::once("remote-codex").chain(args.iter().copied()))
+                Cli::try_parse_from(std::iter::once("pockymoe").chain(args.iter().copied()))
                     .is_err(),
                 "{args:?}"
             );
@@ -244,13 +240,13 @@ mod tests {
 #[derive(Subcommand)]
 enum Commands {
     /// Reserve, inspect and diagnose private device web previews.
-    #[command(after_long_help = r#"More: remote-codex guide preview"#)]
+    #[command(after_long_help = r#"More: pockymoe guide preview"#)]
     Preview {
         #[command(subcommand)]
         command: threads::PreviewCommand,
     },
     /// Durable device hooks: trigger -> typed condition -> prompt, inbox or script.
-    #[command(after_long_help = r#"More: remote-codex guide automation"#)]
+    #[command(after_long_help = r#"More: pockymoe guide automation"#)]
     #[command(alias = "hooks", alias = "hook")]
     Automation {
         #[command(subcommand)]
@@ -263,18 +259,18 @@ enum Commands {
     },
     /// Create, contact, and inspect local threads or same-owner device peers.
     #[command(
-        after_long_help = r#"Rules for delivery and collaboration: remote-codex skill
-Details: remote-codex guide delegate | messaging"#
+        after_long_help = r#"Rules for delivery and collaboration: pockymoe skill
+Details: pockymoe guide delegate | messaging"#
     )]
     Thread {
         #[command(subcommand)]
         command: threads::ThreadCommand,
     },
     /// Read recent conversation text, then expand one turn or item.
-    #[command(after_long_help = r#"More: remote-codex guide transcript"#)]
+    #[command(after_long_help = r#"More: pockymoe guide transcript"#)]
     Transcript(threads::Transcript),
     /// Discover same-owner devices and manage this device's peer access/trust.
-    #[command(after_long_help = r#"More: remote-codex guide devices"#)]
+    #[command(after_long_help = r#"More: pockymoe guide devices"#)]
     Device {
         #[command(subcommand)]
         command: threads::DeviceCommand,
@@ -293,13 +289,13 @@ Details: remote-codex guide delegate | messaging"#
   - To wait, use `inbox wait --kind result --kind question` instead of polling.
   - Ack only what you handled. Do not reply "received"; answer questions before acking.
 
-More: remote-codex guide inbox"#)]
+More: pockymoe guide inbox"#)]
     Inbox(threads::Inbox),
     /// Shared task board for the threads of one lineage.
     #[command(
         after_long_help = r#"Delegates loop: `task claim --wait`, do it, `task done --result`, until `finished: true`.
 
-More: remote-codex guide tasks"#
+More: pockymoe guide tasks"#
     )]
     Task {
         #[command(subcommand)]
@@ -326,7 +322,7 @@ More: remote-codex guide tasks"#
         /// Relay data directory containing relay-store.sqlite or relay.sqlite.
         #[arg(
             long,
-            env = "REMOTE_CODEX_RELAY_DATA_DIR",
+            env = "POCKYMOE_RELAY_DATA_DIR",
             default_value = ".local/relay-server"
         )]
         data_dir: std::path::PathBuf,
@@ -342,7 +338,7 @@ More: remote-codex guide tasks"#
     /// Show the device encryption fingerprint for independent browser verification.
     RelayFingerprint {
         /// Supervisor database path; defaults to relay-mode configuration.
-        #[arg(long, env = "REMOTE_CODEX_DATABASE_PATH")]
+        #[arg(long, env = "POCKYMOE_DATABASE_PATH")]
         database: Option<std::path::PathBuf>,
     },
     /// Install this device from the official GitHub runtime release.
@@ -375,9 +371,9 @@ More: remote-codex guide tasks"#
 #[tokio::main]
 async fn main() -> Result<()> {
     if std::env::args().nth(1).as_deref() == Some("app-server")
-        && std::env::var_os("REMOTE_CODEX_APP_SERVER_BRIDGE").is_some()
+        && std::env::var_os("POCKYMOE_APP_SERVER_BRIDGE").is_some()
     {
-        return remote_codex_runtime::acp::run_codex_app_server_bridge().await;
+        return pockymoe_runtime::acp::run_codex_app_server_bridge().await;
     }
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
@@ -420,10 +416,10 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Guide { topic } => {
-            let guides = remote_codex_protocol::THREAD_INTERACTION_GUIDES;
+            let guides = pockymoe_protocol::THREAD_INTERACTION_GUIDES;
             match topic.as_deref() {
                 None => {
-                    println!("Usage: remote-codex guide TOPIC\n\nTopics:");
+                    println!("Usage: pockymoe guide TOPIC\n\nTopics:");
                     for (name, summary, _) in guides {
                         println!("  {name:<11} {summary}");
                     }
@@ -444,10 +440,10 @@ async fn main() -> Result<()> {
                     Ok(text) => text,
                     Err(_) => {
                         eprintln!("Supervisor skill unavailable; using the CLI's bundled guide.");
-                        remote_codex_protocol::THREAD_INTERACTION_SKILL.to_owned()
+                        pockymoe_protocol::THREAD_INTERACTION_SKILL.to_owned()
                     }
                 },
-                Err(_) => remote_codex_protocol::THREAD_INTERACTION_SKILL.to_owned(),
+                Err(_) => pockymoe_protocol::THREAD_INTERACTION_SKILL.to_owned(),
             };
             println!("{text}");
         }
@@ -490,8 +486,8 @@ async fn main() -> Result<()> {
         }
 
         Commands::Supervisor | Commands::Start => {
-            let state = remote_codex_runtime::boot().await?;
-            remote_codex_supervisor::serve(state).await?;
+            let state = pockymoe_runtime::boot().await?;
+            pockymoe_supervisor::serve(state).await?;
         }
         Commands::Status => {
             let port = std::env::var("PORT").unwrap_or_else(|_| "8787".into());
@@ -501,7 +497,7 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Relay => {
-            remote_codex_relay::serve().await?;
+            pockymoe_relay::serve().await?;
         }
         Commands::RelayMigrate {
             data_dir,
@@ -509,11 +505,11 @@ async fn main() -> Result<()> {
             allow_unsupported_data,
         } => {
             let report = if dry_run {
-                remote_codex_relay::inspect_relay_migration(&data_dir)?
+                pockymoe_relay::inspect_relay_migration(&data_dir)?
             } else {
-                remote_codex_relay::migrate_relay_data_dir_with_options(
+                pockymoe_relay::migrate_relay_data_dir_with_options(
                     &data_dir,
-                    remote_codex_relay::RelayMigrationOptions {
+                    pockymoe_relay::RelayMigrationOptions {
                         allow_unsupported_data,
                     },
                 )?
@@ -521,17 +517,17 @@ async fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         Commands::RelaySupervisor => {
-            std::env::set_var("REMOTE_CODEX_MODE", "relay");
-            let state = remote_codex_runtime::boot().await?;
-            remote_codex_supervisor::serve(state).await?;
+            std::env::set_var("POCKYMOE_MODE", "relay");
+            let state = pockymoe_runtime::boot().await?;
+            pockymoe_supervisor::serve(state).await?;
         }
         Commands::RelayFingerprint { database } => {
-            std::env::set_var("REMOTE_CODEX_MODE", "relay");
+            std::env::set_var("POCKYMOE_MODE", "relay");
             let database = database
-                .unwrap_or_else(|| remote_codex_runtime::RuntimeConfig::from_env().database_url);
+                .unwrap_or_else(|| pockymoe_runtime::RuntimeConfig::from_env().database_url);
             println!(
                 "SHA-256 {}",
-                remote_codex_supervisor::relay_device_fingerprint(&database)?
+                pockymoe_supervisor::relay_device_fingerprint(&database)?
             );
         }
         Commands::Setup {
@@ -540,8 +536,8 @@ async fn main() -> Result<()> {
             code,
             port,
         } => {
-            remote_codex_supervisor::distribution::setup(
-                remote_codex_supervisor::distribution::SetupOptions {
+            pockymoe_supervisor::distribution::setup(
+                pockymoe_supervisor::distribution::SetupOptions {
                     relay,
                     token,
                     code,
@@ -551,16 +547,16 @@ async fn main() -> Result<()> {
             .await?;
         }
         Commands::DeviceRun { config } => {
-            remote_codex_supervisor::distribution::run_device(config).await?
+            pockymoe_supervisor::distribution::run_device(config).await?
         }
         Commands::RuntimeMaintenance { action } => println!(
             "{}",
             serde_json::to_string(
-                &remote_codex_supervisor::distribution::maintenance_cli(&action).await?
+                &pockymoe_supervisor::distribution::maintenance_cli(&action).await?
             )?
         ),
         Commands::InternalUpdate { plan } => {
-            remote_codex_supervisor::distribution::run_worker(plan).await?
+            pockymoe_supervisor::distribution::run_worker(plan).await?
         }
         Commands::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));

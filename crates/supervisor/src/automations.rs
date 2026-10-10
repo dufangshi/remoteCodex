@@ -3,8 +3,8 @@ use axum::{
     extract::{Path, Query, State},
     Json,
 };
-use remote_codex_protocol::{AutomationDefinition, CommandRunInput};
-use remote_codex_runtime::Supervisor;
+use pockymoe_protocol::{AutomationDefinition, CommandRunInput};
+use pockymoe_runtime::Supervisor;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;

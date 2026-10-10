@@ -1,8 +1,8 @@
-# Remote Codex Rust 版本的 npm 发布设计
+# Pockymoe Rust 版本的 npm 发布设计
 
 ## 结论
 
-npm 包不要求实现语言是 JavaScript。包中可以包含 Rust、Go 或其他语言生成的可执行文件；npm 负责保存 tarball、按 `package.json` 的 `os`/`cpu`/`libc` 过滤依赖，并按 `bin` 字段创建命令入口。Remote Codex 仍保留一层很小的 Node launcher，因为用户通过 npm 安装时一定已有 Node，它适合完成平台选择、服务进程管理和旧 CLI 兼容。
+npm 包不要求实现语言是 JavaScript。包中可以包含 Rust、Go 或其他语言生成的可执行文件；npm 负责保存 tarball、按 `package.json` 的 `os`/`cpu`/`libc` 过滤依赖，并按 `bin` 字段创建命令入口。Pockymoe 仍保留一层很小的 Node launcher，因为用户通过 npm 安装时一定已有 Node，它适合完成平台选择、服务进程管理和旧 CLI 兼容。
 
 当前采用“一个 launcher 包 + GitHub Release 原生资产”。不在用户机器上编译
 Rust，也不在 `postinstall` 中执行网络请求；用户第一次真正启动命令时，launcher
@@ -10,7 +10,7 @@ Rust，也不在 `postinstall` 中执行网络请求；用户第一次真正启�
 `~/.remote-codex/bin/<version>/<platform>/`。
 
 ```text
-remote-codex
+pockymoe
   bin/remote-codex.mjs
   native-manifest.json
   web/
@@ -23,7 +23,7 @@ remote-codex
 ```
 
 Windows Device Manager 是独立发布、低频更新的 bootstrap，不属于每个 runtime
-Release。它通过 npm registry 检查新版 `remote-codex`，停止当前 supervisor、安装并验证
+Release。它通过 npm registry 检查新版 `pockymoe`，停止当前 supervisor、安装并验证
 新 runtime 后再恢复服务。因此只有 Device Manager 自身代码变化时才重新构建和发布 EXE。
 
 ## 方案取舍
@@ -33,13 +33,13 @@ Release。它通过 npm registry 检查新版 `remote-codex`，停止当前 supe
 | 安装时 `cargo build`             | npm 包简单                                          | 用户必须安装固定 Rust、C 编译器和系统库；安装慢且失败面大         | 不采用             |
 | `postinstall` 下载 GitHub binary | root 包小                                           | `--ignore-scripts` 会跳过，安装阶段副作用大                       | 不采用             |
 | 一个包包含所有平台 binary        | 发布最简单                                          | 每位用户下载所有平台，包体积和安全审计面都显著增加                | 不采用             |
-| 平台 optionalDependencies        | npm 按 OS/CPU/libc 选择；可被私服缓存；无需安装脚本 | 必须创建并原子发布 7 个额外包；当前 token 只允许写 `remote-codex` | token 扩权后的备选 |
+| 平台 optionalDependencies        | npm 按 OS/CPU/libc 选择；可被私服缓存；无需安装脚本 | 必须创建并原子发布 7 个额外包；当前 token 只允许写 `pockymoe` | token 扩权后的备选 |
 | 首次运行下载 Release binary      | 单一 npm 包、安装轻量、`--ignore-scripts` 可用      | 首次运行需要访问 GitHub；需实现缓存、超时、并发与完整性校验       | 当前采用           |
 
 下载 URL 和 SHA-256 均由发布时生成的 `native-manifest.json` 固定到 npm 包中，
 不会读取可变的 `latest` 资产。缓存命中时仍重新计算 SHA-256；损坏文件会重新下载。
-`REMOTE_CODEX_NATIVE_BINARY` 保留为本地测试覆盖，
-`REMOTE_CODEX_NATIVE_DOWNLOAD_BASE_URL` 只用于镜像和自动化测试。
+`POCKYMOE_NATIVE_BINARY` 保留为本地测试覆盖，
+`POCKYMOE_NATIVE_DOWNLOAD_BASE_URL` 只用于镜像和自动化测试。
 
 ## 仓库与发布包边界
 
@@ -61,8 +61,8 @@ Release。它通过 npm registry 检查新版 `remote-codex`，停止当前 supe
 标准安装方式保持不变：
 
 ```bash
-npm install -g remote-codex
-remote-codex start
+npm install -g pockymoe
+pockymoe start
 ```
 
 安装不会运行 lifecycle script。`version` 和 `help` 无需下载；第一次执行服务命令会显示
@@ -92,7 +92,7 @@ Rust supervisor 直接托管 `web/`，所以正常服务只有一个后端进程
 声明 glibc 2.28 最低版本；不能直接把 Debian Bookworm 或 Ubuntu 最新 runner 的普通
 release binary 当成通用 GNU npm artifact，否则会无意提高用户机器的 glibc 下限。
 
-每个平台必须执行 `remote-codex version`；可在对应 runner 原生执行的平台还必须跑 npm 安装、Web/API 启动和退出 smoke。不能把在 macOS arm64 本机通过 `cargo build` 当作 Windows/Linux 发布验证。
+每个平台必须执行 `pockymoe version`；可在对应 runner 原生执行的平台还必须跑 npm 安装、Web/API 启动和退出 smoke。不能把在 macOS arm64 本机通过 `cargo build` 当作 Windows/Linux 发布验证。
 
 ## 版本和 dist-tag
 
@@ -106,7 +106,7 @@ Release，再发布包含对应 hash manifest 的 npm 包，最后移动 `latest
 
 ## npm 权限和供应链
 
-为现有 `remote-codex` 配置 trusted publisher：
+为现有 `pockymoe` 配置 trusted publisher：
 
 - GitHub repository: `dufangshi/remoteCodex`
 - Workflow: `npm-release.yml`
@@ -115,7 +115,7 @@ Release，再发布包含对应 hash manifest 的 npm 包，最后移动 `latest
 
 GitHub workflow 使用 cloud-hosted runner、`id-token: write`、Node 24 和 npm 11.19.1。npm trusted publishing 要求 npm 11.5.1+ 与 Node 22.14+；OIDC 发布会自动生成 provenance，不保存长期写 token。
 
-当前 `.npmrc` 的 granular token 只对既有 `remote-codex` 包有读写权限，不能创建
+当前 `.npmrc` 的 granular token 只对既有 `pockymoe` 包有读写权限，不能创建
 新平台包；这也是采用单 npm 包结构的实际约束。首发通过 GitHub repository secret
 `NPM_TOKEN` 使用该 token。绑定 trusted publisher 后应删除长期 secret，后续版本只用
 OIDC。`npm-release` GitHub Environment 应要求人工审批；`latest` 仍要求 workflow 的显式开关。

@@ -99,33 +99,33 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git clone --depth 1 --branch "${THREAD_UI_REF}" "${THREAD_UI_REPO}" ./remote-codex-thread-ui
-          echo "Thread UI: $(git -C ./remote-codex-thread-ui rev-parse HEAD)" >> "${GITHUB_STEP_SUMMARY}"
+          git clone --depth 1 --branch "${THREAD_UI_REF}" "${THREAD_UI_REPO}" ./pockymoe-thread-ui
+          echo "Thread UI: $(git -C ./pockymoe-thread-ui rev-parse HEAD)" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Install dependencies
         shell: bash
         run: |
           set -euo pipefail
-          pnpm --dir ./remote-codex-thread-ui install --frozen-lockfile
+          pnpm --dir ./pockymoe-thread-ui install --frozen-lockfile
           pnpm install --frozen-lockfile
 
       - name: Build thread UI before supervisor validation
-        run: pnpm --dir ./remote-codex-thread-ui --filter @remote-codex/thread-ui build
+        run: pnpm --dir ./pockymoe-thread-ui --filter @pockymoe/thread-ui build
 
       - name: Typecheck and test Web
         shell: bash
         run: |
           set -euo pipefail
-          pnpm --filter @remote-codex/supervisor-web typecheck
-          pnpm --filter @remote-codex/supervisor-web test
-          pnpm --filter @remote-codex/supervisor-web build
+          pnpm --filter @pockymoe/supervisor-web typecheck
+          pnpm --filter @pockymoe/supervisor-web test
+          pnpm --filter @pockymoe/supervisor-web build
 
       - name: Build release binary
         shell: bash
         run: |
           set -euo pipefail
           rustup toolchain install "${RUST_VERSION}" --profile minimal
-          cargo +"${RUST_VERSION}" build --locked --release --package remote-codex
+          cargo +"${RUST_VERSION}" build --locked --release --package pockymoe
 
       - name: Verify native bootstrap
         run: node --test scripts/native-setup.test.mjs

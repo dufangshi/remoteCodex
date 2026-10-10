@@ -57,9 +57,9 @@ pub(crate) fn revoke_session(conn: &Connection, token: &str) -> Result<()> {
 }
 
 pub(crate) fn session_secret(data_dir: &Path) -> Result<String> {
-    if let Ok(secret) = std::env::var("REMOTE_CODEX_RELAY_SESSION_SECRET") {
+    if let Ok(secret) = std::env::var("POCKYMOE_RELAY_SESSION_SECRET") {
         if secret.len() < 32 {
-            bail!("REMOTE_CODEX_RELAY_SESSION_SECRET must contain at least 32 characters");
+            bail!("POCKYMOE_RELAY_SESSION_SECRET must contain at least 32 characters");
         }
         return Ok(secret);
     }

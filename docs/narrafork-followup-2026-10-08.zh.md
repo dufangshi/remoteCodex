@@ -1,6 +1,6 @@
 # NarraFork 专项方案与搜索、多语言交付
 
-日期：2026-10-08。通过 remote-codex CLI 创建了五个子线程，均使用
+日期：2026-10-08。通过 pockymoe CLI 创建了五个子线程，均使用
 `gpt-6.1-sol`、`high`。文件编辑、人工介入、工作台布局交付详细设计；搜索和
 多语言交付实现。父线程完成代码审阅、两个仓库的整合及组合浏览器验证。
 
@@ -52,7 +52,7 @@
 
 ## 已实现：统一中英界面
 
-共享 `@remote-codex/thread-ui/i18n` store，宿主和懒加载面板使用同一语言状态。
+共享 `@pockymoe/thread-ui/i18n` store，宿主和懒加载面板使用同一语言状态。
 支持 English/简体中文、浏览器语言识别、英语回退、手动选择、刷新持久化和跨
 标签页同步；日期/数字跟随所选语言。整合资源实际包含 **2,260 个中英配对 key**。
 
@@ -70,25 +70,25 @@ Monaco/Draw.io 的第三方内部菜单、原生进程输出、原始服务器�
 
 ```sh
 cargo fmt --all --check
-cargo check -p remote-codex-supervisor -p remote-codex-relay -j 2
-cargo test -p remote-codex-runtime --test db_migration --test global_search -j 2
-cargo test -p remote-codex-supervisor --test http_e2e conversation_search_reads_bounded_messages_without_hydrating_history -j 2
-cargo test -p remote-codex-relay route_acl::tests -j 2
+cargo check -p pockymoe-supervisor -p pockymoe-relay -j 2
+cargo test -p pockymoe-runtime --test db_migration --test global_search -j 2
+cargo test -p pockymoe-supervisor --test http_e2e conversation_search_reads_bounded_messages_without_hydrating_history -j 2
+cargo test -p pockymoe-relay route_acl::tests -j 2
 ```
 
 覆盖迁移/回填 5 测试、索引查询/维护 2 综合测试、HTTP 1 测试、relay ACL 6 测试。
 父线程核对整合后的 Cargo/crates 与已测搜索分支没有差异，并在主仓库成功执行
-`cargo build -p remote-codex -j 2`，确保浏览器测试消费新 Supervisor。
+`cargo build -p pockymoe -j 2`，确保浏览器测试消费新 Supervisor。
 
 父线程对最终组合版本执行：
 
 ```sh
-corepack pnpm --dir remote-codex-thread-ui --filter @remote-codex/thread-ui build
+corepack pnpm --dir pockymoe-thread-ui --filter @pockymoe/thread-ui build
 corepack pnpm install --offline --frozen-lockfile
-corepack pnpm --dir remote-codex-thread-ui --filter @remote-codex/thread-ui typecheck
-corepack pnpm --filter @remote-codex/supervisor-web typecheck
-corepack pnpm --dir remote-codex-thread-ui --filter @remote-codex/thread-ui exec vitest run src/i18n/i18n.test.tsx src/components/ConversationSearchControls.test.tsx
-corepack pnpm --filter @remote-codex/supervisor-web exec vitest run src/components/ConversationSearch.test.tsx
+corepack pnpm --dir pockymoe-thread-ui --filter @pockymoe/thread-ui typecheck
+corepack pnpm --filter @pockymoe/supervisor-web typecheck
+corepack pnpm --dir pockymoe-thread-ui --filter @pockymoe/thread-ui exec vitest run src/i18n/i18n.test.tsx src/components/ConversationSearchControls.test.tsx
+corepack pnpm --filter @pockymoe/supervisor-web exec vitest run src/components/ConversationSearch.test.tsx
 PATH="$PWD/.temp/bin:$PATH" \
 E2E_API_PORT=18183 E2E_WEB_PORT=15183 \
 E2E_DATABASE_URL="$PWD/.temp/narrafork-integration/e2e.sqlite" \
@@ -103,7 +103,7 @@ UI 产物一致。组合浏览器覆盖跨线程搜索/键盘跳转/刷新、中
 
 搜索线程另外已通过 mobile-chromium 搜索用例；多语言缓存修复另有 77 条定向
 回归通过。各批有重叠，不把它们相加声称唯一测试总数。测试使用隔离数据库/
-工作区并清空继承的 REMOTE_CODEX 连接设置；没有改动正式 Supervisor/数据库，
+工作区并清空继承的 POCKYMOE 连接设置；没有改动正式 Supervisor/数据库，
 没有运行 cargo workspace、完整浏览器或兼容矩阵。
 
 ## 提交与发布边界

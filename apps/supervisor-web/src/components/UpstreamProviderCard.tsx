@@ -13,7 +13,7 @@ import {
   Gauge,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { translate } from '@remote-codex/thread-ui/i18n';
+import { translate } from '@pockymoe/thread-ui/i18n';
 type Props = {
   name: string;
   baseUrl: string;

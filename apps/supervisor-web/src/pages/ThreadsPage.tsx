@@ -1,9 +1,9 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { useEffect, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { MessageSquarePlus, Plus, Settings } from 'lucide-react';
-import { MatterWorkbench } from '@remote-codex/thread-ui';
-import type { ThreadDto, WorkspaceDto } from '@remote-codex/shared';
+import { MatterWorkbench } from '@pockymoe/thread-ui';
+import type { ThreadDto, WorkspaceDto } from '@pockymoe/shared';
 import { fetchThreads, fetchWorkspaces } from '../lib/api';
 import { currentNewThreadHref, currentRelayDeviceIdFromPath, currentThreadHref, currentWorkspacesHref } from '../lib/relayRoutes';
 import { useAppShellNav } from '../components/AppShellNavContext';

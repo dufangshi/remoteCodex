@@ -21,7 +21,7 @@ fn install_root() -> PathBuf {
     home().join(".local/share/remote-codex/native")
 }
 fn config_path() -> PathBuf {
-    std::env::var_os("REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG")
+    std::env::var_os("POCKYMOE_RELAY_SUPERVISOR_CONFIG")
         .map(PathBuf::from)
         .unwrap_or_else(|| home().join(".remote-codex/relay-supervisor.json"))
 }

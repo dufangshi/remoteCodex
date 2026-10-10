@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { ThreadDetailDto, ThreadDto } from '@remote-codex/shared';
+import type { ThreadDetailDto, ThreadDto } from '@pockymoe/shared';
 import { useWorkbenchNavigation, workbenchThreadStatus } from './useWorkbenchNavigation';
 import { ApiError, request } from '../lib/api';
 import { useScopedState } from './useScopedState';

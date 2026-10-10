@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, bail, ensure, Result};
 use async_trait::async_trait;
-use remote_codex_protocol::{
+use pockymoe_protocol::{
     now_rfc3339, toolbox_from_capabilities, AgentBackendDto, AgentBackendInstallationDto,
     AgentBackendManagementSchemaDto, AgentCapabilitySnapshotDto, AgentProviderCapabilitiesDto,
     AgentRuntimeStatusDto, ModelOptionDto, Provider, ReasoningEffortOptionDto,
@@ -316,8 +316,8 @@ impl AcpRuntime {
                 json!({
                     "protocolVersion": 1,
                     "clientInfo": {
-                        "name": "remote-codex",
-                        "title": "Remote Codex",
+                        "name": "pockymoe",
+                        "title": "Pockymoe",
                         "version": env!("CARGO_PKG_VERSION")
                     },
                     "clientCapabilities": {
@@ -521,7 +521,7 @@ impl AcpRuntime {
         Arc<super::deepseek::Bridge>,
         Value,
     )> {
-        let native = (std::env::var("REMOTE_CODEX_DSH_NATIVE").as_deref() != Ok("0"))
+        let native = (std::env::var("POCKYMOE_DSH_NATIVE").as_deref() != Ok("0"))
             .then(|| super::catalog::resolve_executable(&def.base_command))
             .flatten()
             .and_then(|executable| super::deepseek::native_composition(&executable));
@@ -582,8 +582,8 @@ impl AcpRuntime {
                 json!({
                     "protocolVersion": 1,
                     "clientInfo": {
-                        "name": "remote-codex",
-                        "title": "Remote Codex",
+                        "name": "pockymoe",
+                        "title": "Pockymoe",
                         "version": env!("CARGO_PKG_VERSION")
                     },
                     "clientCapabilities": {
@@ -1975,7 +1975,7 @@ impl AgentRuntime for AcpRuntime {
             && !process.cli_env.is_empty()
             && dsh_goal_command.is_none();
         let prompt = if include_context {
-            format!("[remoteCodex: this conversation is a Remote Codex thread; `remote-codex thread self` shows its identity. Before you create or message threads, or show the user a local web app, read `remote-codex skill` (short: rules and an index); every command's `--help` has its flags and rules. Never put credentials in prompts or output.]\n\n{prompt}")
+            format!("[remoteCodex: this conversation is a Pockymoe thread; `pockymoe thread self` shows its identity. Before you create or message threads, or show the user a local web app, read `pockymoe skill` (short: rules and an index); every command's `--help` has its flags and rules. Never put credentials in prompts or output.]\n\n{prompt}")
         } else {
             prompt
         };
@@ -2670,7 +2670,7 @@ impl AgentRuntime for AcpRuntime {
                     },
                 )
                 .await?;
-            // The fork's Remote Codex id does not exist yet. Leave it unloaded so
+            // The fork's Pockymoe id does not exist yet. Leave it unloaded so
             // resume_session starts ACP with the new thread's own CLI environment.
             return Ok(StartSessionResult {
                 provider_session_id: Self::scoped_id(&adapter_id, &id),
@@ -3457,7 +3457,7 @@ async fn answer_dsh_question(
                 )
             })
     }
-    .ok_or_else(|| anyhow!("No Remote Codex turn is active to answer this DSH question"))?;
+    .ok_or_else(|| anyhow!("No Pockymoe turn is active to answer this DSH question"))?;
     let request_id = format!("dsh-question-{}", Uuid::new_v4());
     registry
         .lock()
@@ -3479,7 +3479,7 @@ async fn answer_dsh_question(
     emit_request_resolved(&active, &request_id);
     let answers = &response["answers"];
     if answers.as_object().is_none_or(|answers| answers.is_empty()) {
-        bail!("The user dismissed the question in Remote Codex; stop and wait for their next message.");
+        bail!("The user dismissed the question in Pockymoe; stop and wait for their next message.");
     }
     super::deepseek::answer(asked, answers)
 }
@@ -4285,6 +4285,6 @@ fn emit_usage(bus: &EventBus, thread_id: &str, turn_id: &str, usage: Value, hidd
 fn cli_context_matches(existing: &[(String, String)]) -> bool {
     crate::interaction::launch_env()
         .iter()
-        .filter(|(key, _)| key.starts_with("REMOTE_CODEX_"))
+        .filter(|(key, _)| key.starts_with("POCKYMOE_"))
         .all(|pair| existing.contains(pair))
 }

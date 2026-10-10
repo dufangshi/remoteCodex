@@ -1,11 +1,11 @@
-import { LanguageSwitcher } from '@remote-codex/thread-ui/i18n';
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { LanguageSwitcher } from '@pockymoe/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   PublicTranscript,
   type PublicTranscriptSnapshot,
-} from '@remote-codex/thread-ui';
+} from '@pockymoe/thread-ui';
 
 export function PublicThreadPage() {
   useI18n();

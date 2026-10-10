@@ -1,7 +1,7 @@
-import { getLocale } from '@remote-codex/thread-ui/i18n';
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { getLocale } from '@pockymoe/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { useEffect, useState } from 'react';
-import type { ThreadExportTurnOptionDto } from '@remote-codex/shared';
+import type { ThreadExportTurnOptionDto } from '@pockymoe/shared';
 import { Copy, Link2, Trash2, Check } from 'lucide-react';
 import { request, fetchThreadExportTurns } from '../lib/api';
 import { loadExportSnapshot } from '../lib/transcriptExport';

@@ -39,10 +39,10 @@ and restart. Tools never alter billable token counts or price categories.
 Targeted checks:
 
 ```sh
-cargo test -p remote-codex-runtime service::generation --lib
-cargo test -p remote-codex-runtime gpt_61_sol --lib
-cargo test -p remote-codex-runtime --test generation_speed
-cargo test -p remote-codex-runtime acp::claude_usage --lib
+cargo test -p pockymoe-runtime service::generation --lib
+cargo test -p pockymoe-runtime gpt_61_sol --lib
+cargo test -p pockymoe-runtime --test generation_speed
+cargo test -p pockymoe-runtime acp::claude_usage --lib
 ```
 
 A real Claude check uses an independent database/workspace/session and the
@@ -50,7 +50,7 @@ advertised Haiku model. It verifies positive speed during the first tool wait,
 then checks the final persisted usage. It never restarts the host Supervisor:
 
 ```sh
-cargo test -p remote-codex-runtime --test claude_usage_live -- --ignored --nocapture
+cargo test -p pockymoe-runtime --test claude_usage_live -- --ignored --nocapture
 ```
 
 The real-token browser acceptance is opt-in. Copy credentials/config into a new

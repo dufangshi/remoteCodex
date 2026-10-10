@@ -11,7 +11,7 @@ const repoRoot = path.resolve(
   '..',
 );
 const npmRoot = path.join(repoRoot, 'npm');
-const launcherRoot = path.join(npmRoot, 'remote-codex');
+const launcherRoot = path.join(npmRoot, 'pockymoe');
 const rootManifest = readJson(path.join(repoRoot, 'package.json'));
 const launcherManifest = readJson(path.join(launcherRoot, 'package.json'));
 const cargoVersion = readCargoVersion(path.join(repoRoot, 'Cargo.toml'));
@@ -21,17 +21,17 @@ const explicitCurrentBinary = option('--current-binary');
 const requireAll = args.includes('--require-all');
 
 const packages = [
-  { key: 'darwin-arm64', dir: 'darwin-arm64', executable: 'remote-codex' },
+  { key: 'darwin-arm64', dir: 'darwin-arm64', executable: 'pockymoe' },
   {
     key: 'linux-arm64-gnu',
     dir: 'linux-arm64-gnu',
-    executable: 'remote-codex',
+    executable: 'pockymoe',
   },
-  { key: 'linux-x64-gnu', dir: 'linux-x64-gnu', executable: 'remote-codex' },
+  { key: 'linux-x64-gnu', dir: 'linux-x64-gnu', executable: 'pockymoe' },
   {
     key: 'win32-x64-msvc',
     dir: 'win32-x64-msvc',
-    executable: 'remote-codex.exe',
+    executable: 'pockymoe.exe',
     releaseAsset: 'remote-codex-win32-x64-msvc-cli.exe',
   },
 ];
@@ -50,7 +50,7 @@ assertEqual(
 const webSource = path.join(repoRoot, 'apps', 'supervisor-web', 'dist');
 if (!fs.existsSync(path.join(webSource, 'index.html'))) {
   throw new Error(
-    'Supervisor Web is not built. Run pnpm --filter @remote-codex/supervisor-web build.',
+    'Supervisor Web is not built. Run pnpm --filter @pockymoe/supervisor-web build.',
   );
 }
 replaceDirectory(webSource, path.join(launcherRoot, 'web'));
@@ -115,8 +115,8 @@ for (const entry of packages) {
   const executable =
     entry.releaseAsset ??
     (entry.executable.endsWith('.exe')
-      ? `remote-codex-${entry.key}.exe`
-      : `remote-codex-${entry.key}`);
+      ? `pockymoe-${entry.key}.exe`
+      : `pockymoe-${entry.key}`);
   const staged = path.join(npmRoot, entry.dir, 'bin', entry.executable);
   if (!fs.existsSync(staged)) continue;
   const contents = fs.readFileSync(staged);
@@ -139,7 +139,7 @@ fs.writeFileSync(
   )}\n`,
 );
 
-console.log(`Prepared remote-codex npm packages at version ${cargoVersion}.`);
+console.log(`Prepared pockymoe npm packages at version ${cargoVersion}.`);
 
 function currentPlatformKey() {
   if (process.platform === 'linux')

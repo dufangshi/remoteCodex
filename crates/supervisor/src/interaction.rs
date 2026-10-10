@@ -1,8 +1,8 @@
 use super::http::{map_err, ApiErr};
 use anyhow::Context;
 use axum::{extract::State, Extension, Json};
-use remote_codex_protocol::{CreateThreadInput, Provider};
-use remote_codex_runtime::{
+use pockymoe_protocol::{CreateThreadInput, Provider};
+use pockymoe_runtime::{
     interaction::{clamp_wait, list_roles, load_role, AgentOptions, SendInput, TranscriptQuery},
     Supervisor,
 };
@@ -74,8 +74,8 @@ pub(crate) async fn run(
             )
         }
         "skill" => Ok(json!({
-            "version": remote_codex_protocol::APP_VERSION,
-            "text": remote_codex_protocol::THREAD_INTERACTION_SKILL,
+            "version": pockymoe_protocol::APP_VERSION,
+            "text": pockymoe_protocol::THREAD_INTERACTION_SKILL,
         })),
         "list" => {
             let group = input["groupId"].as_str().map(str::to_owned);

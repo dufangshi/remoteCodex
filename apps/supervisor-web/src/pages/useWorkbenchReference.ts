@@ -2,14 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   AgentProviderCapabilitiesDto, ModelOptionDto, RelayEffectiveAccessDto,
   ThreadDetailDto, ThreadEventEnvelope, UpdateThreadSettingsInput,
-} from '@remote-codex/shared';
+} from '@pockymoe/shared';
 import {
   connectSupervisorEvents, cancelPendingSteer, fetchRelayAccess, fetchThreadCapabilitySnapshot,
   fetchThreadDetail, fetchThreadModels, interruptThread, relayModeActive,
   respondToThreadRequest, resumeThread, sendThreadPrompt, steerPendingPrompt,
   steerSubmittedPrompt, updateThreadSettings, type SendThreadPromptRequestInput,
 } from '../lib/api';
-import { translate as t } from '@remote-codex/thread-ui/i18n';
+import { translate as t } from '@pockymoe/thread-ui/i18n';
 import { createClientRequestId, prependTurns } from './threadDetailModel';
 import { useScopedState } from './useScopedState';
 

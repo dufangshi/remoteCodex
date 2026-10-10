@@ -27,7 +27,7 @@ if (!cargoVersionPattern.test(cargo))
 const updatedCargo = cargo.replace(cargoVersionPattern, `$1"${version}"`);
 fs.writeFileSync(cargoPath, updatedCargo);
 console.log(
-  `Set Remote Codex workspace runtime version to ${version}.`,
+  `Set Pockymoe workspace runtime version to ${version}.`,
 );
 
 function updateJson(filePath, update) {

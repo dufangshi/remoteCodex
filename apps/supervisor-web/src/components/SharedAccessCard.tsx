@@ -1,5 +1,5 @@
-import { getLocale } from '@remote-codex/thread-ui/i18n';
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { getLocale } from '@pockymoe/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { useId, useState } from 'react';
 import {
   ArrowUpRight,
@@ -207,7 +207,7 @@ export function SharedAccessCard({
             <div className="min-w-0">
               <p className="truncate font-semibold">{username}</p>
               <p className="text-xs text-[var(--theme-fg-muted)]">
-                {translate("sharing.remoteCodexAccount")}</p>
+                {translate("sharing.pockymoeAccount")}</p>
             </div>
           </div>
           <div className="rounded-xl border border-[var(--theme-border)] p-4">

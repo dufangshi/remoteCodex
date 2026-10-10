@@ -1,13 +1,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use remote_codex_protocol::Provider;
-use remote_codex_runtime::actor::SharedRuntime;
-use remote_codex_runtime::config::RuntimeConfig;
-use remote_codex_runtime::db::Database;
-use remote_codex_runtime::fake::FakeRuntime;
-use remote_codex_runtime::local_sessions::LocalSessionHomes;
-use remote_codex_runtime::Supervisor;
+use pockymoe_protocol::Provider;
+use pockymoe_runtime::actor::SharedRuntime;
+use pockymoe_runtime::config::RuntimeConfig;
+use pockymoe_runtime::db::Database;
+use pockymoe_runtime::fake::FakeRuntime;
+use pockymoe_runtime::local_sessions::LocalSessionHomes;
+use pockymoe_runtime::Supervisor;
 use serde_json::{json, Value};
 use tempfile::tempdir;
 use tokio::net::TcpListener;
@@ -102,7 +102,7 @@ async fn spawn_supervisor_state(
     let ws_root = dir.path().join("workspaces");
     std::fs::create_dir_all(&ws_root).unwrap();
     let config = RuntimeConfig {
-        mode: remote_codex_protocol::Mode::Local,
+        mode: pockymoe_protocol::Mode::Local,
         host: "127.0.0.1".into(),
         port: 0,
         workspace_root: ws_root.clone(),
@@ -147,7 +147,7 @@ async fn spawn_supervisor_state(
     std::fs::write(dir.path().join("cli-token"), cli.token).unwrap();
     let serving = state.clone();
     tokio::spawn(async move {
-        axum::serve(listener, remote_codex_supervisor::router(serving))
+        axum::serve(listener, pockymoe_supervisor::router(serving))
             .await
             .unwrap();
     });
@@ -305,7 +305,7 @@ async fn device_metrics_api_returns_warmed_cached_native_samples() {
         .unwrap();
     assert_eq!(response.status(), 200);
     assert_eq!(response.headers()["cache-control"], "no-store");
-    let first: remote_codex_protocol::DeviceMetricsDto = response.json().await.unwrap();
+    let first: pockymoe_protocol::DeviceMetricsDto = response.json().await.unwrap();
     assert!(first.sample_window_ms >= 900);
     assert_eq!(first.cpu.logical_core_count, first.cpu.cores.len());
     assert!(first.cpu.logical_core_count > 0);
@@ -314,7 +314,7 @@ async fn device_metrics_api_returns_warmed_cached_native_samples() {
         first.memory.used_bytes + first.memory.available_bytes,
         first.memory.total_bytes
     );
-    let second: remote_codex_protocol::DeviceMetricsDto =
+    let second: pockymoe_protocol::DeviceMetricsDto =
         reqwest::get(format!("http://127.0.0.1:{port}/api/device/metrics"))
             .await
             .unwrap()
@@ -328,13 +328,13 @@ async fn device_metrics_api_returns_warmed_cached_native_samples() {
 async fn cli_delete_authenticates_the_parent_and_refuses_arbitrary_targets_and_spoofing() {
     let (dir, port, root, state) = spawn_supervisor_state(vec![Provider::Codex], |_| {}).await;
     let ws = state
-        .create_workspace(remote_codex_protocol::CreateWorkspaceInput {
+        .create_workspace(pockymoe_protocol::CreateWorkspaceInput {
             abs_path: Some(root.to_string_lossy().into()),
             git_url: None,
             label: None,
         })
         .unwrap();
-    let make = |parent| remote_codex_protocol::CreateThreadInput {
+    let make = |parent| pockymoe_protocol::CreateThreadInput {
         workspace_id: ws.id.clone(),
         title: None,
         provider: Some(Provider::Codex),
@@ -415,7 +415,7 @@ async fn spawn_authenticated_supervisor() -> (tempfile::TempDir, u16) {
     let workspace_root = dir.path().join("workspaces");
     std::fs::create_dir_all(&workspace_root).unwrap();
     let config = RuntimeConfig {
-        mode: remote_codex_protocol::Mode::Server,
+        mode: pockymoe_protocol::Mode::Server,
         host: "127.0.0.1".into(),
         port: 0,
         workspace_root,
@@ -443,7 +443,7 @@ async fn spawn_authenticated_supervisor() -> (tempfile::TempDir, u16) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move {
-        axum::serve(listener, remote_codex_supervisor::router(state))
+        axum::serve(listener, pockymoe_supervisor::router(state))
             .await
             .unwrap();
     });
@@ -1021,13 +1021,13 @@ async fn local_cli_requires_credentials_and_exposes_existing_threads() {
 async fn managed_peer_delivery_cannot_bypass_policy_by_omitting_or_overriding_identity() {
     let (_dir, port, root, state) = spawn_supervisor_state(vec![Provider::Codex], |_| {}).await;
     let ws = state
-        .create_workspace(remote_codex_protocol::CreateWorkspaceInput {
+        .create_workspace(pockymoe_protocol::CreateWorkspaceInput {
             abs_path: Some(root.to_string_lossy().into()),
             git_url: None,
             label: None,
         })
         .unwrap();
-    let input = || remote_codex_protocol::CreateThreadInput {
+    let input = || pockymoe_protocol::CreateThreadInput {
         workspace_id: ws.id.clone(),
         title: None,
         provider: Some(Provider::Codex),
@@ -1091,11 +1091,8 @@ async fn managed_peer_delivery_cannot_bypass_policy_by_omitting_or_overriding_id
         .json()
         .await
         .unwrap();
-    assert_eq!(guide["version"], remote_codex_protocol::APP_VERSION);
-    assert_eq!(
-        guide["text"],
-        remote_codex_protocol::THREAD_INTERACTION_SKILL
-    );
+    assert_eq!(guide["version"], pockymoe_protocol::APP_VERSION);
+    assert_eq!(guide["text"], pockymoe_protocol::THREAD_INTERACTION_SKILL);
 }
 
 /// Exercises the real path an agent takes: POST /api/cli with operation=create and

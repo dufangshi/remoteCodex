@@ -6,7 +6,7 @@ mod linux;
 mod tests;
 
 use anyhow::{anyhow, Result};
-use remote_codex_protocol::*;
+use pockymoe_protocol::*;
 use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},

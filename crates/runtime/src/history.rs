@@ -1,4 +1,4 @@
-use remote_codex_protocol::{ThreadHistoryItemDto, ThreadTurnDto};
+use pockymoe_protocol::{ThreadHistoryItemDto, ThreadTurnDto};
 
 /// Older ACP records retained before/after text but no file metadata. Derive the
 /// presentation on read, without rewriting the user's saved transcript.

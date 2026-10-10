@@ -4,7 +4,7 @@
 use super::*;
 use anyhow::{ensure, Context};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use remote_codex_protocol::{
+use pockymoe_protocol::{
     AutomationAction as Action, AutomationCondition as Condition,
     AutomationDefinition as Definition, AutomationTrigger as Trigger, CommandRunInput, CommandSpec,
     MissedRunPolicy,
@@ -976,7 +976,7 @@ impl Supervisor {
         cmd.current_dir(cwd)
             .env_clear()
             .env("PATH", std::env::var_os("PATH").unwrap_or_default())
-            .env("REMOTE_CODEX_COMMAND_ID", id)
+            .env("POCKYMOE_COMMAND_ID", id)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())

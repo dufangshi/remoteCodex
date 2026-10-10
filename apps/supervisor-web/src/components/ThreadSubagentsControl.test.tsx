@@ -8,12 +8,12 @@ import {
   within,
 } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { setLocale } from '@remote-codex/thread-ui/i18n';
+import { setLocale } from '@pockymoe/thread-ui/i18n';
 import type {
   NativeSubagentDto,
   NativeSubagentDetailDto,
   ThreadDetailDto,
-} from '@remote-codex/shared';
+} from '@pockymoe/shared';
 import { request } from '../lib/api';
 import { ThreadSubagentsControl } from './ThreadSubagentsControl';
 vi.mock('../lib/api', () => ({ request: vi.fn() }));

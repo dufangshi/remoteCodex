@@ -1,5 +1,5 @@
 import { WorkspaceDocumentNavigationGuard } from "./components/WorkspaceDocumentNavigationGuard";
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { installNotificationRouteResponder } from './lib/relayPush';
 import { PortPreviewPage } from './pages/PortPreviewPage';
 import { PublicThreadPage } from './pages/PublicThreadPage';
@@ -12,7 +12,7 @@ import {
   useLocation,
 } from 'react-router-dom';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { PluginProvider } from '@remote-codex/thread-ui';
+import { PluginProvider } from '@pockymoe/thread-ui';
 
 import type {
   AgentBackendIdDto,
@@ -22,7 +22,7 @@ import type {
 import {
   defaultAgentBackendId,
   normalizeAgentBackendId,
-} from '@remote-codex/shared';
+} from '@pockymoe/shared';
 import {
   AppShellNavContext,
   type ThemeMode,
@@ -114,7 +114,7 @@ function readInitialAutoCollapseCompletedTurns() {
 
 function formatDocumentTitle(pageTitle?: string | null) {
   const trimmed = pageTitle?.trim();
-  return trimmed || 'Remote Codex';
+  return trimmed || 'Pockymoe';
 }
 
 function routeDocumentTitle(pathname: string) {

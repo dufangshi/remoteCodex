@@ -4,7 +4,7 @@ import type {
   AgentCapabilitySnapshotDto,
   ModelOptionDto,
   ThreadDto,
-} from '@remote-codex/shared';
+} from '@pockymoe/shared';
 import {
   HarnessSettingsDialog,
   HarnessSettingsFields,
@@ -339,10 +339,10 @@ describe('DeepSeek Harness plugin controls', () => {
       expect(dshConsoleUrl).toHaveBeenCalledWith({ port: 4242, path: '/?token=launch' });
       view.unmount();
 
-      panel(live({}), runHarnessAction, { dshConsoleUrl: async () => { throw new Error('Open Remote Codex on the device'); } });
+      panel(live({}), runHarnessAction, { dshConsoleUrl: async () => { throw new Error('Open Pockymoe on the device'); } });
       fireEvent.click(await screen.findByRole('button', { name: 'Open console' }));
       await waitFor(() => expect(tab.close).toHaveBeenCalled());
-      expect(await screen.findByRole('alert')).toHaveTextContent('Open Remote Codex on the device');
+      expect(await screen.findByRole('alert')).toHaveTextContent('Open Pockymoe on the device');
     } finally {
       open.mockRestore();
     }

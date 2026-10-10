@@ -1,14 +1,14 @@
 ---
 name: thread-interaction
-description: Coordinate peer remoteCodex threads on this device or on another device of the same owner through passive result handoffs, dependency-aware waiting, explicit task dispatch, urgent corrections and file exchange. Also reserve and diagnose private web previews on this device. Use when creating, messaging or collecting work from remoteCodex peers, or preparing a local website for the user to view.
+description: Coordinate peer Pockymoe threads on this device or on another device of the same owner through passive result handoffs, dependency-aware waiting, explicit task dispatch, urgent corrections and file exchange. Also reserve and diagnose private web previews on this device. Use when creating, messaging or collecting work from Pockymoe peers, or preparing a local website for the user to view.
 ---
 
-# remoteCodex threads and web previews
+# Pockymoe threads and web previews
 
 Threads are peers on this Supervisor, across Codex, Claude Code, ACP Grok, DSH and
 other harnesses. Creation does not copy your conversation, and peers in one workspace
 share files unless created with `--worktree`. This page is the index and the rules;
-`remote-codex guide TOPIC` has the details and examples, and every command's `--help`
+`pockymoe guide TOPIC` has the details and examples, and every command's `--help`
 has its exact flags. Data commands print JSON: check the exit status and the returned
 delivery state.
 

@@ -1,5 +1,5 @@
 use super::percent;
-use remote_codex_protocol::*;
+use pockymoe_protocol::*;
 use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},

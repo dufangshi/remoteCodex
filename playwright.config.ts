@@ -27,25 +27,25 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: './target/debug/remote-codex supervisor',
+      command: './target/debug/pockymoe supervisor',
       // Harness subprocesses inherit the live Supervisor's environment. Clear its
       // settings and set both aliases: the prefixed database path takes priority.
       env: {
         ...Object.fromEntries(
           Object.keys(process.env)
-            .filter((key) => key.startsWith('REMOTE_CODEX_'))
+            .filter((key) => key.startsWith('POCKYMOE_'))
             .map((key) => [key, '']),
         ),
-        REMOTE_CODEX_MODE: 'local',
-        REMOTE_CODEX_E2E_FAKE_RUNTIME: realDsh || realCodex ? '' : '1',
-        ...(realCodex ? { CODEX_HOME: process.env.E2E_CODEX_HOME!, REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'codex' } : {}),
+        POCKYMOE_MODE: 'local',
+        POCKYMOE_E2E_FAKE_RUNTIME: realDsh || realCodex ? '' : '1',
+        ...(realCodex ? { CODEX_HOME: process.env.E2E_CODEX_HOME!, POCKYMOE_ENABLED_AGENT_PROVIDERS: 'codex' } : {}),
         // DSH's own telemetry stays off in tests (it reports commands such as /feedback).
-        ...(realDsh ? { DSH_HOME: process.env.E2E_DSH_HOME!, DSH_TELEMETRY_DISABLED: '1', REMOTE_CODEX_ENABLED_AGENT_PROVIDERS: 'acp' } : {}),
+        ...(realDsh ? { DSH_HOME: process.env.E2E_DSH_HOME!, DSH_TELEMETRY_DISABLED: '1', POCKYMOE_ENABLED_AGENT_PROVIDERS: 'acp' } : {}),
         HOST: '127.0.0.1',
         PORT: String(apiPort),
-        REMOTE_CODEX_DATABASE_PATH: e2eDatabaseUrl,
+        POCKYMOE_DATABASE_PATH: e2eDatabaseUrl,
         DATABASE_URL: e2eDatabaseUrl,
-        REMOTE_CODEX_WORKSPACE_ROOT: e2eWorkspaceRoot,
+        POCKYMOE_WORKSPACE_ROOT: e2eWorkspaceRoot,
         WORKSPACE_ROOT: e2eWorkspaceRoot,
       },
       url: `${apiBaseUrl}/healthz`,
@@ -53,7 +53,7 @@ export default defineConfig({
       timeout: 180_000,
     },
     {
-      command: `VITE_API_PROXY_TARGET=${apiBaseUrl} VITE_WS_PROXY_TARGET=ws://127.0.0.1:${apiPort} pnpm --filter @remote-codex/supervisor-web exec vite --force --host localhost --port ${webPort} --strictPort`,
+      command: `VITE_API_PROXY_TARGET=${apiBaseUrl} VITE_WS_PROXY_TARGET=ws://127.0.0.1:${apiPort} pnpm --filter @pockymoe/supervisor-web exec vite --force --host localhost --port ${webPort} --strictPort`,
       url: webBaseUrl,
       reuseExistingServer: true,
       timeout: 120_000,

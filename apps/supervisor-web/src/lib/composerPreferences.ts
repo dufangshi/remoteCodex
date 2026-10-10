@@ -1,5 +1,5 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
-import type { ComposerSendShortcut } from '@remote-codex/thread-ui';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
+import type { ComposerSendShortcut } from '@pockymoe/thread-ui';
 import { request } from './api';
 
 interface ComposerPreferences {

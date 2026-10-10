@@ -5,7 +5,7 @@ use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{bail, Result};
-use remote_codex_protocol::{ThreadWorkspaceFilePreviewDto, ThreadWorkspaceTreeNodeDto};
+use pockymoe_protocol::{ThreadWorkspaceFilePreviewDto, ThreadWorkspaceTreeNodeDto};
 use tempfile::NamedTempFile;
 use walkdir::WalkDir;
 use zip::write::SimpleFileOptions;

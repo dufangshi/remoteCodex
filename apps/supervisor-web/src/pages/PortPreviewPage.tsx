@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { request } from '../lib/api';
 
 /** Exchange the browser's account session for a private preview-host cookie. */
@@ -26,7 +26,7 @@ export function PortPreviewPage() {
     <section className="max-w-lg space-y-4">
       <h1 className="text-xl font-semibold">{translate('devices.portMappings')}</h1>
       {error ? <p role="alert">{error}</p> : <p role="status">{translate('devices.opening')}</p>}
-      {error && <Link className="underline" to="/">{translate('workbench.remoteCodexHome')}</Link>}
+      {error && <Link className="underline" to="/">{translate('workbench.pockymoeHome')}</Link>}
     </section>
   </main>;
 }

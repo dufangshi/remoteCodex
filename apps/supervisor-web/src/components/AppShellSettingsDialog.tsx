@@ -1,5 +1,5 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
-import { LanguageSwitcher } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
+import { LanguageSwitcher } from '@pockymoe/thread-ui/i18n';
 import { FormDialog } from './FormDialog';
 import { useFontSize } from '../lib/fontSize';
 import { RuntimeManagement } from './RuntimeManagement';
@@ -31,7 +31,7 @@ import {
   SettingsPanels,
   SettingsDialog,
   type SettingsSection,
-} from '@remote-codex/thread-ui';
+} from '@pockymoe/thread-ui';
 import { useAppShellNav } from './AppShellNavContext';
 import {
   apiErrorMessage,

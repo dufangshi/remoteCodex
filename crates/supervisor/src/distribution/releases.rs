@@ -39,7 +39,7 @@ pub fn platform() -> Result<&'static str> {
 }
 fn client() -> Result<reqwest::Client> {
     Ok(reqwest::Client::builder()
-        .user_agent("remote-codex-native-updater")
+        .user_agent("pockymoe-native-updater")
         .connect_timeout(Duration::from_secs(20))
         .timeout(Duration::from_secs(300))
         .build()?)

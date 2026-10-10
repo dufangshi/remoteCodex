@@ -2,7 +2,7 @@ use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
 use async_trait::async_trait;
-use remote_codex_protocol::{
+use pockymoe_protocol::{
     AgentBackendDto, AgentCapabilitySnapshotDto, AgentProviderCapabilitiesDto, ModelOptionDto,
     Provider, ThreadActionRequestDto, ThreadEventEnvelope, ThreadHistoryItemDto, ThreadSubagentDto,
     ThreadTurnDto, ToolboxItemDto,
@@ -134,7 +134,7 @@ pub struct StartTurnInput {
     pub images: Vec<PromptImage>,
     /// The thread's title, for harnesses that list their own sessions (DSH).
     pub title: Option<String>,
-    /// This harness session already received the Remote Codex context (it is
+    /// This harness session already received the Pockymoe context (it is
     /// in its history), so a resumed or restarted process must not add it again.
     pub context_delivered: bool,
 }
@@ -292,7 +292,7 @@ pub trait AgentRuntime: Send + Sync {
         anyhow::bail!("goals are not supported by this harness");
     }
     fn toolbox(&self, agent_id: Option<&str>) -> Vec<ToolboxItemDto> {
-        remote_codex_protocol::toolbox_from_capabilities(&self.negotiated_caps(agent_id))
+        pockymoe_protocol::toolbox_from_capabilities(&self.negotiated_caps(agent_id))
     }
     /// Harness-specific options for thread creation (DSH run modes), probing
     /// in `cwd` when nothing is cached. Null when the harness has none.

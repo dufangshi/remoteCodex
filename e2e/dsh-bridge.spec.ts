@@ -28,8 +28,8 @@ test.beforeAll(async ({ request }) => {
   // Keyless fixtures: the scripted provider and a harmless plugin command.
   const patch = path.join(profile, 'cordis.patch.yml');
   for (const [id, file] of [
-    ['remote-codex-e2e-scripted-llm', 'e2e/fixtures/dsh-scripted-llm.mjs'],
-    ['remote-codex-e2e-command', 'e2e/fixtures/dsh-e2e-command.mjs'],
+    ['pockymoe-e2e-scripted-llm', 'e2e/fixtures/dsh-scripted-llm.mjs'],
+    ['pockymoe-e2e-command', 'e2e/fixtures/dsh-e2e-command.mjs'],
   ]) {
     const current = readFileSync(patch, 'utf8');
     if (current.includes(id)) continue;
@@ -83,7 +83,7 @@ test('streams live text and keeps one committed answer', async ({ request }) => 
     .toEqual(['Plain answer SCRIPTED_OK for: stream please']);
 });
 
-test('reviews a DSH plan in Remote Codex and follows its exit', async ({ request }) => {
+test('reviews a DSH plan in Pockymoe and follows its exit', async ({ request }) => {
   expect((await request.patch(`${base}/api/threads/${threadId}/settings`, { data: { collaborationMode: 'plan' } })).ok()).toBeTruthy();
   expect((await harness(request)).session.projections.plan.active).toBe(true);
   const accepted = await request.post(`${base}/api/threads/${threadId}/prompt`, {

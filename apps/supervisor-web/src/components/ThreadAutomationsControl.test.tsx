@@ -7,8 +7,8 @@ import {
   within,
 } from '@testing-library/react';
 import { beforeEach, expect, it, vi } from 'vitest';
-import { setLocale } from '@remote-codex/thread-ui/i18n';
-import type { AutomationDto, ThreadDto } from '@remote-codex/shared';
+import { setLocale } from '@pockymoe/thread-ui/i18n';
+import type { AutomationDto, ThreadDto } from '@pockymoe/shared';
 import { request } from '../lib/api';
 import { automationTotals } from './ThreadAutomationsControl';
 import { ThreadWatchesControl, type NativeWatch } from './ThreadWatchesControl';

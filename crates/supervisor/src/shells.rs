@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use anyhow::{anyhow, Result};
+use pockymoe_protocol::now_rfc3339;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
-use remote_codex_protocol::now_rfc3339;
 use serde_json::{json, Value};
 use tokio::sync::broadcast;
 use uuid::Uuid;
@@ -210,7 +210,7 @@ impl ShellHub {
                 thread_id: thread_id.into(),
                 workspace_id: workspace_id.into(),
                 cwd: cwd.into(),
-                tmux_session_name: format!("remote-codex-pty-{id}"),
+                tmux_session_name: format!("pockymoe-pty-{id}"),
                 created_at: now,
                 metadata,
                 replay,

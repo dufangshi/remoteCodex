@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { nativeSummaries } from './workbenchNativeModel';
-import type { ThreadDetailDto, ThreadTurnDto } from '@remote-codex/shared';
+import type { ThreadDetailDto, ThreadTurnDto } from '@pockymoe/shared';
 it('retains native terminal facts from history after the active list clears, with real item targets', () => {
   const history = [
     {

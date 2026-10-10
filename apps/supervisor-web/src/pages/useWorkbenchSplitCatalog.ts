@@ -4,8 +4,8 @@ import type {
   RelayPortalSummaryDto,
   ThreadDto,
   WorkspaceDto,
-} from '@remote-codex/shared';
-import type { WorkbenchThread } from '@remote-codex/thread-ui';
+} from '@pockymoe/shared';
+import type { WorkbenchThread } from '@pockymoe/thread-ui';
 import { request } from '../lib/api';
 
 export interface SplitThreadSelection {

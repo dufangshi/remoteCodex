@@ -1,6 +1,6 @@
 # 统一 hooks 预览
 
-统一自动化已接入 Rust Supervisor、Remote Codex CLI 与工作台“自动化”面板。当前在预览分支，尚未合入 main、发布 runtime 或部署公开 Web。未在生产线程创建任何自动任务。此前的文件创建、双向分屏、紧凑输入区与进展指示点一并保留。
+统一自动化已接入 Rust Supervisor、Pockymoe CLI 与工作台“自动化”面板。当前在预览分支，尚未合入 main、发布 runtime 或部署公开 Web。未在生产线程创建任何自动任务。此前的文件创建、双向分屏、紧凑输入区与进展指示点一并保留。
 
 ## 可以定义什么
 
@@ -8,7 +8,7 @@
 
 所有触发类型共用三类动作：发送 prompt 到登记线程；将普通 result/status 被动投递 inbox；执行固定 argv 命令或显式 shell 脚本。时间触发和轮次/任务结束事件也可以执行脚本。只有明确设置 prompt 动作才会唤醒线程，普通结果不会自动开始新一轮。
 
-`remote-codex hooks`、`remote-codex hook` 都是 `remote-codex automation` 的别名。CLI、REST 和 UI 使用同一套定义、执行记录与调度逻辑，原 Claude watches 继续作为独立只读来源显示。
+`pockymoe hooks`、`pockymoe hook` 都是 `pockymoe automation` 的别名。CLI、REST 和 UI 使用同一套定义、执行记录与调度逻辑，原 Claude watches 继续作为独立只读来源显示。
 
 ## 使用示例
 
@@ -17,7 +17,7 @@
 每小时检查自己负责的项目：
 
 ```sh
-remote-codex hooks create --thread self --request-id hourly-project-check --json '{
+pockymoe hooks create --thread self --request-id hourly-project-check --json '{
   "name": "每小时检查",
   "trigger": {"kind": "interval", "everySeconds": 3600},
   "action": {"kind": "prompt", "text": "检查当前项目的待办与执行状态，汇报需要处理的事项。"}
@@ -45,13 +45,13 @@ remote-codex hooks create --thread self --request-id hourly-project-check --json
 ```
 
 ```sh
-remote-codex hooks create --file build-hook.json --request-id build-hook
-remote-codex command run --thread self --command-key build --request-id build-run-1 --cwd . -- cargo check -p remote-codex-runtime
-remote-codex hooks list --thread self
-remote-codex hooks runs --thread self AUTOMATION_ID
-remote-codex hooks pause --thread self AUTOMATION_ID
-remote-codex hooks resume --thread self AUTOMATION_ID
-remote-codex hooks cancel --thread self AUTOMATION_ID
+pockymoe hooks create --file build-hook.json --request-id build-hook
+pockymoe command run --thread self --command-key build --request-id build-run-1 --cwd . -- cargo check -p pockymoe-runtime
+pockymoe hooks list --thread self
+pockymoe hooks runs --thread self AUTOMATION_ID
+pockymoe hooks pause --thread self AUTOMATION_ID
+pockymoe hooks resume --thread self AUTOMATION_ID
+pockymoe hooks cancel --thread self AUTOMATION_ID
 ```
 
 `commandKey` 关联通过 wrapper 实际运行的命令，每次命令运行用独立 request ID；同一次请求重试沿用原 ID，避免重复执行。普通终端执行相同文本不会触发。详细 DTO、轮次/任务提醒示例和 HTTP 接口见 [接口说明](unified-hooks.md)。

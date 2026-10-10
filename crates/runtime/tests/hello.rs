@@ -1,18 +1,16 @@
 use std::sync::Arc;
 
-use remote_codex_protocol::{
-    CreateThreadInput, CreateWorkspaceInput, Provider, SendThreadPromptInput,
-};
-use remote_codex_runtime::actor::SharedRuntime;
-use remote_codex_runtime::config::RuntimeConfig;
-use remote_codex_runtime::db::Database;
-use remote_codex_runtime::fake::FakeRuntime;
-use remote_codex_runtime::Supervisor;
+use pockymoe_protocol::{CreateThreadInput, CreateWorkspaceInput, Provider, SendThreadPromptInput};
+use pockymoe_runtime::actor::SharedRuntime;
+use pockymoe_runtime::config::RuntimeConfig;
+use pockymoe_runtime::db::Database;
+use pockymoe_runtime::fake::FakeRuntime;
+use pockymoe_runtime::Supervisor;
 use tempfile::tempdir;
 
 fn test_config(dir: &std::path::Path) -> RuntimeConfig {
     RuntimeConfig {
-        mode: remote_codex_protocol::Mode::Local,
+        mode: pockymoe_protocol::Mode::Local,
         host: "127.0.0.1".into(),
         port: 0,
         workspace_root: dir.join("workspaces"),
@@ -45,7 +43,7 @@ fn prompt_input(prompt: &str) -> SendThreadPromptInput {
 }
 
 fn insert_stale_turn(supervisor: &Supervisor, thread_id: &str, turn_id: &str) {
-    let now = remote_codex_protocol::now_rfc3339();
+    let now = pockymoe_protocol::now_rfc3339();
     supervisor
         .db
         .with(|conn| {
@@ -70,8 +68,8 @@ async fn seeded_thread(
 ) -> (
     tempfile::TempDir,
     Supervisor,
-    remote_codex_protocol::WorkspaceDto,
-    remote_codex_protocol::ThreadDto,
+    pockymoe_protocol::WorkspaceDto,
+    pockymoe_protocol::ThreadDto,
 ) {
     let dir = tempdir().unwrap();
     let ws_path = dir.path().join("proj");
@@ -435,7 +433,7 @@ async fn supervisor_update_recovery_respects_user_stop_and_ordinary_crashes() {
 
 #[test]
 fn db_owner_child() {
-    let Some(path) = std::env::var_os("REMOTE_CODEX_LOCK_TEST_PATH") else {
+    let Some(path) = std::env::var_os("POCKYMOE_LOCK_TEST_PATH") else {
         return;
     };
     assert!(Database::open(std::path::Path::new(&path)).is_err());
@@ -449,7 +447,7 @@ fn second_process_cannot_open_owned_database_and_lock_releases_on_exit() {
     db.set_kv("preserved", "yes").unwrap();
     let child = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "db_owner_child", "--nocapture"])
-        .env("REMOTE_CODEX_LOCK_TEST_PATH", &path)
+        .env("POCKYMOE_LOCK_TEST_PATH", &path)
         .output()
         .unwrap();
     assert!(

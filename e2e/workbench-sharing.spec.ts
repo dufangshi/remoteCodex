@@ -14,9 +14,9 @@ test('workbench shares images publicly and grants device access without leaving 
   const rp = await freePort(), sp = await freePort();
   const base = `http://127.0.0.1:${rp}`;
   const password = randomBytes(24).toString('hex');
-  const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('REMOTE_CODEX_')));
+  const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('POCKYMOE_')));
   const start = (command: string, extra: Record<string, string>) => {
-    const proc = spawn(resolve('target/debug/remote-codex'), [command], { env: { ...environment, HOST: '127.0.0.1', REMOTE_CODEX_ADMIN_USERNAME: 'testadmin', REMOTE_CODEX_ADMIN_PASSWORD: password, REMOTE_CODEX_SESSION_SECRET: randomBytes(32).toString('hex'), REMOTE_CODEX_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'), REMOTE_CODEX_E2E_FAKE_RUNTIME: '1', ...extra }, stdio: 'ignore' });
+    const proc = spawn(resolve('target/debug/pockymoe'), [command], { env: { ...environment, HOST: '127.0.0.1', POCKYMOE_ADMIN_USERNAME: 'testadmin', POCKYMOE_ADMIN_PASSWORD: password, POCKYMOE_SESSION_SECRET: randomBytes(32).toString('hex'), POCKYMOE_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'), POCKYMOE_E2E_FAKE_RUNTIME: '1', ...extra }, stdio: 'ignore' });
     processes.push(proc);
   };
   const api = async (path: string, token?: string, body?: unknown) => {
@@ -26,12 +26,12 @@ test('workbench shares images publicly and grants device access without leaving 
   };
   const context = await browser.newContext();
   try {
-    start('relay', { PORT: String(rp), REMOTE_CODEX_RELAY_DATA_DIR: join(root, 'relay'), REMOTE_CODEX_RELAY_REGISTRATION_ENABLED: 'true', REMOTE_CODEX_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'), REMOTE_CODEX_RELAY_WEB_DIST_DIR: resolve('apps/supervisor-web/dist'), REMOTE_CODEX_PUBLIC_BASE_URL: base });
+    start('relay', { PORT: String(rp), POCKYMOE_RELAY_DATA_DIR: join(root, 'relay'), POCKYMOE_RELAY_REGISTRATION_ENABLED: 'true', POCKYMOE_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'), POCKYMOE_RELAY_WEB_DIST_DIR: resolve('apps/supervisor-web/dist'), POCKYMOE_PUBLIC_BASE_URL: base });
     await expect.poll(() => fetch(`${base}/healthz`).then(r => r.status).catch(() => 0)).toBe(200);
     for (const username of ['owner', 'reviewer']) await api('/relay/auth/register', undefined, { username, email: `${username}@example.test`, password });
     const owner = (await api('/relay/auth/login', undefined, { username: 'owner', password })).token;
     const device = await api('/relay/devices', owner, { name: 'Isolated UI device' });
-    start('relay-supervisor', { PORT: String(sp), REMOTE_CODEX_RELAY_SUPERVISOR_PORT: String(sp), REMOTE_CODEX_RELAY_SERVER_URL: base, REMOTE_CODEX_RELAY_AGENT_TOKEN: device.token, REMOTE_CODEX_DATABASE_PATH: join(root, 'supervisor.sqlite'), REMOTE_CODEX_WORKSPACE_ROOT: join(root, 'workspaces') });
+    start('relay-supervisor', { PORT: String(sp), POCKYMOE_RELAY_SUPERVISOR_PORT: String(sp), POCKYMOE_RELAY_SERVER_URL: base, POCKYMOE_RELAY_AGENT_TOKEN: device.token, POCKYMOE_DATABASE_PATH: join(root, 'supervisor.sqlite'), POCKYMOE_WORKSPACE_ROOT: join(root, 'workspaces') });
     await expect.poll(async () => (await api('/healthz')).connectedSupervisors).toBe(1);
     const deviceApi = `/relay/devices/${device.device.id}/api`;
     const absPath = join(root, 'workspace');

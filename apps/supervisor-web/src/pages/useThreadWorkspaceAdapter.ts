@@ -1,7 +1,7 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { useMemo, type Dispatch, type SetStateAction } from 'react';
 
-import type { ThreadWorkspaceAdapter } from '@remote-codex/thread-ui';
+import type { ThreadWorkspaceAdapter } from '@pockymoe/thread-ui';
 import {
   ApiError,
   fetchLinkedFile,

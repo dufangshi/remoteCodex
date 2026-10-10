@@ -1,6 +1,6 @@
 # Auth And Connectivity Modes
 
-Remote Codex supports three backend connectivity modes through `REMOTE_CODEX_MODE`.
+Pockymoe supports three backend connectivity modes through `POCKYMOE_MODE`.
 
 The default remains compatible with the existing supervisor behavior.
 
@@ -8,13 +8,13 @@ The default remains compatible with the existing supervisor behavior.
 
 ### `local`
 
-This is the default when `REMOTE_CODEX_MODE` is unset.
+This is the default when `POCKYMOE_MODE` is unset.
 
 The supervisor is treated as a trusted local or private-network service, such as a machine shared over Tailscale. Existing REST and `/ws` behavior stays unchanged: no login is required and clients can call the API directly.
 
 Use this for development and trusted LAN/VPN setups.
 
-`remote-codex start` listens on `127.0.0.1` for both the Web UI and supervisor
+`pockymoe start` listens on `127.0.0.1` for both the Web UI and supervisor
 API unless `SERVICE_HOST` or `SERVICE_API_HOST` is set. Local mode has no login
 requirement. To connect from a trusted LAN or VPN, explicitly set the listener
 to the appropriate interface. Use `server` mode with credentials whenever the
@@ -27,10 +27,10 @@ The supervisor is deployed as a reachable server and must protect API access.
 Required environment variables:
 
 ```bash
-REMOTE_CODEX_MODE=server
-REMOTE_CODEX_ADMIN_USERNAME=admin
-REMOTE_CODEX_ADMIN_PASSWORD=change-me
-REMOTE_CODEX_SESSION_SECRET=at-least-16-characters
+POCKYMOE_MODE=server
+POCKYMOE_ADMIN_USERNAME=admin
+POCKYMOE_ADMIN_PASSWORD=change-me
+POCKYMOE_SESSION_SECRET=at-least-16-characters
 ```
 
 In this mode:
@@ -59,18 +59,18 @@ This mode exists because the private supervisor often cannot accept inbound publ
 Mobile app / browser
   -> public relay
     -> existing outbound supervisor-to-relay websocket
-      -> home Remote Codex supervisor
+      -> home Pockymoe supervisor
 ```
 
 Expected environment variables:
 
 ```bash
-REMOTE_CODEX_MODE=relay
-REMOTE_CODEX_ADMIN_USERNAME=admin
-REMOTE_CODEX_ADMIN_PASSWORD=change-me
-REMOTE_CODEX_SESSION_SECRET=at-least-16-characters
-REMOTE_CODEX_RELAY_SERVER_URL=wss://relay.example.com
-REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_REPLACE_ME
+POCKYMOE_MODE=relay
+POCKYMOE_ADMIN_USERNAME=admin
+POCKYMOE_ADMIN_PASSWORD=change-me
+POCKYMOE_SESSION_SECRET=at-least-16-characters
+POCKYMOE_RELAY_SERVER_URL=wss://relay.example.com
+POCKYMOE_RELAY_AGENT_TOKEN=rcd_REPLACE_ME
 ```
 
 Relay mode still requires the local supervisor admin configuration, but public
@@ -78,51 +78,51 @@ clients authenticate against the relay user system. Requests forwarded over the
 supervisor-initiated tunnel are trusted as relay-authorized requests and are not
 asked to send the private supervisor admin password over the public edge.
 
-The public relay server is packaged in the main `remote-codex` npm package and
-is started with `remote-codex relay`.
+The public relay server is packaged in the main `pockymoe` npm package and
+is started with `pockymoe relay`.
 
 On the public server, run the relay server:
 
 ```bash
-npm install -g remote-codex
-REMOTE_CODEX_ADMIN_USERNAME=admin
-REMOTE_CODEX_ADMIN_PASSWORD=change-me-now
-REMOTE_CODEX_RELAY_SESSION_SECRET=replace-with-at-least-32-random-characters
-REMOTE_CODEX_RELAY_DATA_DIR=/var/lib/remote-codex-relay
-REMOTE_CODEX_RELAY_REGISTRATION_ENABLED=true
+npm install -g pockymoe
+POCKYMOE_ADMIN_USERNAME=admin
+POCKYMOE_ADMIN_PASSWORD=change-me-now
+POCKYMOE_RELAY_SESSION_SECRET=replace-with-at-least-32-random-characters
+POCKYMOE_RELAY_DATA_DIR=/var/lib/remote-codex-relay
+POCKYMOE_RELAY_REGISTRATION_ENABLED=true
 HOST=0.0.0.0
 PORT=8788
-remote-codex relay
+pockymoe relay
 ```
 
-`remote-codex relay` requires:
+`pockymoe relay` requires:
 
-- `REMOTE_CODEX_ADMIN_USERNAME`
-- `REMOTE_CODEX_ADMIN_PASSWORD`
+- `POCKYMOE_ADMIN_USERNAME`
+- `POCKYMOE_ADMIN_PASSWORD`
 
 It should normally also be given:
 
-- `REMOTE_CODEX_RELAY_SESSION_SECRET`
-- `REMOTE_CODEX_RELAY_DATA_DIR`
-- `REMOTE_CODEX_RELAY_REGISTRATION_ENABLED`
+- `POCKYMOE_RELAY_SESSION_SECRET`
+- `POCKYMOE_RELAY_DATA_DIR`
+- `POCKYMOE_RELAY_REGISTRATION_ENABLED`
 - `HOST`
 - `PORT`
 
 Private device HTTP previews are optional. Set
-`REMOTE_CODEX_PORT_PREVIEW_BASE_URL` only after configuring wildcard DNS, TLS
+`POCKYMOE_PORT_PREVIEW_BASE_URL` only after configuring wildcard DNS, TLS
 and ingress routing; see [device web previews](relay-port-preview-proposal.md).
 
 Google and GitHub OAuth are enabled only when both credentials for that
-provider are configured. `REMOTE_CODEX_PUBLIC_BASE_URL` must be the public
+provider are configured. `POCKYMOE_PUBLIC_BASE_URL` must be the public
 HTTPS relay origin so the generated callback exactly matches the provider
 configuration:
 
 ```bash
-REMOTE_CODEX_PUBLIC_BASE_URL=https://relay.example.com
-REMOTE_CODEX_GOOGLE_OAUTH_CLIENT_ID=...
-REMOTE_CODEX_GOOGLE_OAUTH_CLIENT_SECRET=...
-REMOTE_CODEX_GITHUB_OAUTH_CLIENT_ID=...
-REMOTE_CODEX_GITHUB_OAUTH_CLIENT_SECRET=...
+POCKYMOE_PUBLIC_BASE_URL=https://relay.example.com
+POCKYMOE_GOOGLE_OAUTH_CLIENT_ID=...
+POCKYMOE_GOOGLE_OAUTH_CLIENT_SECRET=...
+POCKYMOE_GITHUB_OAUTH_CLIENT_ID=...
+POCKYMOE_GITHUB_OAUTH_CLIENT_SECRET=...
 ```
 
 The callback paths are `/relay/auth/oauth/google/callback` and
@@ -135,42 +135,42 @@ On the private machine that will run Codex and access local workspaces, run the
 relay-connected supervisor backend:
 
 ```bash
-npm install -g remote-codex
-REMOTE_CODEX_ADMIN_USERNAME=admin
-REMOTE_CODEX_ADMIN_PASSWORD=change-me-locally
-REMOTE_CODEX_SESSION_SECRET=at-least-16-characters
-REMOTE_CODEX_RELAY_SERVER_URL=wss://relay.example.com
-REMOTE_CODEX_RELAY_AGENT_TOKEN=rcd_REPLACE_ME
+npm install -g pockymoe
+POCKYMOE_ADMIN_USERNAME=admin
+POCKYMOE_ADMIN_PASSWORD=change-me-locally
+POCKYMOE_SESSION_SECRET=at-least-16-characters
+POCKYMOE_RELAY_SERVER_URL=wss://relay.example.com
+POCKYMOE_RELAY_AGENT_TOKEN=rcd_REPLACE_ME
 HOST=127.0.0.1
 PORT=8787
-remote-codex relay-supervisor
+pockymoe relay-supervisor
 ```
 
-`remote-codex relay-supervisor` sets `REMOTE_CODEX_MODE=relay` for the child
+`pockymoe relay-supervisor` sets `POCKYMOE_MODE=relay` for the child
 supervisor process. It requires:
 
-- `REMOTE_CODEX_ADMIN_USERNAME`
-- `REMOTE_CODEX_ADMIN_PASSWORD`
-- `REMOTE_CODEX_SESSION_SECRET`
-- `REMOTE_CODEX_RELAY_SERVER_URL`
-- `REMOTE_CODEX_RELAY_AGENT_TOKEN`
+- `POCKYMOE_ADMIN_USERNAME`
+- `POCKYMOE_ADMIN_PASSWORD`
+- `POCKYMOE_SESSION_SECRET`
+- `POCKYMOE_RELAY_SERVER_URL`
+- `POCKYMOE_RELAY_AGENT_TOKEN`
 
-When running a relay-connected supervisor beside another local Remote Codex
+When running a relay-connected supervisor beside another local Pockymoe
 service, also set separate values for:
 
 - `PORT`
 - `DATABASE_URL`
 - `WORKSPACE_ROOT`
 
-`REMOTE_CODEX_RELAY_SERVER_URL` is a websocket base URL. Use `ws://host:port`
+`POCKYMOE_RELAY_SERVER_URL` is a websocket base URL. Use `ws://host:port`
 for a plain relay port, or `wss://relay.example.com` when the relay is behind
 TLS.
 
-In a source checkout, run the Rust relay with `cargo run -p remote-codex -- relay`.
+In a source checkout, run the Rust relay with `cargo run -p pockymoe -- relay`.
 
 The relay server also serves the built web frontend when
 `apps/supervisor-web/dist/index.html` is present in the installed package or
-source checkout. `REMOTE_CODEX_RELAY_WEB_DIST_DIR` can override that path. The
+source checkout. `POCKYMOE_RELAY_WEB_DIST_DIR` can override that path. The
 relay injects a bootstrap config into `index.html` so the browser uses
 `/relay/...` APIs instead of trying to contact a local supervisor directly.
 
@@ -188,15 +188,15 @@ Relay mode is a separate transport layer from the normal supervisor API. The rel
 
 The current implementation establishes the supervisor-initiated outbound tunnel, heartbeat, multi-device relay registry, relay user accounts, session sharing, REST request multiplexing, and a websocket event bridge:
 
-- the home supervisor validates `REMOTE_CODEX_RELAY_SERVER_URL` and `REMOTE_CODEX_RELAY_AGENT_TOKEN`,
-- the home supervisor requires the configured admin username/password for Remote Codex API access,
+- the home supervisor validates `POCKYMOE_RELAY_SERVER_URL` and `POCKYMOE_RELAY_AGENT_TOKEN`,
+- the home supervisor requires the configured admin username/password for Pockymoe API access,
 - the home supervisor connects outward to `/supervisor/tunnel`,
 - the relay authenticates that tunnel with a per-device token created in `/relay-portal`,
-- optional `REMOTE_CODEX_RELAY_SUPERVISOR_TOKEN` remains as a legacy bootstrap token path,
+- optional `POCKYMOE_RELAY_SUPERVISOR_TOKEN` remains as a legacy bootstrap token path,
 - `/healthz` on the relay reports whether a supervisor is connected.
 - OAuth login supports existing Google/GitHub identity rows and approval flows.
 - relay users register with email, username, and password at `/relay-portal`,
-- relay users create devices and configure the returned `rcd_...` token on the private supervisor as `REMOTE_CODEX_RELAY_AGENT_TOKEN`,
+- relay users create devices and configure the returned `rcd_...` token on the private supervisor as `POCKYMOE_RELAY_AGENT_TOKEN`,
 - clients call `GET|POST|PATCH|DELETE /relay/devices/:deviceId/api/...` on the public relay,
 - `/relay/api/...` remains a compatibility path that selects the first accessible connected device,
 - the relay authenticates clients with relay user sessions,
@@ -212,20 +212,20 @@ The current implementation establishes the supervisor-initiated outbound tunnel,
 ## Relay Users, Devices, And Sharing
 
 The relay server stores users, devices, shares, grants, and settings in
-`REMOTE_CODEX_RELAY_DATA_DIR/relay-store.sqlite`. Before replacing a Node 0.11
-relay, stop it and run `remote-codex relay-migrate --data-dir <path> --dry-run`,
+`POCKYMOE_RELAY_DATA_DIR/relay-store.sqlite`. Before replacing a Node 0.11
+relay, stop it and run `pockymoe relay-migrate --data-dir <path> --dry-run`,
 then repeat without `--dry-run`. Migration uses SQLite Online Backup and keeps
 `relay-store.pre-rust-0.12.sqlite`; it never deletes the old Rust
 `relay.sqlite`. The first admin user
-is seeded from `REMOTE_CODEX_ADMIN_USERNAME`,
-`REMOTE_CODEX_ADMIN_PASSWORD`, and optional `REMOTE_CODEX_ADMIN_EMAIL`.
+is seeded from `POCKYMOE_ADMIN_USERNAME`,
+`POCKYMOE_ADMIN_PASSWORD`, and optional `POCKYMOE_ADMIN_EMAIL`.
 
 Relay portal:
 
 - `/relay-portal` lets users log in or register with email, username, and password.
 - registered users can create multiple devices.
 - creating a device returns a permanent `rcd_...` device token; it can be copied again by the device owner and is revoked only when replaced or the device is deleted.
-- each device token maps one running private Remote Codex supervisor to that user.
+- each device token maps one running private Pockymoe supervisor to that user.
 - users can share a single `threadId` on one device with another username.
 - invited users see those entries under Shared With Me and can continue the shared thread.
 
@@ -255,7 +255,7 @@ Those capabilities should be added on top of the same outbound tunnel rather tha
 
 - Use `local` only on trusted loopback, LAN, or VPN networks.
 - Use HTTPS/TLS in `server` mode when accessed by mobile clients.
-- Do not reuse the admin password as `REMOTE_CODEX_SESSION_SECRET`.
+- Do not reuse the admin password as `POCKYMOE_SESSION_SECRET`.
 - Keep destructive actions behind existing confirmation flows even after login.
 - For mobile apps, store tokens in Keychain or Android Keystore.
 

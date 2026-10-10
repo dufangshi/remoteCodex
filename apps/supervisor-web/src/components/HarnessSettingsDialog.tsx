@@ -1,10 +1,10 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { useCallback, useEffect, useState } from 'react';
 import type {
   AgentCapabilitySnapshotDto,
   ModelOptionDto,
   ThreadDto,
-} from '@remote-codex/shared';
+} from '@pockymoe/shared';
 import { fetchThreadCapabilitySnapshot, postThreadHarnessAction } from '../lib/api';
 import {
   DshHarnessPanel,

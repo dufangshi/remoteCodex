@@ -1,5 +1,5 @@
 {
-  "name": "@remote-codex/supervisor-web",
+  "name": "@pockymoe/supervisor-web",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -13,10 +13,10 @@
   "dependencies": {
     "3dmol": "^2.5.2",
     "@hpke/core": "^1.9.0",
-    "@remote-codex/plugin-runtime": "workspace:*",
-    "@remote-codex/plugin-terminal": "workspace:*",
-    "@remote-codex/shared": "workspace:*",
-    "@remote-codex/thread-ui": "file:../../remote-codex-thread-ui/packages/thread-ui",
+    "@pockymoe/plugin-runtime": "workspace:*",
+    "@pockymoe/plugin-terminal": "workspace:*",
+    "@pockymoe/shared": "workspace:*",
+    "@pockymoe/thread-ui": "file:../../pockymoe-thread-ui/packages/thread-ui",
     "@streamdown/code": "^1.1.1",
     "@tanstack/react-virtual": "^3.14.10",
     "@xterm/addon-fit": "^0.11.0",

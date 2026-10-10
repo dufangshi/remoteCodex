@@ -1,4 +1,4 @@
-// Remote Codex bridge inside the ACP-owned DSH process (inserted with --patch).
+// Pockymoe bridge inside the ACP-owned DSH process (inserted with --patch).
 // ACP keeps prompts, tools, permissions and cancellation. This reverse channel
 // carries startup metadata, an allowlisted subset of DSH's own Remote API,
 // session projection views, live assistant text and human questions. It never
@@ -165,7 +165,7 @@ export function apply(ctx, config) {
     });
   });
   // Questions and tool approvals for a session or its subagents go to the
-  // Remote Codex turn. DSH's Web host would otherwise hold them for a Web
+  // Pockymoe turn. DSH's Web host would otherwise hold them for a Web
   // client that is not there, and the session would wait forever.
   const ask = (signal, message) => new Promise((resolve, reject) => {
     const id = ++questionId;
@@ -211,7 +211,7 @@ export function apply(ctx, config) {
       socket.setEncoding('utf8');
       socket.on('error', () => {});
       socket.on('close', () => {
-        for (const question of questions.values()) question.reject(new Error('Remote Codex disconnected'));
+        for (const question of questions.values()) question.reject(new Error('Pockymoe disconnected'));
         questions.clear();
       });
       socket.on('connect', () => send({ token: config.token, hello: data }));
@@ -263,7 +263,7 @@ export function apply(ctx, config) {
       case 'session': return session(params.sessionId);
       case 'invoke': {
         const endpoint = `${params.namespace}/${params.method}`;
-        if (!REMOTES.has(endpoint)) throw new Error(`Remote ${endpoint} is not available through Remote Codex`);
+        if (!REMOTES.has(endpoint)) throw new Error(`Remote ${endpoint} is not available through Pockymoe`);
         if (endpoint === 'pluginManager/setBundleEnabled' && APP_BUNDLE.test(String(params.args?.name))) {
           throw new Error(`${params.args.name} is an application bundle; the ACP profile cannot switch it`);
         }
@@ -527,7 +527,7 @@ function settings(ctx) {
 
 async function updateSetting(ctx, { ns, key, value, revision }) {
   const type = Object.hasOwn(SETTINGS, ns) && Object.hasOwn(SETTINGS[ns], key) ? SETTINGS[ns][key] : null;
-  if (!type) throw new Error(`Setting ${ns}.${key} is not editable through Remote Codex`);
+  if (!type) throw new Error(`Setting ${ns}.${key} is not editable through Pockymoe`);
   if (value !== null && typeof value !== type) throw new Error(`Setting ${ns}.${key} expects a ${type}`);
   if (type === 'number' && value !== null && !Number.isFinite(value)) throw new Error(`Setting ${ns}.${key} expects a finite number`);
   if (typeof value === 'string' && value.trimStart().startsWith('!!')) throw new Error('YAML tags are not accepted');

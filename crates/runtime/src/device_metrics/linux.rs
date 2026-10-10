@@ -1,6 +1,6 @@
 //! Read-only Linux hwmon and powercap providers. Never use power limits as watts.
 use super::hardware::{command, energy_watts, power, read_u64, unavailable};
-use remote_codex_protocol::*;
+use pockymoe_protocol::*;
 use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},

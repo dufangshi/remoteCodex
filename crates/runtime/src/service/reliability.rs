@@ -41,7 +41,7 @@ impl Supervisor {
             tx.commit()?;
             Ok(())
         })?;
-        self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+        self.bus.emit(pockymoe_protocol::ThreadEventEnvelope {
             event_type: "thread.updated".into(), thread_id: id.into(), timestamp: now,
             payload: json!({"reason":"pending_steer_updated","pendingSteers":self.load_steers(id)?}),
         });
@@ -62,7 +62,7 @@ impl Supervisor {
                     )?;
                     Ok(())
                 });
-                state.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+                state.bus.emit(pockymoe_protocol::ThreadEventEnvelope {
                     event_type: "thread.updated".into(),
                     thread_id: id,
                     timestamp: now_rfc3339(),
@@ -114,7 +114,7 @@ impl Supervisor {
             tx.commit()?;
             Ok(())
         })?;
-        self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+        self.bus.emit(pockymoe_protocol::ThreadEventEnvelope {
             event_type: "thread.updated".into(),
             thread_id: id.into(),
             timestamp: now_rfc3339(),
@@ -194,7 +194,7 @@ impl Supervisor {
             conn.execute("UPDATE threads SET last_error=NULL WHERE id=?1", [id])?;
             Ok(())
         })?;
-        self.bus.emit(remote_codex_protocol::ThreadEventEnvelope {
+        self.bus.emit(pockymoe_protocol::ThreadEventEnvelope {
             event_type: "thread.updated".into(),
             thread_id: id.into(),
             timestamp: now_rfc3339(),

@@ -1,10 +1,10 @@
 use super::*;
 use crate::fake::FakeRuntime;
-use remote_codex_protocol::ThreadEventEnvelope;
+use pockymoe_protocol::ThreadEventEnvelope;
 
 fn supervisor(dir: &Path) -> Arc<Supervisor> {
     let config = RuntimeConfig {
-        mode: remote_codex_protocol::Mode::Local,
+        mode: pockymoe_protocol::Mode::Local,
         host: "127.0.0.1".into(),
         port: 0,
         workspace_root: dir.into(),
@@ -146,7 +146,7 @@ async fn automation_busy_two_and_half_periods_coalesces_until_whole_turn_ends() 
     s.drain_steers(&t).await.unwrap();
     assert_eq!(pending(&s, &t), 1);
     // Tool/item progress is deliberately not a completion boundary.
-    s.bus.emit(remote_codex_protocol::ThreadEventEnvelope{event_type:"thread.item.completed".into(),thread_id:t.clone(),timestamp:"2030-01-01T02:00:00Z".into(),payload:json!({"turnId":"user-turn","item":{"id":"tool","kind":"toolCall","text":"batch finished","status":"completed"}})});
+    s.bus.emit(pockymoe_protocol::ThreadEventEnvelope{event_type:"thread.item.completed".into(),thread_id:t.clone(),timestamp:"2030-01-01T02:00:00Z".into(),payload:json!({"turnId":"user-turn","item":{"id":"tool","kind":"toolCall","text":"batch finished","status":"completed"}})});
     s.automation_tick("2030-01-01T03:30:00Z").await.unwrap();
     s.drain_steers(&t).await.unwrap();
     let r = runs(&s, &t, id);
@@ -555,7 +555,7 @@ async fn automation_at_inbox_is_passive_for_idle_and_missed_policy_skips_late_ru
 #[tokio::test]
 async fn automation_time_and_command_events_execute_real_scripts_once_and_exclude_failures() {
     let (dir, s, t) = setup().await;
-    let script = json!({"kind":"runScript","argv":["/bin/sh","-c","printf 'run\\n' >> executions; test -z \"$REMOTE_CODEX_TOKEN$REMOTE_CODEX_URL$REMOTE_CODEX_CLI_CONFIG\""],"cwd":".","timeoutSeconds":3});
+    let script = json!({"kind":"runScript","argv":["/bin/sh","-c","printf 'run\\n' >> executions; test -z \"$POCKYMOE_TOKEN$POCKYMOE_URL$POCKYMOE_CLI_CONFIG\""],"cwd":".","timeoutSeconds":3});
     let a = s
         .automation_create(
             &t,

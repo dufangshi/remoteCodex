@@ -10,8 +10,8 @@ fs.mkdirSync(root, { recursive:true });
 const port = Number(process.env.FORK_TEST_PORT ?? 19273);
 const base = `http://127.0.0.1:${port}`;
 const log = fs.openSync(path.join(root,'supervisor.log'),'a');
-const start = () => spawn(path.resolve('target/debug/remote-codex'), ['supervisor'], {
- env:{...process.env, PORT:String(port), HOST:'127.0.0.1', REMOTE_CODEX_MODE:'local', REMOTE_CODEX_E2E_FAKE_RUNTIME:'0', DATABASE_URL:path.join(root,'supervisor.sqlite'), WORKSPACE_ROOT:root}, stdio:['ignore',log,log], detached:true,
+const start = () => spawn(path.resolve('target/debug/pockymoe'), ['supervisor'], {
+ env:{...process.env, PORT:String(port), HOST:'127.0.0.1', POCKYMOE_MODE:'local', POCKYMOE_E2E_FAKE_RUNTIME:'0', DATABASE_URL:path.join(root,'supervisor.sqlite'), WORKSPACE_ROOT:root}, stdio:['ignore',log,log], detached:true,
 });
 let proc = start();
 const sleep = ms=>new Promise(r=>setTimeout(r,ms));

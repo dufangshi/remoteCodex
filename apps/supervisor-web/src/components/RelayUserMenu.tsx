@@ -1,4 +1,4 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { LogOut, Settings, UserRound, MonitorSmartphone } from 'lucide-react';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
@@ -11,7 +11,7 @@ import {
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 import { useAppShellNav } from './AppShellNavContext';
-import type { RelaySessionDto } from '@remote-codex/shared';
+import type { RelaySessionDto } from '@pockymoe/shared';
 import {
   ApiError,
   fetchRelaySession,

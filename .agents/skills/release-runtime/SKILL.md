@@ -1,15 +1,15 @@
 ---
 name: release-runtime
-description: 排查 Remote Codex 原生安装与更新，固定提交并验证、发布不可变 GitHub runtime release；Windows Device Manager 独立发布。
+description: 排查 Pockymoe 原生安装与更新，固定提交并验证、发布不可变 GitHub runtime release；Windows Device Manager 独立发布。
 ---
 
-# Remote Codex 原生更新与发布
+# Pockymoe 原生更新与发布
 
 GitHub Releases 是 runtime 的权威版本。不要发布新的 runtime/npm 包；npm 目录只保留旧版本兼容和历史测试。参考 [安装与迁移](../../../docs/github-runtime.md)。
 
 ## 排查安装与更新
 
-先比较实际 CLI 路径、`remote-codex version`、设备管理 API 的 installed/running/latest 版本及 job/log。Unix 用 `type -a remote-codex` 和 `~/.local/bin/remote-codex version`；Windows 用 `Get-Command remote-codex -All`。CLI 版本不等于后台正在运行的版本。
+先比较实际 CLI 路径、`pockymoe version`、设备管理 API 的 installed/running/latest 版本及 job/log。Unix 用 `type -a pockymoe` 和 `~/.local/bin/pockymoe version`；Windows 用 `Get-Command pockymoe -All`。CLI 版本不等于后台正在运行的版本。
 
 旧 npm 安装需通过相同设备 setup 命令完成一次迁移，保留配置、SQLite 和设备身份。运行中的设备优先使用 Settings 对应的 device-scoped Check/Update API；更新 worker 必须独立运行、暂停和恢复受本次维护影响的线程。API 不可用或不能完成迁移时才手动分离恢复，不盲目 kill 或降级已迁移数据库。
 

@@ -1,4 +1,4 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import {
   useCallback,
   useEffect,
@@ -138,7 +138,7 @@ export function useThreadAuxiliaryActions({
   }, [id]);
 
   async function handleExportTranscript(
-    input: import('@remote-codex/shared').ExportThreadTranscriptInput,
+    input: import('@pockymoe/shared').ExportThreadTranscriptInput,
   ) {
     if (!id) {
       return;
@@ -150,7 +150,7 @@ export function useThreadAuxiliaryActions({
     try {
       const snapshot = await loadExportSnapshot(id, input);
       const html = await renderStandaloneTranscript(snapshot);
-      const filename = `remote-codex-${snapshot.title.replace(/[^a-z0-9._-]+/gi, '-').replace(/^-|-$/g, '') || 'thread'}.html`;
+      const filename = `pockymoe-${snapshot.title.replace(/[^a-z0-9._-]+/gi, '-').replace(/^-|-$/g, '') || 'thread'}.html`;
       const href = URL.createObjectURL(
         new Blob([html], { type: 'text/html;charset=utf-8' }),
       );

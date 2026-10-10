@@ -1,10 +1,10 @@
-import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { translate, useI18n } from '@pockymoe/thread-ui/i18n';
 import { ProductHeader } from '../components/ProductHeader';
 import { ArrowRight, BookOpen, MonitorSmartphone, RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import type { RelaySessionDto } from '@remote-codex/shared';
+import type { RelaySessionDto } from '@pockymoe/shared';
 import { ApiError, enableRelayMode, fetchRelaySession } from '../lib/api';
 
 function errorMessage(caught: unknown) {
@@ -53,7 +53,7 @@ export function RelayHomePage() {
   return (
     <main className="min-h-screen bg-[var(--app-bg)] px-4 py-5 text-[var(--app-fg)] sm:px-6 sm:py-6">
       <div className="mx-auto w-full max-w-5xl">
-        <ProductHeader title="Remote Codex" actions={<Link className="product-icon-button" to="/relay-guide" aria-label={translate("auth.guide")} title={translate("auth.guide")}><BookOpen size={18} /></Link>} />
+        <ProductHeader title="Pockymoe" actions={<Link className="product-icon-button" to="/relay-guide" aria-label={translate("auth.guide")} title={translate("auth.guide")}><BookOpen size={18} /></Link>} />
 
         <section className="py-10 sm:py-14" aria-busy={loading}>
           <div className="flex items-center gap-2 text-sm text-[var(--theme-fg-muted)]">

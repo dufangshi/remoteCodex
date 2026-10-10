@@ -12,7 +12,7 @@ function fixture(t, { version = '9.1.0', corrupt = false, failVersion = false, p
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'native-bootstrap-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const bin = path.join(root, 'bin'); fs.mkdirSync(bin);
-  const asset = platform === 'Darwin' ? 'remote-codex-darwin-arm64' : `remote-codex-linux-${arch === 'aarch64' ? 'arm64' : 'x64'}-gnu`;
+  const asset = platform === 'Darwin' ? 'remote-codex-darwin-arm64' : `pockymoe-linux-${arch === 'aarch64' ? 'arm64' : 'x64'}-gnu`;
   const native = '#!/bin/sh\nif [ "$1" = version ]; then printf "%s\\n" "$TEST_VERSION"; else printf "%s\\n" "$@" > "$TEST_ARGUMENTS"; fi\n';
   const sums = `${corrupt ? 'a'.repeat(64) : crypto.createHash('sha256').update(native).digest('hex')}  ${asset}\n`;
   fs.writeFileSync(path.join(root, 'binary'), native);

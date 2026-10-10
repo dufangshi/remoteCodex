@@ -1,4 +1,4 @@
-# remoteCodex 工作台布局与 UI 优化方案
+# Pockymoe 工作台布局与 UI 优化方案
 
 日期：2026-10-07（多伦多）。任务板：#3。状态：方案交付，未实现产品改动。
 
@@ -14,10 +14,10 @@
 | --- | --- | --- |
 | 主仓库 | `ffb07d8b17c08af5aa601a67af6e9f058a5a25ac` | Web 适配、Rust relay 工作台导航、协作接口、现有 E2E |
 | 底层业务对比基线 | `94edcfa` | 沿用共同对比报告；当前 UI 结论以本轮生产源码为准 |
-| 独立共享 UI | `8e4c384d81012c229d1a780ea175fa2dbaa5c82b` | `remote-codex-thread-ui/packages/thread-ui/src` |
+| 独立共享 UI | `8e4c384d81012c229d1a780ea175fa2dbaa5c82b` | `pockymoe-thread-ui/packages/thread-ui/src` |
 | NarraFork，只读 | `4e04d2f2e490bd57a5d8d712b709a574b905848a` | Dockview、面板服务、导航、编辑器、终端、手机和主题 |
 
-共同报告：[remoteCodex 与 NarraFork 对比](../narrafork-comparison-2026-10-07.zh.md)。下面使用 `U/` 表示共享 UI 的 `packages/thread-ui/src/`，`W/` 表示主仓库 `apps/supervisor-web/src/`，`N/` 表示只读参考仓库根目录。
+共同报告：[Pockymoe 与 NarraFork 对比](../narrafork-comparison-2026-10-07.zh.md)。下面使用 `U/` 表示共享 UI 的 `packages/thread-ui/src/`，`W/` 表示主仓库 `apps/supervisor-web/src/`，`N/` 表示只读参考仓库根目录。
 
 ### 1.1 关键源码依据
 
@@ -43,7 +43,7 @@
 
 ## 2. 共同能力、它更强、我们更适合的部分
 
-| 能力 | remoteCodex 已有 | NarraFork 的增强 | 建议取舍 |
+| 能力 | Pockymoe 已有 | NarraFork 的增强 | 建议取舍 |
 | --- | --- | --- | --- |
 | 单会话+文件 | Matter 的可调整 Explorer；旧外壳可调整分栏；多种预览和 Monaco | 文件作为可停靠资源进入更大的多面板表面 | 保留现有文件系统与预览，增加“固定到参考区”和可靠恢复，不重新开发编辑器 |
 | 文件标签 | 预览/固定、dirty 点、关闭确认 | 资源标签与工作台停靠、编辑会话状态协同 | 优先补每文件草稿隔离、固定标签恢复、焦点/键盘行为 |
@@ -77,7 +77,7 @@
 场景：一个父线程下有实现、搜索、验证等多个工作者，用户要知道谁仍在跑、谁需要输入、结果在哪。
 
 - 保留 GroupedThreadTabs，把已有“有 N 个子线程运行”扩成可展开的协作区：运行、等待输入、结果待查看、失败、状态暂不可用。
-- **控制面线程、harness 原生 subagent、任务板条目分别建模。** 任务 owner 可关联控制面线程；原生 subagent 没有已映射 Remote Codex threadId 时只展示原生详情，不伪造可跳转线程。
+- **控制面线程、harness 原生 subagent、任务板条目分别建模。** 任务 owner 可关联控制面线程；原生 subagent 没有已映射 Pockymoe threadId 时只展示原生详情，不伪造可跳转线程。
 - 第一版消费已有 family/thread/activity 和 activeSubagents。持久展示最近完成/失败，避免 running=0 后入口突然消失。没有可靠等待原因时显示“状态暂不可用”，不猜成 idle。
 - 第二版通过受权限保护的 Rust adapter 接入 taskList/taskShow 与 inbox 结果/问题摘要，显示“阻塞于 #N”及成果路径。控制面能力已有，完整 Web 展示/权限适配仍是新工作。
 - 点结果跳到原线程/对应消息，或固定到参考区。UI 查看结果不自动 ack Agent inbox，也不自动将 task done 当成用户已验收。
@@ -486,7 +486,7 @@ pnpm exec playwright test e2e/workbench-panels.spec.ts \
   --grep 'mobile view preserves drafts and restores focus' --project=mobile-chromium
 ```
 
-TS/TSX 共享 UI 改动先在独立 UI 仓库做受影响 Vitest、typecheck 和一次 `pnpm --filter @remote-codex/thread-ui build`；CSS-only 不构建 JS。宿主确认消费新 dist，必要时按 skill 刷新本地 file 依赖。使用隔离测试 API/Web 端口与高优先级 `REMOTE_CODEX_DATABASE_PATH/REMOTE_CODEX_WORKSPACE_ROOT`，清除继承的正式 relay 配置；不能把正在运行真实任务的 Supervisor 当测试服务。新增 Rust 时只做受影响 crate/test-name 与 fmt/编译，不跑 workspace/platform 全量。
+TS/TSX 共享 UI 改动先在独立 UI 仓库做受影响 Vitest、typecheck 和一次 `pnpm --filter @pockymoe/thread-ui build`；CSS-only 不构建 JS。宿主确认消费新 dist，必要时按 skill 刷新本地 file 依赖。使用隔离测试 API/Web 端口与高优先级 `POCKYMOE_DATABASE_PATH/POCKYMOE_WORKSPACE_ROOT`，清除继承的正式 relay 配置；不能把正在运行真实任务的 Supervisor 当测试服务。新增 Rust 时只做受影响 crate/test-name 与 fmt/编译，不跑 workspace/platform 全量。
 
 若受影响链路全部通过且没有新改动，停止，不补全量保险。实际发布共享 UI、Web relay 部署、runtime 更新由父线程负责；此方案不授权 push/发布/部署，也不涉及 Windows Device Manager 版本。
 

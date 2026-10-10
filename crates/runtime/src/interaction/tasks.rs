@@ -4,7 +4,7 @@
 use super::inbox;
 use crate::Supervisor;
 use anyhow::{anyhow, bail, ensure, Result};
-use remote_codex_protocol::{now_rfc3339, ThreadEventEnvelope};
+use pockymoe_protocol::{now_rfc3339, ThreadEventEnvelope};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -216,7 +216,7 @@ impl Supervisor {
                     "task",
                     &format!("Task #{number} assigned: {}", title.trim()),
                     &format!(
-                        "Task #{number} \"{}\" is assigned to you{}. Claim it with `remote-codex task claim {number}`, read it with `remote-codex task show {number}`, and finish with `remote-codex task done {number} --result ...`.",
+                        "Task #{number} \"{}\" is assigned to you{}. Claim it with `pockymoe task claim {number}`, read it with `pockymoe task show {number}`, and finish with `pockymoe task done {number} --result ...`.",
                         title.trim(),
                         if ready { " and ready" } else { "; it is waiting on its dependencies and you will be told when it is ready" }
                     ),
@@ -451,7 +451,7 @@ impl Supervisor {
                             &me,
                             "task",
                             &format!("Task #{n} ready: {title}"),
-                            &format!("Task #{n} \"{title}\" is now unblocked. Claim it with `remote-codex task claim {n}`."),
+                            &format!("Task #{n} \"{title}\" is now unblocked. Claim it with `pockymoe task claim {n}`."),
                         )?;
                         touched.push(owner);
                     }

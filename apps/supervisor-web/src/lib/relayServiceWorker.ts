@@ -1,4 +1,4 @@
-import { setLocale, translate, useI18n } from '@remote-codex/thread-ui/i18n';
+import { setLocale, translate, useI18n } from '@pockymoe/thread-ui/i18n';
 /// <reference lib="webworker" />
 import { installPushHandlers } from './notificationWorker';
 import {

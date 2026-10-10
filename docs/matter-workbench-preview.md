@@ -7,10 +7,10 @@ reply readable when scrolling to the bottom.
 
 ## Repository pairing
 
-- Remote Codex branch: `feat/matter-workbench`, based on main
+- Pockymoe branch: `feat/matter-workbench`, based on main
   `a5d27bc8df420f8c63bc16bbe0334320a18b3104`.
 - Shared UI repository: `dufangshi/remote-codex-thread-ui-rust`, checked out at
-  `remote-codex-thread-ui/` (not the similarly named sibling repository).
+  `pockymoe-thread-ui/` (not the similarly named sibling repository).
 - Shared UI branch: `feat/matter-workbench`, based on main `db97668`.
 - Required shared UI commit: `1b81c16064467839f4745f63128e62c69e8fb508`
   ([shared UI PR #4](https://github.com/dufangshi/remote-codex-thread-ui-rust/pull/4)).
@@ -18,7 +18,7 @@ reply readable when scrolling to the bottom.
   commit `08ff4d786c75a44e9ac5d223e7e9bfaf89233e99`, `app-ui.html`.
   The requester confirmed permission to reuse its styles. The implementation
   adopts its restrained colors, DM Sans, thin icons, navigation proportions,
-  rounded composer, and execution timeline, adapted to Remote Codex controls.
+  rounded composer, and execution timeline, adapted to Pockymoe controls.
 - DM Sans is self-hosted under `apps/supervisor-web/public/fonts/`; its OFL
   license is included alongside the font.
 
@@ -32,7 +32,7 @@ and expandable execution timeline example.
 - Tailscale URL for a connected device: <http://100.77.247.48:4327>.
 - Isolated database: `.local/matter-preview.sqlite`.
 - Isolated workspaces: `.local/matter-preview-workspaces/`.
-- The test supervisor uses the fake runtime with inherited `REMOTE_CODEX_*`
+- The test supervisor uses the fake runtime with inherited `POCKYMOE_*`
   environment variables removed. Demo commands and replies are fixtures, not
   real model runs. The active host supervisor was not restarted or updated.
 
@@ -55,7 +55,7 @@ Open tabs retain their order across thread switching, account refreshes, and
 page reloads. The host removes its legacy 16 px bottom padding so the workbench
 is not clipped. Dark selection uses a brighter gray-blue background and stronger
 text contrast. Session and Global settings share the workbench theme. The thread
-menu separately copies Remote Codex IDs, native harness IDs, and (for Codex)
+menu separately copies Pockymoe IDs, native harness IDs, and (for Codex)
 `codex://threads/...` deeplinks.
 
 Thread indicators distinguish running (blue spinner), completed/unread (green
@@ -78,7 +78,7 @@ shows matching message excerpts; it does not currently jump to a turn.
 Completed checks:
 
 - Shared UI package build and main Web typecheck/production build.
-- `cargo test -p remote-codex-relay workbench --lib`: two passing tests for
+- `cargo test -p pockymoe-relay workbench --lib`: two passing tests for
   account/device isolation, preserved favorites, sharing revocation,
   workspace grants, disabled accounts, and event authorization.
 - Relay formatting and compilation checks.

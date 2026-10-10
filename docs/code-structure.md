@@ -17,12 +17,12 @@ find crates -name '*.rs' -not -path '*/target/*' | xargs wc -l | sort -rn | head
 
 # Web surfaces
 find apps/supervisor-web/src -name '*.ts*' -o -name '*.css' | xargs wc -l | sort -rn | head -15
-find remote-codex-thread-ui/packages -name '*.ts*' -o -name '*.css' \
+find pockymoe-thread-ui/packages -name '*.ts*' -o -name '*.css' \
   | grep -v node_modules | grep -v /dist/ | xargs wc -l | sort -rn | head -15
 ```
 
 Snapshot at 2026-09-29: Rust 43.2k, `apps/supervisor-web` 30.0k,
-`remote-codex-thread-ui` 59.7k. Rust was 49.1k on 2026-10-04.
+`pockymoe-thread-ui` 59.7k. Rust was 49.1k on 2026-10-04.
 
 ## The split convention
 

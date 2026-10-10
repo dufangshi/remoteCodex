@@ -3,4 +3,4 @@ export type {
   FrontendPluginModule,
   InlineCodeRenderContext,
   ThreadPanelContribution,
-} from '@remote-codex/thread-ui';
+} from '@pockymoe/thread-ui';
