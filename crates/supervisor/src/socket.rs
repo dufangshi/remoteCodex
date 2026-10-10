@@ -115,15 +115,9 @@ async fn run_socket_session(
             shell = shells.recv() => {
                 match shell {
                     Ok(shell) => {
-                        if client_state.attached_shell_id.as_deref() != Some(&shell.shell_id) {
+                        let Some(message) = client_state.shell_message(shell) else {
                             continue;
-                        }
-                        let message = json!({
-                            "type": "shell.output",
-                            "shellId": shell.shell_id,
-                            "timestamp": now_rfc3339(),
-                            "payload": { "data": shell.data }
-                        });
+                        };
                         if output.send(message).is_err() {
                             break;
                         }
@@ -142,6 +136,34 @@ async fn run_socket_session(
 struct SocketClientState {
     attached_shell_id: Option<String>,
     viewer_id: Option<String>,
+    /// Output up to this sequence was already sent as the attach replay.
+    replayed_seq: u64,
+}
+
+impl SocketClientState {
+    fn shell_message(&mut self, shell: crate::shells::ShellOutput) -> Option<Value> {
+        if self.attached_shell_id.as_deref() != Some(&shell.shell_id)
+            || shell.seq <= self.replayed_seq
+        {
+            return None;
+        }
+        if shell.exited {
+            self.attached_shell_id = None;
+            self.viewer_id = None;
+            return Some(json!({
+                "type": "shell.exited",
+                "shellId": shell.shell_id,
+                "timestamp": now_rfc3339(),
+                "payload": { "threadId": shell.thread_id, "state": "exited" }
+            }));
+        }
+        Some(json!({
+            "type": "shell.output",
+            "shellId": shell.shell_id,
+            "timestamp": now_rfc3339(),
+            "payload": { "data": shell.data }
+        }))
+    }
 }
 
 fn handle_client_message(message: &Value, state: &mut SocketClientState) -> Vec<Value> {
@@ -168,10 +190,15 @@ fn handle_client_message(message: &Value, state: &mut SocketClientState) -> Vec<
             if let Err(error) = crate::shells::hub().resize(id, cols as u16, rows as u16) {
                 return shell_error(message, "resize_failed", &error.to_string());
             }
+            let (replay, replayed_seq) = match crate::shells::hub().replay(id) {
+                Ok(replay) => replay,
+                Err(error) => return shell_error(message, "shell_not_found", &error.to_string()),
+            };
             let viewer_id = Uuid::new_v4().to_string();
             state.attached_shell_id = Some(id.to_string());
             state.viewer_id = Some(viewer_id.clone());
-            vec![
+            state.replayed_seq = replayed_seq;
+            let mut messages = vec![
                 json!({
                     "type": "shell.connected",
                     "shellId": id,
@@ -188,7 +215,17 @@ fn handle_client_message(message: &Value, state: &mut SocketClientState) -> Vec<
                         "viewerId": viewer_id
                     }
                 }),
-            ]
+            ];
+            if !replay.is_empty() {
+                // The browser resets xterm before attaching; replay restores the screen.
+                messages.push(json!({
+                    "type": "shell.output",
+                    "shellId": id,
+                    "timestamp": now_rfc3339(),
+                    "payload": { "data": replay, "replay": true }
+                }));
+            }
+            messages
         }
         Some("shell.detach") => {
             let Some((shell_id, viewer_id)) = owned_shell(message, state) else {
@@ -287,4 +324,104 @@ fn shell_error(message: &Value, code: &str, error_message: &str) -> Vec<Value> {
         "timestamp": now_rfc3339(),
         "payload": { "code": code, "message": error_message }
     })]
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+    use tokio::sync::broadcast::error::TryRecvError;
+
+    fn wait_for_replay(id: &str, needle: &str) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if crate::shells::hub().replay(id).unwrap().0.contains(needle) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!("shell output never contained {needle}");
+    }
+
+    fn next_message(
+        state: &mut SocketClientState,
+        output: &mut tokio::sync::broadcast::Receiver<crate::shells::ShellOutput>,
+        until: impl Fn(&Value) -> bool,
+    ) -> Vec<Value> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut seen = Vec::new();
+        while Instant::now() < deadline {
+            match output.try_recv() {
+                Ok(chunk) => {
+                    if let Some(message) = state.shell_message(chunk) {
+                        let done = until(&message);
+                        seen.push(message);
+                        if done {
+                            return seen;
+                        }
+                    }
+                }
+                Err(TryRecvError::Empty) => std::thread::sleep(Duration::from_millis(20)),
+                Err(error) => panic!("shell output channel failed: {error}"),
+            }
+        }
+        panic!("expected shell message never arrived; saw {seen:?}");
+    }
+
+    #[test]
+    fn attach_replays_recent_output_once_and_reports_exit() {
+        let cwd = tempfile::tempdir().unwrap();
+        let hub = crate::shells::hub();
+        let mut output = hub.subscribe_all();
+        let (id, _) = hub
+            .create(
+                "thread-replay",
+                "workspace-replay",
+                cwd.path().to_str().unwrap(),
+                80,
+                24,
+                None,
+            )
+            .unwrap();
+        hub.write(&id, "printf 'before-%s\\n' attach\n").unwrap();
+        wait_for_replay(&id, "before-attach");
+
+        let mut state = SocketClientState::default();
+        let attached = handle_client_message(
+            &json!({ "type": "shell.attach", "shellId": id, "cols": 100, "rows": 30 }),
+            &mut state,
+        );
+        let replay = attached
+            .iter()
+            .find(|message| message["type"] == "shell.output")
+            .expect("attach replays existing output");
+        assert_eq!(replay["payload"]["replay"], true);
+        assert!(replay["payload"]["data"]
+            .as_str()
+            .unwrap()
+            .contains("before-attach"));
+
+        // Output queued before attach is already part of the replay and must not repeat.
+        hub.write(&id, "printf 'after-%s\\n' attach\n").unwrap();
+        let live = next_message(&mut state, &mut output, |message| {
+            message["payload"]["data"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("after-attach")
+        });
+        assert!(live.iter().all(|message| !message["payload"]["data"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("before-attach")));
+
+        hub.write(&id, "exit\n").unwrap();
+        let exited = next_message(&mut state, &mut output, |message| {
+            message["type"] == "shell.exited"
+        });
+        let last = exited.last().unwrap();
+        assert_eq!(last["payload"]["threadId"], "thread-replay");
+        assert_eq!(last["payload"]["state"], "exited");
+        assert!(hub.get(&id).is_err(), "an exited shell is no longer listed");
+        assert!(hub.list_for_thread("thread-replay").is_empty());
+    }
 }

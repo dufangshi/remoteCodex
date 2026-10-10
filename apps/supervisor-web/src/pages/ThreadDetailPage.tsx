@@ -1,7 +1,7 @@
 import { useThreadDrafts } from './useThreadDrafts';
 import { useWorkbenchReference } from './useWorkbenchReference';
 import { WorkbenchThreadPicker } from '../components/WorkbenchThreadPicker';
-import { WorkbenchTerminal } from '../components/WorkbenchTerminal';
+import { WorkbenchTerminal, terminalTargetKey, type TerminalOpenRequest } from '../components/WorkbenchTerminal';
 import { WorkbenchReferencePane } from '../components/WorkbenchReferencePane';
 import { WorkbenchCollaboration } from '../components/WorkbenchCollaboration';
 import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
@@ -18,7 +18,7 @@ import { ThreadPublicLinks } from '../components/ThreadPublicLinks';
 import { ThreadWatchesControl } from '../components/ThreadWatchesControl';
 import { ThreadSubagentsControl } from '../components/ThreadSubagentsControl';
 import { PortMappingsControl } from '../components/PortMappingsControl';
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Download, Link2, Network, Users } from 'lucide-react';
 
@@ -392,6 +392,20 @@ function threadConnectionSummary(isLoaded: boolean, connection: RealtimeConnecti
   }
 }
 
+const TERMINAL_OPEN_KEY = 'remote-codex.terminal-open:';
+
+/** Per browser tab, so a reload restores an open terminal without reopening it elsewhere. */
+function readTerminalOpen(routeKey: string) {
+  try { return sessionStorage.getItem(TERMINAL_OPEN_KEY + routeKey) === '1'; } catch { return false; }
+}
+
+function writeTerminalOpen(routeKey: string, open: boolean) {
+  try {
+    if (open) sessionStorage.setItem(TERMINAL_OPEN_KEY + routeKey, '1');
+    else sessionStorage.removeItem(TERMINAL_OPEN_KEY + routeKey);
+  } catch { /* Optional preference. */ }
+}
+
 export function ThreadDetailPage() {
   const { locale: i18nLocale } = useI18n();
   const { id = '' } = useParams();
@@ -678,7 +692,16 @@ export function ThreadDetailPage() {
   const referenceDevice = workbenchPresentation.value.referenceDeviceId ?? relayRouteDeviceId ?? 'local';
   const referenceId = workbenchPresentation.value.referenceId === id && referenceDevice === (relayRouteDeviceId ?? 'local') ? null : workbenchPresentation.value.referenceId;
   const [focusedPane, setFocusedPane] = useScopedState<'primary' | 'reference'>(`${routeKey}:${referenceDevice}:${referenceId ?? ''}`, 'primary');
-  const [terminalOpen, setTerminalOpen] = useScopedState(routeKey, false);
+  const [terminalOpen, setTerminalOpenState] = useScopedState(routeKey, readTerminalOpen(routeKey));
+  // Restored after a reload; an explicit open also focuses and may create a terminal.
+  const setTerminalOpen = useCallback((action: SetStateAction<boolean>) => {
+    setTerminalOpenState(current => {
+      const next = typeof action === 'function' ? action(current) : action;
+      writeTerminalOpen(routeKey, next);
+      return next;
+    });
+  }, [routeKey, setTerminalOpenState]);
+  const [terminalOpenRequest, setTerminalOpenRequest] = useState<TerminalOpenRequest | null>(null);
   const [chatDraft, setChatDraft, referenceDraft, setReferenceDraft] = useThreadDrafts(routeKey, `${referenceDevice}:${referenceId ?? ''}`);
   const referenceController = useWorkbenchReference(referenceDevice, referenceId, relayRouteDeviceId ?? 'local');
   const referenceEventRef = useRef(referenceController.onEvent);
@@ -731,6 +754,7 @@ export function ThreadDetailPage() {
     : toolsAccess?.kind === 'shared' && ((toolsAccess.scope === 'device' && toolsAccess.workspaceScope !== 'selected') || toolsAccess.workspaceId === toolsDetail?.workspace.id)
       ? toolsAccess.workspaceAccess : 'none';
   const toolsCanControl = toolsUseReference ? referenceController.canControl : relayThreadCanControl;
+  const toolsTargetLabel = `${toolsDevice === (relayRouteDeviceId ?? 'local') ? (presentationDeviceName ?? translate('workbench.localDeviceName')) : toolsDevice.slice(0,8)} · ${toolsDetail?.workspace.label ?? ''} · ${toolsDetail?.thread.title ?? ''}`;
   const focusPane = useCallback((pane: 'primary' | 'reference') => {
     if (pane === focusedPane) return true;
     if (pane === 'reference' && !referenceId) return false;
@@ -746,16 +770,22 @@ export function ThreadDetailPage() {
       if (toolsUseReference && (toolsDevice !== (relayRouteDeviceId ?? 'local') || toolsDetail?.workspace.id !== detail?.workspace.id) && !confirmWorkspaceDocumentLeave()) return false;
       setFocusedPane('primary');
     }
-    if (patch.mode === 'files') setTerminalOpen(false);
     workbenchPresentation.update(patch);
     return true;
-  }, [workbenchPresentation.update, toolsUseReference, toolsDevice, toolsDetail?.workspace.id, relayRouteDeviceId, detail?.workspace.id, setFocusedPane, setTerminalOpen]);
+  }, [workbenchPresentation.update, toolsUseReference, toolsDevice, toolsDetail?.workspace.id, relayRouteDeviceId, detail?.workspace.id, setFocusedPane]);
   const selectSplitThread = useCallback((selection: {deviceId: string | null; workspaceId: string; threadId: string; title: string}) => {
     if (toolsUseReference && (toolsDevice !== (relayRouteDeviceId ?? 'local') || toolsDetail?.workspace.id !== detail?.workspace.id) && !confirmWorkspaceDocumentLeave()) return;
     workbenchPresentation.update({ referenceId: selection.threadId, referenceDeviceId: selection.deviceId, mode: 'thread' });
     setFocusedPane('primary');
   }, [toolsUseReference, toolsDevice, toolsDetail?.workspace.id, relayRouteDeviceId, detail?.workspace.id, workbenchPresentation.update, setFocusedPane]);
   const closeTerminal = useCallback(() => setTerminalOpen(false), [setTerminalOpen]);
+  const toolsTargetKey = toolsDetail ? terminalTargetKey(toolsDevice, toolsDetail.thread.id) : null;
+  const toggleTerminal = useCallback(() => {
+    if (!terminalOpen && toolsTargetKey) {
+      setTerminalOpenRequest(current => ({ token: (current?.token ?? 0) + 1, target: toolsTargetKey }));
+    }
+    setTerminalOpen(!terminalOpen);
+  }, [setTerminalOpen, terminalOpen, toolsTargetKey]);
   const loadToolsCapabilities = useCallback(() => fetchThreadCapabilitySnapshot(toolsDetail!.thread.id, toolsDevice), [toolsDetail?.thread.id, toolsDevice]);
   const loadDialogCapabilities = useCallback(() => fetchThreadCapabilitySnapshot(harnessSettingsTarget!.threadId, harnessSettingsTarget!.deviceId), [harnessSettingsTarget?.threadId, harnessSettingsTarget?.deviceId]);
   const openReferenceThread = useCallback((threadId: string) => navigate(threadHref(threadId, referenceDevice === 'local' ? null : referenceDevice)), [navigate, referenceDevice]);
@@ -3172,7 +3202,7 @@ export function ThreadDetailPage() {
   }
 
   function handleToggleView() {
-    setTerminalOpen(open => !open);
+    toggleTerminal();
   }
 
   async function handleShellCopy() {
@@ -3251,11 +3281,10 @@ export function ThreadDetailPage() {
         ? translate("workbench.checkingRelayPermissions")
       : null
     : null;
-  const {
-    floatingMobileComposerBottomOffset,
-    timelineBottomSpacer,
-    useFloatingMobileComposer,
-  } = useMobileComposerLayout({
+  // The workbench composer sits inside the chat panel, which reserves its own
+  // scroll space; a second timeline spacer would hide replies in a short chat
+  // (for example above an open terminal).
+  const { floatingMobileComposerBottomOffset } = useMobileComposerLayout({
     activeView,
     composerHostRef,
     threadId: detail?.thread.id ?? id,
@@ -3456,7 +3485,6 @@ export function ThreadDetailPage() {
       previousTurnScrollRequestKey,
       nextTurnScrollRequestKey,
       ...(searchTarget ? { searchTarget } : {}),
-      bottomSpacer: timelineBottomSpacer,
       className: 'thread-timeline-surface min-h-0 flex-1',
       onTailVisibilityChange: setFollowTail,
       onPreviousTurnAvailabilityChange: setCanJumpToPreviousTurn,
@@ -3491,7 +3519,6 @@ export function ThreadDetailPage() {
       previousTurnScrollRequestKey,
       nextTurnScrollRequestKey,
       searchTarget,
-      timelineBottomSpacer,
       timelineOptimisticTurn,
     ],
   );
@@ -3643,7 +3670,6 @@ export function ThreadDetailPage() {
       if (!currentDetail) return;
       if (toolsUseReference && !confirmWorkspaceDocumentLeave()) return;
       setFocusedPane('primary');
-      setTerminalOpen(false);
 
       const relativePath = relativeWorkspaceLinkPath(
         input.path,
@@ -3656,16 +3682,15 @@ export function ThreadDetailPage() {
         requestId: (current?.requestId ?? 0) + 1,
       }));
     },
-    [toolsUseReference, setFocusedPane, setTerminalOpen],
+    [toolsUseReference, setFocusedPane],
   );
   const openReferenceFile = useCallback((input: {path: string; line?: number}) => {
     if (!referenceController.detail) return;
     if (!toolsUseReference && !confirmWorkspaceDocumentLeave()) return;
     setFocusedPane('reference');
-    setTerminalOpen(false);
     const path = relativeWorkspaceLinkPath(input.path, referenceController.detail.workspace.absPath) ?? input.path;
     setWorkspaceFocusPathRequest(current => ({ path, ...(input.line !== undefined ? {line:input.line} : {}), requestId: (current?.requestId ?? 0)+1 }));
-  }, [referenceController.detail, toolsUseReference, setFocusedPane, setTerminalOpen]);
+  }, [referenceController.detail, toolsUseReference, setFocusedPane]);
   const surfaceAdapter = useMemo(
     () => ({
       openThread,
@@ -3815,12 +3840,12 @@ export function ThreadDetailPage() {
         focusedPane: toolsUseReference ? 'reference' : 'primary',
         onFocusPane: focusPane,
         toolsOpen: terminalOpen,
-        toolsTargetLabel: `${toolsDevice === (relayRouteDeviceId ?? 'local') ? (presentationDeviceName ?? translate('workbench.localDeviceName')) : toolsDevice.slice(0,8)} · ${toolsDetail?.workspace.label ?? ''} · ${toolsDetail?.thread.title ?? ''}`,
+        toolsTargetLabel,
         toolTitle: `${translate('workbench.terminal')} · ${toolsDetail?.workspace.label ?? ''} · ${toolsDetail?.thread.title ?? ''}`,
-        toolContent: terminalOpen ? <WorkbenchTerminal key={`${toolsDevice}:${toolsDetail?.thread.id ?? ''}`} deviceId={toolsDevice} detail={toolsDetail} canControl={toolsCanControl} onClose={closeTerminal} effectiveTheme={shellNav?.effectiveTheme ?? 'dark'} /> : null,
+        toolContent: controls => <WorkbenchTerminal deviceId={toolsDevice} detail={toolsDetail} canControl={toolsCanControl} open={terminalOpen} controls={controls} onClose={closeTerminal} effectiveTheme={shellNav?.effectiveTheme ?? 'dark'} targetLabel={toolsTargetLabel} openRequest={terminalOpenRequest} />,
         onCloseTools: closeTerminal,
         storageFailed: workbenchPresentation.storageFailed,
-      }, statusActions: detail ? <><ThreadSubagentsControl key={`subagents-${detail.thread.id}`} detail={detail} /><ThreadWatchesControl key={`watches-${detail.thread.id}`} thread={detail.thread} /><WorkbenchThreadPicker deviceId={relayRouteDeviceId} workspaceId={detail.workspace.id} threadId={detail.thread.id} threads={threads} navigationThreads={workbenchNavigation.threads} reference={referenceId ? {deviceId: referenceDevice === 'local' ? null : referenceDevice, threadId:referenceId} : null} splitActive={Boolean(referenceId && ['thread','files'].includes(workbenchPresentation.value.mode))} onSelect={selectSplitThread} onRestore={() => changePresentation({mode:'thread'})} onClose={() => changePresentation({mode:'focus'})} onCollaboration={() => changePresentation({mode:'collaboration'})} /></> : null, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView: terminalOpen ? 'shell' : 'chat', terminalEnabled: terminalPluginEnabled, onViewChange: view => setTerminalOpen(view === 'shell'), onNavigate: navigate, onSearch: () => setSearchOpen(true), searchOpen, search: id && detail ? <ConversationSearch key={id} threadId={id} workspaceId={detail.thread.workspaceId}
+      }, statusActions: detail ? <><ThreadSubagentsControl key={`subagents-${detail.thread.id}`} detail={detail} /><ThreadWatchesControl key={`watches-${detail.thread.id}`} thread={detail.thread} /><WorkbenchThreadPicker deviceId={relayRouteDeviceId} workspaceId={detail.workspace.id} threadId={detail.thread.id} threads={threads} navigationThreads={workbenchNavigation.threads} reference={referenceId ? {deviceId: referenceDevice === 'local' ? null : referenceDevice, threadId:referenceId} : null} splitActive={Boolean(referenceId && ['thread','files'].includes(workbenchPresentation.value.mode))} onSelect={selectSplitThread} onRestore={() => changePresentation({mode:'thread'})} onClose={() => changePresentation({mode:'focus'})} onCollaboration={() => changePresentation({mode:'collaboration'})} /></> : null, renderThreadMenu: thread => <RecentThreadMenu thread={thread} currentKey={workbenchNavigation.currentKey} onFavorite={workbenchNavigation.onToggleThreadFavorite} onRenamed={workbenchNavigation.onThreadRenamed} onRemoved={workbenchNavigation.onThreadRemoved} onNavigate={navigate} />, harnessSessionId: detail?.thread.providerSessionId ?? null, harnessSessionUrl: detail?.thread.providerSessionId && (detail.thread.provider === 'codex' || detail.thread.agentId === 'codex') ? `codex://threads/${encodeURIComponent(detail.thread.providerSessionId)}` : null, activeView: terminalOpen ? 'shell' : 'chat', terminalEnabled: terminalPluginEnabled, onViewChange: view => { if (view === 'shell') toggleTerminal(); }, onNavigate: navigate, onSearch: () => setSearchOpen(true), searchOpen, search: id && detail ? <ConversationSearch key={id} threadId={id} workspaceId={detail.thread.workspaceId}
         deviceLabel={relayRouteDeviceId ?? searchLabels.localDevice}
         allowGlobal={relayThreadIsOwner || (relayAccess?.scope === 'device' && (relayAccess.threadAccess === 'read' || relayAccess.threadAccess === 'control'))}
         onNavigate={match => {

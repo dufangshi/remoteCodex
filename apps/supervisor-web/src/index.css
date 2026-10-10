@@ -731,66 +731,6 @@ fieldset {
   box-shadow: none;
 }
 
-.shell-panel {
-  background: color-mix(in srgb, var(--theme-surface) 68%, transparent);
-}
-
-.shell-header {
-  border-color: color-mix(in srgb, var(--theme-border) 88%, transparent);
-  background: color-mix(in srgb, var(--theme-panel) 94%, transparent);
-}
-
-.shell-banner,
-.shell-empty-state {
-  border-color: color-mix(in srgb, var(--theme-border) 88%, transparent);
-  background: color-mix(in srgb, var(--theme-surface-strong) 90%, transparent);
-}
-
-.shell-terminal-frame {
-  border-color: color-mix(in srgb, var(--theme-border) 90%, transparent);
-  background: color-mix(in srgb, var(--theme-surface-strong) 96%, transparent);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.16),
-    0 18px 36px rgb(15 23 42 / 0.08);
-}
-
-.shell-toolbox {
-  border-color: color-mix(in srgb, var(--theme-border) 90%, transparent);
-  background: color-mix(in srgb, var(--theme-panel) 92%, transparent);
-}
-
-.shell-toolbox-copy,
-.shell-control-chip,
-.shell-toolbox-trigger {
-  border-color: color-mix(in srgb, var(--theme-border-strong) 94%, transparent);
-  background: color-mix(in srgb, var(--theme-surface-strong) 94%, transparent);
-  color: var(--theme-fg);
-}
-
-.shell-toolbox-trigger:hover,
-.shell-toolbox-copy:hover,
-.shell-control-chip:hover {
-  background: var(--theme-hover);
-}
-
-.shell-floating-feedback {
-  border-color: color-mix(in srgb, var(--theme-border-strong) 92%, transparent);
-  background: color-mix(in srgb, var(--theme-panel) 94%, transparent);
-  color: var(--theme-fg-soft);
-}
-
-.shell-floating-feedback-done {
-  border-color: rgb(34 197 94 / 0.3);
-  background: rgb(34 197 94 / 0.12);
-  color: rgb(21 128 61);
-}
-
-.shell-floating-feedback-failed {
-  border-color: rgb(244 63 94 / 0.28);
-  background: rgb(244 63 94 / 0.12);
-  color: rgb(190 24 93);
-}
-
 .ui-action-primary,
 .ui-action-info,
 .ui-action-success,
@@ -1700,30 +1640,6 @@ fieldset {
 
 :root[data-theme-effective='dark'] .timeline-overlay-badge-user {
   color: rgb(165 243 252);
-}
-
-:root[data-theme-effective='dark'] .shell-terminal-frame {
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.04),
-    0 18px 36px rgb(2 6 23 / 0.28);
-}
-
-:root[data-theme-effective='dark'] .shell-toolbox-copy,
-:root[data-theme-effective='dark'] .shell-control-chip,
-:root[data-theme-effective='dark'] .shell-toolbox-trigger {
-  color: rgb(245 245 244);
-}
-
-:root[data-theme-effective='dark'] .shell-floating-feedback {
-  color: rgb(231 229 228);
-}
-
-:root[data-theme-effective='dark'] .shell-floating-feedback-done {
-  color: rgb(236 253 245);
-}
-
-:root[data-theme-effective='dark'] .shell-floating-feedback-failed {
-  color: rgb(255 228 230);
 }
 
 :root[data-theme-effective='dark'] .timeline-overlay-badge-agent {

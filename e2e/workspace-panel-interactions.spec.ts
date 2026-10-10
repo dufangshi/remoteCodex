@@ -131,3 +131,54 @@ test('workspace drawer resizes persistently and compact actions preserve folder 
     await page.screenshot({ path: path.join(artifactRoot, `${testInfo.project.name}-workspace.png`), scale: 'css' });
   }
 });
+
+test('virtualized file tree keeps every row after the Files drawer is hidden and shown again', async ({ page, request }, testInfo) => {
+  test.skip(testInfo.project.name !== 'desktop-chromium', 'Drawer visibility regression');
+  await page.addInitScript(() => localStorage.setItem('remote-codex.locale', 'en'));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const absPath = path.resolve(process.env.E2E_WORKSPACE_ROOT!, `tree-visibility-${randomUUID()}`);
+  for (const folder of ['alpha', 'beta', 'gamma']) {
+    await mkdir(path.join(absPath, folder), { recursive: true });
+    for (let index = 0; index < 30; index++) await writeFile(path.join(absPath, folder, `${folder}-${String(index).padStart(2, '0')}.md`), `# ${folder} ${index}\n`);
+  }
+  const workspace = await (await request.post(`${base}/api/workspaces`, { data: { absPath, label: 'Tree visibility' } })).json();
+  const started = await (await request.post(`${base}/api/threads/start`, { data: { workspaceId: workspace.id, title: 'Tree visibility', provider: 'codex', model: 'ios-e2e-stream', approvalMode: 'yolo' } })).json();
+  await page.goto(`/threads/${started.id ?? started.thread.id}`);
+  const toggleFiles = page.getByRole('navigation', { name: 'Workspace tools', exact: true }).getByRole('button', { name: 'Toggle Explorer', exact: true });
+  await toggleFiles.click();
+  const tree = page.getByRole('tree', { name: 'Workspace files' });
+  for (const folder of ['gamma', 'beta', 'alpha']) {
+    const row = tree.getByRole('treeitem', { name: folder, exact: true });
+    await row.getByRole('button', { name: folder, exact: true }).dblclick();
+    await expect(row).toHaveAttribute('aria-expanded', 'true');
+  }
+  const layout = () => tree.evaluate(element => {
+    const box = element.getBoundingClientRect();
+    const rows = [...element.querySelectorAll<HTMLElement>('[data-index]')].map(row => ({ index: Number(row.dataset.index), top: row.getBoundingClientRect().top - box.top, height: row.getBoundingClientRect().height }));
+    const visible = rows.filter(row => row.top + row.height > 0 && row.top < element.clientHeight).sort((a, b) => a.top - b.top);
+    return {
+      scrollTop: Math.round(element.scrollTop),
+      scrollHeight: element.scrollHeight,
+      zeroHeightRows: rows.filter(row => row.height === 0).length,
+      firstVisibleTop: Math.round(visible[0]?.top ?? 999),
+      gaps: visible.slice(1).filter((row, index) => row.top - (visible[index]!.top + visible[index]!.height) > 1).length,
+      contiguous: visible.every((row, index) => index === 0 || row.index === visible[index - 1]!.index + 1),
+    };
+  });
+  await tree.hover();
+  await page.mouse.wheel(0, 1200);
+  await expect.poll(async () => (await layout()).scrollTop).toBeGreaterThan(1000);
+  const scrolled = await layout();
+  // Hidden drawers measure 0px rows; they must not collapse the tree afterwards.
+  await page.getByTestId('workbench-close-files').click();
+  await expect(tree).toBeHidden();
+  await toggleFiles.click();
+  await expect(tree).toBeVisible();
+  await expect.poll(layout).toMatchObject({ scrollTop: scrolled.scrollTop, scrollHeight: scrolled.scrollHeight, zeroHeightRows: 0, gaps: 0, contiguous: true });
+  expect((await layout()).firstVisibleTop).toBeLessThanOrEqual(0);
+  await tree.hover();
+  await page.mouse.wheel(0, -5000);
+  await expect.poll(async () => (await layout()).scrollTop).toBe(0);
+  await expect(tree.getByRole('treeitem', { name: 'alpha', exact: true })).toBeInViewport();
+  await expect.poll(layout).toMatchObject({ zeroHeightRows: 0, gaps: 0, contiguous: true });
+});
