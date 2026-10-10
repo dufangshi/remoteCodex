@@ -2,12 +2,13 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { ThreadCreateForm } from './ThreadCreateForm';
-const api = vi.hoisted(() => ({ create: vi.fn(), agents: vi.fn(), models: vi.fn(), install: vi.fn(), backends: vi.fn(), workspaces: vi.fn() }));
+const api = vi.hoisted(() => ({ create: vi.fn(), agents: vi.fn(), models: vi.fn(), install: vi.fn(), backends: vi.fn(), workspaces: vi.fn(), catalog: vi.fn(), harness: vi.fn() }));
 vi.mock('../../lib/api', async original => ({
   ...(await original<typeof import('../../lib/api')>()), createThread: api.create,
   fetchAgentBackendAgents: api.agents, fetchAgentBackendModelsFor: api.models,
   fetchAgentBackendModels: api.models, installOrUpdateAgentBackend: api.install,
   fetchAgentBackends: api.backends, fetchWorkspaces: api.workspaces,
+  fetchAgentHarnessCatalog: api.catalog, postThreadHarnessAction: api.harness,
 }));
 vi.mock('../../components/AppShellNavContext', () => ({ useAppShellNav: () => ({ defaultBackend: 'acp' }) }));
 let installed: boolean;
@@ -71,4 +72,20 @@ it('does not create a thread after navigating away during installation', async (
   fireEvent.click(screen.getByRole('button', { name: 'Install adapter' }));
   view.unmount(); await act(async () => resolve());
   expect(api.create).not.toHaveBeenCalled(); expect(onCreated).not.toHaveBeenCalled();
+});
+it('keeps a created DSH thread when its run mode fails and retries only the mode', async () => {
+  api.agents.mockResolvedValue([{ ...agent(true), id: 'deepseek', model: 'deepseek', displayName: 'DeepSeek Harness' }]);
+  api.catalog.mockResolvedValue({ runModes: [{ id: 'plan', name: 'Plan', description: null, isDefault: true, broken: null }] });
+  api.harness.mockRejectedValueOnce(new Error('DSH is restarting')).mockResolvedValueOnce({});
+  const created = mount();
+  await waitFor(() => expect(api.catalog).toHaveBeenCalled());
+  const create = await screen.findByRole('button', { name: /Create thread/i });
+  await waitFor(() => expect(create).toBeEnabled()); fireEvent.click(create);
+  expect(await screen.findByRole('alert')).toHaveTextContent('run mode was not applied: DSH is restarting');
+  expect(created).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry run mode' }));
+  await waitFor(() => expect(created).toHaveBeenCalledWith({ id: 'created-thread' }));
+  expect(api.create).toHaveBeenCalledTimes(1);
+  expect(api.harness).toHaveBeenCalledTimes(2);
+  expect(api.harness).toHaveBeenLastCalledWith('created-thread', { kind: 'selectRunMode', id: 'plan' });
 });
