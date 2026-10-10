@@ -49,6 +49,53 @@ test('interrupted history keeps one turn status without repeated message circles
   await page.screenshot({path:testInfo.outputPath('clean-history.png'),scale:'css'});
 });
 
+test('native task notifications use compact prose and expand without mobile overflow', async ({ page, request }, testInfo) => {
+  const id = await createThread(request);
+  const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
+  const startedAt = new Date(Date.now() - 60_000).toISOString();
+  const completedAt = new Date().toISOString();
+  await page.addInitScript(() => {
+    localStorage.setItem('remote-codex.locale', 'zh-CN');
+    localStorage.setItem('remote-codex-theme-mode', 'dark');
+  });
+  await page.routeWebSocket(/\/ws(?:\?.*)?$/, socket => {
+    socket.send(JSON.stringify({type:'supervisor.connected'}));
+    socket.onMessage(() => socket.send(JSON.stringify({type:'supervisor.pong'})));
+  });
+  await page.route(`**/api/threads/${id}?**`, route => route.fulfill({json:{
+    ...detail, totalTurnCount:1, activeSubagents:[],
+    thread:{...detail.thread,status:'idle',activeTurnId:null},
+    turns:[{id:'task-notices',status:'completed',startedAt,completedAt,items:[
+      {id:'prompt',kind:'userMessage',text:'检查后台验证结果'},
+      {id:'reply',kind:'agentMessage',text:'后台检查已完成，以下是各项任务的结果。'},
+      {id:'notice',kind:'generic',origin:'nativeTaskNotification',taskStatus:'completed',status:'interrupted',createdAt:completedAt,
+        text:'修复文件树复制行为，重新构建 UI 并运行桌面浏览器回归验证'},
+      {id:'failure-notice',kind:'generic',origin:'nativeTaskNotification',taskStatus:'failed',status:'completed',createdAt:completedAt,
+        text:'验证移动端布局与文件编辑的交互'},
+      {id:'note',kind:'generic',text:'已保存检查结果。',status:'completed'},
+    ]}],
+  }}));
+  await page.goto(`/threads/${id}`);
+  await page.locator('.thread-graph-worked-summary button[aria-expanded]').click();
+  const notice = page.locator('.thread-graph-task-notice').first();
+  await expect(notice.locator('.thread-graph-task-notice-toggle')).toContainText('后台任务完成');
+  await expect(page.locator('.thread-graph-task-notice.is-failed')).toContainText('后台任务失败');
+  await expect(notice.locator('.thread-graph-task-notice-detail')).toHaveCount(0);
+  expect(await notice.locator('.thread-graph-task-notice-toggle').evaluate(el => getComputedStyle(el).fontSize)).toBe('12px');
+  const noteBody = page.locator('.thread-graph-history-event-note');
+  expect(await noteBody.evaluate(el => getComputedStyle(el).fontSize)).toBe('12px');
+  expect(await noteBody.evaluate(el => getComputedStyle(el).fontFamily)).toBe(await notice.evaluate(el => getComputedStyle(el).fontFamily));
+  for (const row of await page.locator('.thread-graph-task-notice-row').all()) {
+    expect(await row.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+  }
+  await page.screenshot({path:testInfo.outputPath('task-notifications-collapsed.png'),scale:'css'});
+  await notice.locator('.thread-graph-task-notice-toggle').click();
+  await expect(notice.locator('.thread-graph-task-notice-toggle')).toHaveAttribute('aria-expanded','true');
+  await expect(notice.locator('.thread-graph-task-notice-detail')).toContainText('重新构建 UI');
+  await expect(notice.locator('.thread-graph-task-notice-detail time')).toHaveAttribute('datetime',completedAt);
+  await page.screenshot({path:testInfo.outputPath('task-notifications-expanded.png'),scale:'css'});
+});
+
 test('opening a detached thread automatically connects once and hides the healthy indicator', async ({ page, request }) => {
   const id = await createThread(request);
   const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
