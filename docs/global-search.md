@@ -14,8 +14,6 @@ Queries are literal case-insensitive substrings, 1–200 Unicode characters afte
 
 The Supervisor's existing authenticated HTTP boundary protects local requests. The relay authorizes explicit paths before forwarding: global/workspace conversation search requires device ownership or a device-scoped thread read/control grant. A thread share can use only that thread's search endpoint. Workspace filesystem access, including access attached to a thread share, cannot enumerate workspace conversations. UI scope options follow the same permission boundary, but server ACLs remain authoritative. Device conversation readers may obtain the signed device encryption descriptor through the workspace transport-key alias even without file access; each data request still has its own ACL.
 
-Multi-user hosted VM isolation denies global and workspace conversation search until an authenticated, device-enforced tenant thread allowlist exists. A user-owned filesystem workspace alone is insufficient. Thread search remains available. This deliberately avoids returning another hosted user's excerpts to the relay for filtering.
-
 Browser requests use the existing encrypted device transport: query parameters and result bodies are encrypted between browser and Supervisor; the relay sees the routing path and authorization metadata. No relay index or central plaintext conversation database is created. Search fails visibly on an unavailable endpoint/device; global search never falls back to loading histories into the browser.
 
 ## Index maintenance

@@ -22,7 +22,6 @@ pub struct RelayMigrationReport {
     pub device_count: i64,
     pub share_count: i64,
     pub grant_count: i64,
-    pub hosted_sandbox_count: i64,
     pub oauth_identity_count: i64,
     pub pending_registration_count: i64,
     pub active_unsupported_settings: Vec<String>,
@@ -58,10 +57,9 @@ pub fn inspect_relay_migration(data_dir: impl AsRef<FsPath>) -> Result<RelayMigr
             device_count: counts.1,
             share_count: counts.2,
             grant_count: counts.3,
-            hosted_sandbox_count: unsupported.0,
-            oauth_identity_count: unsupported.1,
-            pending_registration_count: unsupported.2,
-            active_unsupported_settings: unsupported.3,
+            oauth_identity_count: unsupported.0,
+            pending_registration_count: unsupported.1,
+            active_unsupported_settings: unsupported.2,
             unsupported_data_allowed: false,
         });
     }
@@ -79,7 +77,6 @@ pub fn inspect_relay_migration(data_dir: impl AsRef<FsPath>) -> Result<RelayMigr
             device_count: counts.1,
             share_count: counts.2,
             grant_count: counts.3,
-            hosted_sandbox_count: 0,
             oauth_identity_count: 0,
             pending_registration_count: 0,
             active_unsupported_settings: Vec::new(),
@@ -98,7 +95,6 @@ pub fn inspect_relay_migration(data_dir: impl AsRef<FsPath>) -> Result<RelayMigr
         device_count: 0,
         share_count: 0,
         grant_count: 0,
-        hosted_sandbox_count: 0,
         oauth_identity_count: 0,
         pending_registration_count: 0,
         active_unsupported_settings: Vec::new(),
@@ -193,7 +189,7 @@ pub fn migrate_relay_data_dir_with_options(
     })
 }
 
-pub(crate) fn unsupported_relay_data(path: &FsPath) -> Result<(i64, i64, i64, Vec<String>)> {
+pub(crate) fn unsupported_relay_data(path: &FsPath) -> Result<(i64, i64, Vec<String>)> {
     let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let count = |table: &str, condition: &str| -> Result<i64> {
         if !table_exists(&conn, table) {
@@ -220,7 +216,6 @@ pub(crate) fn unsupported_relay_data(path: &FsPath) -> Result<(i64, i64, i64, Ve
         }
     }
     Ok((
-        count("relay_hosted_sandboxes", "1=1")?,
         count("relay_user_identities", "1=1")?,
         count("relay_pending_registrations", "status='pending'")?,
         active_settings,
@@ -442,7 +437,8 @@ impl RelayStore {
             avatar_data_url TEXT
         );",
         )?;
-        hosted::ensure_schema(&conn)?;
+        ensure_registration_schema(&conn)?;
+        drop_retired_hosted_tables(&conn)?;
         migrate_legacy_rust_tables(&mut conn)?;
         security::ensure_schema(&conn)?;
         device_tokens::migrate(&conn, &session_secret)?;
@@ -488,6 +484,69 @@ pub(crate) fn backup_database(source_path: &FsPath, destination_path: &FsPath) -
         let _ = std::fs::remove_file(&temporary_path);
     }
     backup_result
+}
+
+fn ensure_registration_schema(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS relay_pending_registrations (
+          id TEXT PRIMARY KEY,
+          email TEXT NOT NULL,
+          username TEXT NOT NULL,
+          password_salt TEXT NOT NULL,
+          password_hash TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
+          reviewed_at TEXT,
+          reviewed_by_user_id TEXT,
+          provider TEXT NOT NULL DEFAULT 'password',
+          provider_subject TEXT
+        );
+        CREATE INDEX IF NOT EXISTS relay_pending_registrations_status_idx
+          ON relay_pending_registrations(status,created_at DESC);
+        CREATE TABLE IF NOT EXISTS relay_user_identities (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE,
+          provider TEXT NOT NULL CHECK (provider IN ('google','github')),
+          provider_subject TEXT NOT NULL,
+          provider_email TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          UNIQUE(provider,provider_subject)
+        );
+        ",
+    )?;
+    for (column, definition) in [
+        ("provider", "TEXT NOT NULL DEFAULT 'password'"),
+        ("provider_subject", "TEXT"),
+    ] {
+        let exists = conn
+            .prepare("PRAGMA table_info(relay_pending_registrations)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .flatten()
+            .any(|value| value == column);
+        if !exists {
+            conn.execute_batch(&format!(
+                "ALTER TABLE relay_pending_registrations ADD COLUMN {column} {definition}"
+            ))?;
+        }
+    }
+    Ok(())
+}
+
+// Hosted VMs were removed. Their tables restricted user deletion, so drop them
+// (children first) instead of leaving orphaned constraints behind.
+fn drop_retired_hosted_tables(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "
+        DROP TABLE IF EXISTS relay_hosted_active_turns;
+        DROP TABLE IF EXISTS relay_hosted_operations;
+        DROP TABLE IF EXISTS relay_hosted_user_threads;
+        DROP TABLE IF EXISTS relay_hosted_user_workspaces;
+        DROP TABLE IF EXISTS relay_hosted_sandbox_members;
+        DROP TABLE IF EXISTS relay_hosted_sandboxes;
+        ",
+    )?;
+    Ok(())
 }
 
 pub(crate) fn table_exists(conn: &Connection, table: &str) -> bool {
@@ -612,4 +671,66 @@ pub(crate) fn migrate_legacy_rust_tables(conn: &mut Connection) -> Result<()> {
     )?;
     tx.commit()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reopening_drops_retired_hosted_tables_and_unblocks_user_deletion() {
+        let path = std::env::temp_dir()
+            .join(format!("relay-hosted-removal-{}", Uuid::new_v4()))
+            .join("relay-store.sqlite");
+        {
+            let store = RelayStore::open(path.clone(), "secret".into()).unwrap();
+            let conn = store.conn.try_lock().unwrap();
+            for user in ["admin", "member"] {
+                conn.execute(
+                    "INSERT INTO relay_users VALUES (?1,?1,?1,'user',1,NULL,'now','salt','hash')",
+                    [user],
+                )
+                .unwrap();
+            }
+            conn.execute(
+                "INSERT INTO relay_devices VALUES ('vm','admin','VM',NULL,'hash','rcd_x','now')",
+                [],
+            )
+            .unwrap();
+            conn.execute_batch(
+                "CREATE TABLE relay_hosted_sandboxes (
+                   id TEXT PRIMARY KEY,
+                   device_id TEXT NOT NULL REFERENCES relay_devices(id) ON DELETE CASCADE,
+                   assigned_user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE RESTRICT
+                 );
+                 CREATE TABLE relay_hosted_sandbox_members (
+                   sandbox_id TEXT NOT NULL REFERENCES relay_hosted_sandboxes(id) ON DELETE CASCADE,
+                   user_id TEXT NOT NULL REFERENCES relay_users(id) ON DELETE CASCADE
+                 );
+                 INSERT INTO relay_hosted_sandboxes VALUES ('sandbox','vm','member');
+                 INSERT INTO relay_hosted_sandbox_members VALUES ('sandbox','member');",
+            )
+            .unwrap();
+            assert!(conn
+                .execute("DELETE FROM relay_users WHERE id='member'", [])
+                .is_err());
+        }
+
+        let store = RelayStore::open(path, "secret".into()).unwrap();
+        let conn = store.conn.try_lock().unwrap();
+        assert!(!table_exists(&conn, "relay_hosted_sandboxes"));
+        assert!(!table_exists(&conn, "relay_hosted_sandbox_members"));
+        assert!(table_exists(&conn, "relay_pending_registrations"));
+        assert!(table_exists(&conn, "relay_user_identities"));
+        conn.execute("DELETE FROM relay_users WHERE id='member'", [])
+            .unwrap();
+        let devices: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM relay_devices WHERE id='vm'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(devices, 1);
+    }
 }

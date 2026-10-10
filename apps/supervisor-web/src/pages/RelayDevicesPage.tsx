@@ -1958,26 +1958,13 @@ function DeviceRow({
   const actionsTriggerRef = useRef<HTMLButtonElement>(null);
   const menuFocusDirectionRef = useRef<'first' | 'last'>('first');
   const menuId = `device-actions-${useId()}`;
-  const hostedStatus = device.hostedStatus ?? null;
-  const canConnect = device.connected || Boolean(hostedStatus && !['stopping', 'deleting'].includes(hostedStatus));
-  const canCopySetup = !hostedStatus;
-  const statusText = hostedStatus
-    ? hostedStatusLabel(hostedStatus)
-    : device.connected
-      ? translate("devices.online_c3e839")
-      : translate("devices.offline");
-  const activityText =
-    hostedStatus === 'stopped'
-      ? translate("devices.stoppedConnectToWakeThisVM")
-      : hostedStatus && hostedStatus !== 'online'
-        ? translate("devices.theHostedSupervisorIsNotReadyYet", { value1: statusText })
-        : device.connected
-          ? device.connectedAt
-            ? `Online since ${formatRelayTimestamp(device.connectedAt)}`
-            : translate("devices.onlineConnectedTimeUnavailable")
-          : device.lastHeartbeatAt
-            ? `Last heartbeat ${formatRelayTimestamp(device.lastHeartbeatAt)}`
-            : translate("devices.noHeartbeatRecorded");
+  const activityText = device.connected
+    ? device.connectedAt
+      ? `Online since ${formatRelayTimestamp(device.connectedAt)}`
+      : translate("devices.onlineConnectedTimeUnavailable")
+    : device.lastHeartbeatAt
+      ? `Last heartbeat ${formatRelayTimestamp(device.lastHeartbeatAt)}`
+      : translate("devices.noHeartbeatRecorded");
 
   useEffect(() => {
     if (!actionsMenuOpen) return;
@@ -2073,11 +2060,6 @@ function DeviceRow({
           <span className={`device-presence-label ${device.connected ? 'is-online' : 'is-offline'}`}>
             {device.connected ? translate("devices.online_c3e839") : translate("devices.offline")}
           </span>
-          {hostedStatus ? (
-            <span className="shrink-0 rounded-full bg-[var(--theme-muted)] px-2 py-0.5 text-[10px] font-medium text-[var(--theme-fg-muted)]">
-              {translate("devices.hosted")} {statusText}
-            </span>
-          ) : null}
         </div>
         <p className="mt-1 truncate font-mono text-xs text-[var(--theme-fg-muted)]">
           {device.tokenPreview}
@@ -2098,12 +2080,12 @@ function DeviceRow({
       <div className="flex min-w-0 items-center gap-2 md:justify-end">
         <button
           className="relay-button-primary inline-flex min-h-11 grow items-center justify-center gap-2 whitespace-nowrap md:grow-0 sm:min-h-10"
-          disabled={!canConnect}
+          disabled={!device.connected}
           onClick={onConnect}
           type="button"
         >
           <Plug className="h-4 w-4" />
-          {hostedStatus === 'stopped' ? translate("devices.startConnect") : translate("devices.connect")}
+          {translate("devices.connect")}
         </button>
         <div className="relative" ref={actionsMenuRef}>
           <button
@@ -2142,7 +2124,6 @@ function DeviceRow({
             >
               <button
                 className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)] disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!canCopySetup}
                 onClick={() => copySetup('unix')}
                 role="menuitem"
                 type="button"
@@ -2151,7 +2132,6 @@ function DeviceRow({
                 {translate("devices.copySetupForMacOSLinux")}</button>
               <button
                 className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-[var(--theme-fg)] transition hover:bg-[var(--theme-hover)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)] disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!canCopySetup}
                 onClick={() => copySetup('windows')}
                 role="menuitem"
                 type="button"
@@ -2170,22 +2150,18 @@ function DeviceRow({
               >
                 <Share2 className="h-4 w-4" />
                 {translate("devices.shareDevice")}</button>
-              {!hostedStatus && <button className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-[var(--theme-hover)]" role="menuitem" onClick={()=>{setActionsMenuOpen(false);onRotate();}}>{translate("devices.replaceDeviceToken_268410")}</button>}
+              <button className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-[var(--theme-hover)]" role="menuitem" onClick={()=>{setActionsMenuOpen(false);onRotate();}}>{translate("devices.replaceDeviceToken_268410")}</button>
               <div className="mt-1 border-t border-[var(--theme-border)] pt-1">
                 <button
                   className="flex min-h-11 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-[var(--status-danger-fg)] transition hover:bg-[var(--status-danger-bg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--theme-accent-ring)] disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={busy || Boolean(hostedStatus)}
+                  disabled={busy}
                   onClick={() => {
                     actionsTriggerRef.current?.focus();
                     setActionsMenuOpen(false);
                     onDelete();
                   }}
                   role="menuitem"
-                  title={
-                    hostedStatus
-                      ? translate("devices.hostedVMsAreManagedByARelay")
-                      : translate("devices.delete_43de5b", { value1: device.name })
-                  }
+                  title={translate("devices.delete_43de5b", { value1: device.name })}
                   type="button"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -2410,12 +2386,6 @@ function relayWebsocketBaseUrl() {
 
 function formatRelayTimestamp(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString(getLocale()) : translate("devices.unavailable");
-}
-
-function hostedStatusLabel(
-  status: NonNullable<RelayDeviceDto['hostedStatus']>,
-) {
-  return status.replace('_', ' ').replace(/^./, (value) => value.toUpperCase());
 }
 
 function toDatetimeLocalValue(value: string | null | undefined) {

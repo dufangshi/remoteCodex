@@ -4,7 +4,7 @@
 
 ## 1. 范围
 
-- 只在**同一 relay 用户名下**的 device 之间（`relay_devices.owner_user_id` 相同）。不含分享设备、hosted 成员访问、Web UI。
+- 只在**同一 relay 用户名下**的 device 之间（`relay_devices.owner_user_id` 相同）。不含分享设备、Web UI。
 - 消息：设备目录；对远端 thread 的 info / workspaces / list / status / show / transcript / send（inbox、direct、queue、steer）/ backends / models / create；跨 device 的 `--notify-on-complete`（结果落到发起方本机 inbox）；目标离线时 inbox/queue 消息进**发送端** outbox，稍后重投。
 - 文件：随消息推送附件（分片上传到目标 thread 的 incoming 目录）；只读拉取远端 workspace 文件（`fs ls` / `fs get`）。
 - 传输：除密钥握手外全部端到端 HPKE 加密，relay 只见路由元数据。放开隧道 WebSocket 的 16 MiB 帧上限。
@@ -69,7 +69,7 @@ relay → 目标（沿用 `relay.request`，多一个只由 relay 写入的 `pee
 1. 发起方 device = 该隧道 socket 已认证的 device；绝不取自帧内容。目标必须存在、`owner_user_id` 相同、owner 用户 enabled，且目标 ≠ 发起方。
 2. `payload.path`（去掉 query）必须以 `/api/peer/` 开头；method ∈ GET/POST/PUT。
 3. 除 `GET .../transport/key` 握手外必须带 `x-rcd-key`（即密文）；否则 403。
-4. 只转发这些 header：`content-type`、`accept`、`x-rcd-key`、`x-rcd-request`、`x-rcd-enc`、`x-rcd-sealed`。丢弃 `x-rcd-resource`、`x-rcd-hosted-workspaces` 等策略头。`peer` 对象只由 relay 构造；浏览器路径永远不带 `peer`。
+4. 只转发这些 header：`content-type`、`accept`、`x-rcd-key`、`x-rcd-request`、`x-rcd-enc`、`x-rcd-sealed`。丢弃 `x-rcd-resource` 等策略头。`peer` 对象只由 relay 构造；浏览器路径永远不带 `peer`。
 5. `payload.body` 字符串 ≤ 8 MiB；每个发起方同时在途 ≤ 32；沿用全局 pending 上限。
 6. 目录：同 owner 的全部 device（含自己 `self:true`），`online` 取当前隧道连接。
 7. `/supervisor/tunnel` 升级时把 WebSocket message/frame 上限提到 128 MiB。

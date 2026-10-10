@@ -55,7 +55,7 @@ WebSocket 一次握手后复用分方向 AES-GCM 密钥，以单调序号构造 
 
 - 老 supervisor 可显示未启用加密状态并继续既有兼容路径；一旦浏览器固定该设备的加密身份，就拒绝静默降级。要获得保护，需更新 relay Web 和设备 supervisor 两端。
 - 旧原生客户端／显式兼容 API 仍可明文调用，受原有账号／资源授权约束。本版本未删除设备所有者能力、未引入工作区白名单、沙箱或逐命令审批。共享 terminal 的新最小 scope 校验要求更新 supervisor，旧设备失败时应升级，不能放宽越权校验。
-- Relay 看得到账户、授权、设备和资源 ID、消息种类、长度与时序。Hosted workspace 过滤在设备加密前执行，relay 只保留授权索引。
+- Relay 看得到账户、授权、设备和资源 ID、消息种类、长度与时序。
 - 公开分享由浏览器投影用户消息和最终回复后显式发布，公开快照及其图片本来就是公开内容，由 relay 明文保存。分享不再要求 relay 读取整个私有 transcript。HTML 导出保持浏览器渲染流程。
 - **本方案不能阻止已经控制 relay 的攻击者替换它提供的网页 JavaScript，也不能阻止仍有设备控制能力的 relay 自行发起获授权命令。** 首次公钥固定也依赖可信首次连接／独立指纹核对。因此这次的加密保护转发内容，不等于把 relay 从设备信任边界中移除。进一步设备权限限制按用户要求暂缓。
 
@@ -66,12 +66,10 @@ WebSocket 一次握手后复用分方向 AES-GCM 密钥，以单调序号构造 
 合并前保留分支测试证据；正式上线需新不可变 runtime/npm 版本及完整四平台资产，按 [release-runtime](../.agents/skills/release-runtime/SKILL.md) 执行。Web 由公网 Rust relay 提供，合并 main 后固定共享 UI SHA 运行 relay-deploy，不能以重启设备 supervisor 代替 Web 部署。Windows Device Manager 不随本次 runtime 改动独立发版。
 
 
-## 设备安装命令与旧 VM 恢复
+## 设备安装命令与旧凭据恢复
 
 设备所有者可在 Devices 菜单反复复制 macOS/Linux 或 Windows 安装命令。列表和共享响应不包含 token；点击时通过所有者专用 `POST /relay/devices/:id/setup-token` 获取永久 device token，响应禁止缓存。不会为复制而轮换凭据或关闭设备连接。
 
 安装凭据存于 `relay_device_setup_tokens`，使用 session secret 派生的独立 AES-256-GCM 密钥加密，设备 ID 绑定为认证数据。备份需同时保留数据库和 session secret。认证仍校验 token 哈希。
 
-旧安全迁移错误清空过 `relay_devices.token`。残存明文会迁移到加密存储；原设备重连时可恢复已通过认证的原凭据。若已经只剩哈希且尚未恢复，首次复制或 VM 配置会为原设备创建可重复使用的补充凭据，原哈希保持有效，设备 ID、工作区与历史不变。显式 Replace token 会同时撤销原凭据和补充凭据。删除设备也使两者失效。
-
-Hosted VM 启动使用同一凭据存储，不再依赖已清空的明文字段。停止、启动中、错误和暂时断开的 VM 可以进入连接流程；恢复错误和过期在线状态时重试启动。正在停止或删除的 VM 不允许连接，已有在线连接不会被重新启动。
+旧安全迁移错误清空过 `relay_devices.token`。残存明文会迁移到加密存储；原设备重连时可恢复已通过认证的原凭据。若已经只剩哈希且尚未恢复，首次复制会为原设备创建可重复使用的补充凭据，原哈希保持有效，设备 ID、工作区与历史不变。显式 Replace token 会同时撤销原凭据和补充凭据。删除设备也使两者失效。

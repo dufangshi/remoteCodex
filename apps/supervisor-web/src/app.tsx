@@ -46,7 +46,6 @@ import { WorkspaceNewPage } from './pages/WorkspaceNewPage';
 import { WorkspacesPage } from './pages/WorkspacesPage';
 import {
   ApiError,
-  HOSTED_VM_WAKE_EVENT,
   deletePlugin,
   fetchAuthSession,
   fetchPlugins,
@@ -228,10 +227,6 @@ function AppShell({
   const [autoCollapseCompletedTurns, setAutoCollapseCompletedTurnsState] = useState(
     readInitialAutoCollapseCompletedTurns,
   );
-  const [hostedVmWake, setHostedVmWake] = useState<{
-    attempt: number;
-    startedAt: number;
-  } | null>(null);
   const location = useLocation();
   const isThreadUtilityRoute =
     /^\/threads\/(?:import|new)$/.test(location.pathname) ||
@@ -256,26 +251,6 @@ function AppShell({
   useEffect(() => {
     setNavOpen(false);
   }, [location.pathname, location.search]);
-
-  useEffect(() => {
-    const onHostedVmWake = (event: Event) => {
-      const detail = (event as CustomEvent<{
-        state: 'starting' | 'connected';
-        attempt: number;
-      }>).detail;
-      if (detail.state === 'connected') {
-        setHostedVmWake(null);
-        return;
-      }
-      setHostedVmWake((current) => ({
-        attempt: detail.attempt,
-        startedAt: current?.startedAt ?? Date.now(),
-      }));
-    };
-    window.addEventListener(HOSTED_VM_WAKE_EVENT, onHostedVmWake);
-    return () =>
-      window.removeEventListener(HOSTED_VM_WAKE_EVENT, onHostedVmWake);
-  }, []);
 
   function setDefaultBackend(backend: AgentBackendIdDto) {
     setDefaultBackendState(backend);
@@ -330,28 +305,6 @@ function AppShell({
             : 'min-h-screen'
         }`}
       >
-        {hostedVmWake ? (
-          <div
-            aria-live="polite"
-            className="fixed inset-x-4 top-4 z-[80] mx-auto max-w-2xl overflow-hidden rounded-lg border border-[var(--status-warning-border)] bg-[var(--theme-panel)] shadow-[var(--theme-shadow)]"
-            role="status"
-          >
-            <div className="flex items-center justify-between gap-4 px-4 py-3">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-[var(--theme-fg)]">
-                  {translate("workbench.startingHostedVM")}</p>
-                <p className="truncate text-xs text-[var(--theme-fg-muted)]">
-                  {translate("workbench.waitingForTheSupervisorPagesWillResume")}</p>
-              </div>
-              <span className="shrink-0 text-xs tabular-nums text-[var(--theme-fg-muted)]">
-                {translate("workbench.check")} {hostedVmWake.attempt}
-              </span>
-            </div>
-            <div className="h-1 overflow-hidden bg-[var(--theme-muted)]">
-              <div className="h-full w-1/3 animate-pulse bg-[var(--theme-accent-solid)]" />
-            </div>
-          </div>
-        ) : null}
         <main
           className={`mx-auto w-full ${
             isThreadWorkspaceRoute ? 'max-w-none' : 'max-w-[1600px]'

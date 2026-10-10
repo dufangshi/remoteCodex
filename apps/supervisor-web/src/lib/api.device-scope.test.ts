@@ -20,7 +20,6 @@ import {
   workspaceResourceScope,
   connectShellSocket,
   fetchThreadDelivery,
-  request,
 } from './api';
 vi.mock('./relayTransport', () => ({
   encryptedBrowserFetch: vi.fn(),
@@ -37,34 +36,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   localStorage.clear();
-  vi.useRealTimers();
   vi.unstubAllGlobals();
-});
-it('keeps a resolved local request local when navigation changes during a wake retry', async () => {
-  vi.useFakeTimers();
-  localStorage.setItem('remote-codex-relay-mode', 'false');
-  const fetchMock = vi
-    .fn()
-    .mockImplementationOnce(async () => {
-      localStorage.setItem('remote-codex-relay-mode', 'true');
-      setSelectedRelayDeviceId('new-device');
-      return new Response(
-        JSON.stringify({
-          code: 'unavailable',
-          message: 'starting',
-          details: { reason: 'hosted_sandbox_starting' },
-        }),
-        { status: 503, headers: { 'content-type': 'application/json' } },
-      );
-    })
-    .mockResolvedValueOnce(new Response('{}'));
-  vi.stubGlobal('fetch', fetchMock);
-  const pending = request('/api/workspaces');
-  await vi.advanceTimersByTimeAsync(1500);
-  await pending;
-  expect(fetchMock).toHaveBeenCalledTimes(2);
-  for (const [url] of fetchMock.mock.calls) expect(url).toBe('/api/workspaces');
-  expect(encryptedBrowserFetch).not.toHaveBeenCalled();
 });
 it('routes every secondary chat operation and attached prompt to its captured device', async () => {
   const target = 'other-device';

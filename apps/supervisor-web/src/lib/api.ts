@@ -15,12 +15,6 @@ import type {
   RelayAccessGrantDto,
   RelayCreateDeviceResultDto,
   RelayLoginResultDto,
-  RelayHostedSandboxCapabilityDto,
-  RelayHostedCodexFilesDto,
-  RelayHostedSandboxDetailDto,
-  RelayHostedSandboxDto,
-  RelayHostedSandboxOperationDto,
-  RelayHostedSandboxReconciliationDto,
   RelayPortalSummaryDto,
   RelayRegisterResultDto,
   RelayRegistrationSettingsDto,
@@ -110,27 +104,6 @@ const RELAY_MODE_STORAGE_KEY = 'remote-codex-relay-mode';
 const RELAY_DEVICE_STORAGE_KEY = 'remote-codex-relay-device-id';
 const RELAY_THREAD_STORAGE_KEY = 'remote-codex-relay-thread-id';
 type RequestAuthMode = 'default' | 'relay-admin' | 'none';
-export const HOSTED_VM_WAKE_EVENT = 'remote-codex:hosted-vm-wake';
-
-function emitHostedVmWake(detail: { state: 'starting' | 'connected'; attempt: number }) {
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent(HOSTED_VM_WAKE_EVENT, { detail }));
-  }
-}
-
-function waitForHostedVmRetry(delayMs: number, signal?: AbortSignal | null) {
-  return new Promise<void>((resolve, reject) => {
-    const timer = window.setTimeout(resolve, delayMs);
-    signal?.addEventListener(
-      'abort',
-      () => {
-        window.clearTimeout(timer);
-        reject(signal.reason ?? new DOMException('Request aborted.', 'AbortError'));
-      },
-      { once: true },
-    );
-  });
-}
 
 declare global {
   interface Window {
@@ -457,29 +430,12 @@ export async function request<T>(
     options.auth,
   );
   const targetPath = apiPath(String(input), options.deviceId);
-  let wakeAttempt = 0;
-  while (true) {
-    // targetPath was resolved once; even a local /api path must stay local if
-    // navigation changes while the hosted-device wake retry is pending.
-    const response = await fetchApi(targetPath, requestInit, null, options.threadScope);
-    if (response.ok) {
-      if (wakeAttempt > 0) {
-        emitHostedVmWake({ state: 'connected', attempt: wakeAttempt });
-      }
-      const text = await response.text();
-      return (text ? JSON.parse(text) : {}) as T;
-    }
-    const payload = await readApiErrorPayload(response);
-    const hostedVmStarting =
-      response.status === 503 &&
-      payload.details?.reason === 'hosted_sandbox_starting';
-    if (!hostedVmStarting || wakeAttempt >= 60) {
-      throw new ApiError(response.status, payload);
-    }
-    wakeAttempt += 1;
-    emitHostedVmWake({ state: 'starting', attempt: wakeAttempt });
-    await waitForHostedVmRetry(1_500, requestInit.signal);
+  const response = await fetchApi(targetPath, requestInit, null, options.threadScope);
+  if (!response.ok) {
+    throw new ApiError(response.status, await readApiErrorPayload(response));
   }
+  const text = await response.text();
+  return (text ? JSON.parse(text) : {}) as T;
 }
 
 function fallbackDownloadFilename(input: RequestInfo | URL) {
@@ -828,148 +784,6 @@ export function fetchRelayAdmin(days?: number) {
   return request<RelayAdminSummaryDto>(`/relay/admin${query}`, undefined, {
     auth: 'relay-admin',
   });
-}
-
-export function fetchHostedSandboxCapability() {
-  return request<RelayHostedSandboxCapabilityDto>(
-    '/relay/admin/hosted-sandboxes/capability',
-    undefined,
-    { auth: 'relay-admin' },
-  );
-}
-
-export function fetchHostedSandboxes() {
-  return request<{ sandboxes: RelayHostedSandboxDto[] }>(
-    '/relay/admin/hosted-sandboxes',
-    undefined,
-    { auth: 'relay-admin' },
-  );
-}
-
-export function fetchHostedSandboxReconciliation() {
-  return request<RelayHostedSandboxReconciliationDto>(
-    '/relay/admin/hosted-sandboxes/reconciliation',
-    undefined,
-    { auth: 'relay-admin' },
-  );
-}
-
-export function runHostedSandboxReconciliation() {
-  return request<RelayHostedSandboxReconciliationDto>(
-    '/relay/admin/hosted-sandboxes/reconciliation/run',
-    { method: 'POST' },
-    { auth: 'relay-admin' },
-  );
-}
-
-export function deleteHostedOrphanInstance(id: string) {
-  return request<RelayHostedSandboxReconciliationDto>(
-    `/relay/admin/hosted-sandboxes/reconciliation/orphan-instances/${encodeURIComponent(id)}`,
-    { method: 'DELETE' },
-    { auth: 'relay-admin' },
-  );
-}
-
-export function deleteHostedOrphanCredential(credentialRef: string) {
-  return request<RelayHostedSandboxReconciliationDto>(
-    `/relay/admin/hosted-sandboxes/reconciliation/orphan-credentials/${encodeURIComponent(credentialRef)}`,
-    { method: 'DELETE' },
-    { auth: 'relay-admin' },
-  );
-}
-
-export function createHostedSandbox(input: {
-  assignedUserIds: string[];
-  deviceName: string;
-  imageVersion:
-    | 'ubuntu-24.04-v1'
-    | 'ubuntu-24.04-v2'
-    | 'ubuntu-24.04-v3'
-    | 'ubuntu-24.04-v4'
-    | 'ubuntu-24.04-v5';
-  resources: { cpuCount: number; memoryMiB: number; diskGiB: number };
-  backends: ['codex'];
-  codexFiles: RelayHostedCodexFilesDto;
-}) {
-  return request<{
-    sandbox: RelayHostedSandboxDetailDto;
-    operation: RelayHostedSandboxOperationDto;
-  }>(
-    '/relay/admin/hosted-sandboxes',
-    { method: 'POST', body: JSON.stringify(input) },
-    { auth: 'relay-admin' },
-  );
-}
-
-export function updateHostedSandboxMembers(
-  id: string,
-  assignedUserIds: string[],
-) {
-  return request<RelayHostedSandboxDetailDto>(
-    `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}/members`,
-    {
-      method: 'PUT',
-      body: JSON.stringify({ assignedUserIds }),
-    },
-    { auth: 'relay-admin' },
-  );
-}
-
-export function updateHostedSandboxSettings(
-  id: string,
-  input: { workspaceIsolationEnabled: boolean },
-) {
-  return request<RelayHostedSandboxDetailDto>(
-    `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}/settings`,
-    { method: 'PATCH', body: JSON.stringify(input) },
-    { auth: 'relay-admin' },
-  );
-}
-
-export function runHostedSandboxAction(
-  id: string,
-  action: 'start' | 'stop' | 'retry',
-) {
-  return request<{ operation: RelayHostedSandboxOperationDto }>(
-    `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}/${action}`,
-    { method: 'POST' },
-    { auth: 'relay-admin' },
-  );
-}
-
-export function snapshotHostedSandbox(id: string, name: string) {
-  return request<{ operation: RelayHostedSandboxOperationDto }>(
-    `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}/snapshots`,
-    { method: 'POST', body: JSON.stringify({ name }) },
-    { auth: 'relay-admin' },
-  );
-}
-
-export function fetchHostedCodexFiles(id: string) {
-  return request<RelayHostedCodexFilesDto>(
-    `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}/backends/codex/files`,
-    undefined,
-    { auth: 'relay-admin' },
-  );
-}
-
-export function updateHostedCodexFiles(
-  id: string,
-  files: RelayHostedCodexFilesDto,
-) {
-  return request<{ updated: true }>(
-    `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}/backends/codex/files`,
-    { method: 'PUT', body: JSON.stringify(files) },
-    { auth: 'relay-admin' },
-  );
-}
-
-export function deleteHostedSandbox(id: string) {
-  return request<{ operation: RelayHostedSandboxOperationDto }>(
-    `/relay/admin/hosted-sandboxes/${encodeURIComponent(id)}`,
-    { method: 'DELETE' },
-    { auth: 'relay-admin' },
-  );
 }
 
 export function updateRelayRegistrationSettings(

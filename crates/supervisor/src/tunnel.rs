@@ -7,7 +7,7 @@ use crate::bounded_channel as mpsc;
 use anyhow::{anyhow, Result};
 use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
-use remote_codex_protocol::{now_rfc3339, ThreadEventEnvelope};
+use remote_codex_protocol::now_rfc3339;
 use remote_codex_runtime::Supervisor;
 use serde_json::{json, Value};
 use tokio_tungstenite::connect_async_with_config;
@@ -241,9 +241,8 @@ async fn run_connected_tunnel_with_deadline(
                         if event.payload["reason"] == "thread_created" || event.payload["reason"] == "child_deleted" {
                             let _ = outgoing.send(json!({"type":"relay.heartbeat","timestamp":now_rfc3339(),"threadLineage":thread_lineage(&state)}));
                         }
-                        if let Some(activity) = relay_activity(&event) {
+                        if matches!(event.event_type.as_str(), "thread.turn.started" | "thread.turn.completed") {
                             let _ = outgoing.send(json!({"type":"relay.heartbeat","timestamp":now_rfc3339(),"threadLineage":thread_lineage(&state)}));
-                            let _ = outgoing.send(activity);
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
@@ -490,24 +489,6 @@ fn connect_relay_client(
     );
 }
 
-fn relay_activity(event: &ThreadEventEnvelope) -> Option<Value> {
-    let kind = match event.event_type.as_str() {
-        "thread.turn.started" => "turn_started",
-        "thread.turn.completed" => "turn_terminal",
-        _ => return None,
-    };
-    let turn_id = event.payload.get("turnId").and_then(Value::as_str)?;
-    Some(json!({
-        "type": "relay.activity",
-        "timestamp": now_rfc3339(),
-        "payload": {
-            "kind": kind,
-            "threadId": event.thread_id,
-            "turnId": turn_id
-        }
-    }))
-}
-
 async fn bounded_forward(
     future: impl std::future::Future<Output = Value>,
     timeout: Duration,
@@ -635,81 +616,16 @@ pub(crate) async fn forward_local(
                 Ok(value) => json_response(value),
                 Err(_) => relay_error_response(429, "Too many encrypted connections"),
             }
-        } else if payload["headers"]["x-rcd-hosted-workspaces"].is_string()
-            && matches!(
-                path,
-                "/api/workspaces" | "/api/threads" | "/api/threads/start"
-            )
-        {
-            dispatch_local(state, opened.request.clone(), peer.clone()).await
         } else {
             dispatch_streaming(state, opened.request.clone(), &transport, peer.clone()).await
         };
-        let (response, resources) = filter_hosted_response(&payload, response);
-        let mut sealed = opened
+        return opened
             .response(response)
             .unwrap_or_else(|_| relay_error_response(502, "Device response encryption failed"));
-        if let Some(resources) = resources {
-            sealed["headers"]["x-rcd-result-resource"] = json!(resources.to_string());
-        }
-        return sealed;
     }
     let mut payload = payload;
     payload["fileActor"] = payload["headers"]["x-rcd-file-actor"].clone();
     dispatch_local(state, payload, peer).await
-}
-// Policy is inserted by the relay after authentication, never copied from client headers.
-fn filter_hosted_response(request: &Value, mut response: Value) -> (Value, Option<Value>) {
-    let Some(policy) = request["headers"]["x-rcd-hosted-workspaces"].as_str() else {
-        return (response, None);
-    };
-    let Ok(owned) = serde_json::from_str::<std::collections::HashSet<String>>(policy) else {
-        return (relay_error_response(403, "Invalid hosted policy"), None);
-    };
-    let path = request["path"]
-        .as_str()
-        .unwrap_or("")
-        .split('?')
-        .next()
-        .unwrap_or("");
-    let method = request["method"].as_str().unwrap_or("");
-    if !matches!(
-        (method, path),
-        ("GET", "/api/workspaces" | "/api/threads")
-            | ("POST", "/api/workspaces" | "/api/threads/start")
-    ) || response["statusCode"].as_u64().unwrap_or(500) >= 300
-    {
-        return (response, None);
-    }
-    let Ok(mut data) = serde_json::from_str::<Value>(response["body"].as_str().unwrap_or(""))
-    else {
-        return (relay_error_response(502, "Invalid hosted response"), None);
-    };
-    if method == "GET" {
-        let Some(rows) = data.as_array_mut() else {
-            return (relay_error_response(502, "Invalid hosted list"), None);
-        };
-        rows.retain(|row| {
-            row[if path == "/api/workspaces" {
-                "id"
-            } else {
-                "workspaceId"
-            }]
-            .as_str()
-            .is_some_and(|id| owned.contains(id))
-        });
-    }
-    let rows = if let Some(rows) = data.as_array() {
-        rows.clone()
-    } else {
-        vec![data.clone()]
-    };
-    let resources = rows
-        .iter()
-        .map(|row| json!({"id":row["id"],"workspaceId":row["workspaceId"]}))
-        .collect::<Vec<_>>();
-    response["body"] = json!(data.to_string());
-    (response, Some(json!(resources)))
 }
 fn json_response(value: Value) -> Value {
     json!({"statusCode":200,"headers":{"content-type":"application/json","cache-control":"no-store"},"body":value.to_string()})

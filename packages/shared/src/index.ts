@@ -122,9 +122,6 @@ export interface RelayDeviceDto {
   connectedAt: string | null;
   lastHeartbeatAt: string | null;
   createdAt: string;
-  hostedStatus?: RelayHostedSandboxStatusDto | null;
-  hostedActiveTurnCount?: number;
-  hostedIdleDeadlineAt?: string | null;
 }
 
 export interface RelayAdminUserDto extends RelayUserDto {
@@ -371,153 +368,6 @@ export interface RelayAdminSummaryDto {
   registrationEnabled: boolean;
 }
 
-export type RelayHostedSandboxProviderDto = 'disabled' | 'incus';
-
-export interface RelayHostedSandboxCapabilityDto {
-  provider: RelayHostedSandboxProviderDto;
-  configured: boolean;
-  reachable: boolean;
-  available: boolean;
-  reasonCode: string | null;
-  reason: string | null;
-  checkedAt: string;
-  limits?: {
-    maxInstances: number;
-    maxRunningInstances: number;
-  };
-  capacity?: {
-    totalInstances: number;
-    runningInstances: number;
-  };
-  metrics?: {
-    cpuCount: number;
-    load1: number;
-    loadPerCpu: number;
-    memoryTotalMiB: number;
-    memoryAvailableMiB: number;
-    diskTotalGiB: number;
-    diskAvailableGiB: number;
-    monitorPath: string;
-  };
-  alerts?: Array<{
-    code: 'host_memory_low' | 'host_disk_low' | 'host_load_high';
-    severity: 'warning';
-    message: string;
-  }>;
-}
-
-export type RelayHostedSandboxStatusDto =
-  | 'requested'
-  | 'creating'
-  | 'starting'
-  | 'provisioning'
-  | 'stopped'
-  | 'online'
-  | 'stopping'
-  | 'error'
-  | 'deleting';
-
-export type RelayHostedSandboxOperationActionDto =
-  | 'create'
-  | 'start'
-  | 'stop'
-  | 'snapshot'
-  | 'delete'
-  | 'rotate_credential';
-
-export type RelayHostedSandboxOperationStatusDto =
-  | 'pending'
-  | 'running'
-  | 'succeeded'
-  | 'failed';
-
-export interface RelayHostedSandboxResourcesDto {
-  cpuCount: number;
-  memoryMiB: number;
-  diskGiB: number;
-}
-
-export interface RelayHostedCodexConfigDto {
-  modelProvider: string;
-  model: string;
-  reviewModel: string;
-  reasoningEffort: 'low' | 'medium' | 'high' | 'xhigh';
-  baseUrl: string;
-  wireApi: 'responses';
-  requiresOpenaiAuth: boolean;
-  disableResponseStorage: boolean;
-  networkAccess: 'enabled' | 'disabled';
-  goals: boolean;
-}
-
-export interface RelayHostedSandboxMemberDto {
-  userId: string;
-  username: string;
-  email: string;
-}
-
-export interface RelayHostedCodexFilesDto {
-  configToml: string;
-  authJson: string;
-}
-
-export interface RelayHostedSandboxDto {
-  id: string;
-  deviceId: string;
-  deviceName: string;
-  assignedUserId: string;
-  assignedUsername: string;
-  assignedUsers: RelayHostedSandboxMemberDto[];
-  workspaceIsolationEnabled: boolean;
-  createdByAdminUserId: string;
-  provider: 'incus';
-  providerInstanceId: string | null;
-  imageVersion: string;
-  resources: RelayHostedSandboxResourcesDto;
-  status: RelayHostedSandboxStatusDto;
-  lastErrorCode: string | null;
-  lastErrorMessage: string | null;
-  activeTurnCount: number;
-  lastUserActivityAt: string | null;
-  idleDeadlineAt: string | null;
-  runningSince: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface RelayHostedSandboxOperationDto {
-  id: string;
-  sandboxId: string;
-  action: RelayHostedSandboxOperationActionDto;
-  status: RelayHostedSandboxOperationStatusDto;
-  errorCode: string | null;
-  errorMessage: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface RelayHostedSandboxDetailDto extends RelayHostedSandboxDto {
-  operations: RelayHostedSandboxOperationDto[];
-}
-
-export interface RelayHostedSandboxReconciliationDto {
-  status: 'never_run' | 'healthy' | 'issues' | 'unavailable';
-  checkedAt: string | null;
-  errorCode: string | null;
-  missingInstanceSandboxIds: string[];
-  missingCredentialSandboxIds: string[];
-  orphanInstances: Array<{
-    id: string;
-    status: string;
-    snapshots: string[];
-  }>;
-  orphanCredentials: Array<{
-    credentialRef: string;
-    createdAt: string;
-  }>;
-  orphanSnapshotCount: number;
-}
-
 export type RelaySupervisorEnvelope =
   | {
       type: 'relay.connected';
@@ -528,16 +378,6 @@ export type RelaySupervisorEnvelope =
       type: 'relay.heartbeat';
       timestamp: string;
       deviceId?: string;
-    }
-  | {
-      type: 'relay.activity';
-      timestamp: string;
-      deviceId?: string;
-      payload: {
-        kind: 'turn_started' | 'turn_terminal';
-        threadId: string;
-        turnId: string;
-      };
     }
   | {
       type: 'relay.request';

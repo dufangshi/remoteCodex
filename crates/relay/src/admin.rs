@@ -1,5 +1,5 @@
 //! Relay administration API: the admin summary, registration approval,
-//! user enable/reset/delete, and the hosted-sandbox lifecycle handlers.
+//! and user enable/reset/delete.
 //! Split out of lib.rs so the privileged surface sits in one reviewable file.
 use super::*;
 
@@ -93,19 +93,11 @@ pub(crate) async fn relay_admin(
     let devices: Vec<Value> = stmt
         .query_map([], |row| {
             let id: String = row.get(0)?;
-            let hosted: Option<(String, i64, Option<String>)> = conn
-                .query_row(
-                    "SELECT status,active_turn_count,idle_deadline_at
-                     FROM relay_hosted_sandboxes WHERE device_id=?1",
-                    params![id],
-                    |hosted| Ok((hosted.get(0)?, hosted.get(1)?, hosted.get(2)?)),
-                )
-                .optional()?;
             Ok(json!({
                 "id": id,
                 "ownerUserId": row.get::<_, String>(1)?,
                 "name": row.get::<_, String>(2)?,
-                "token": if hosted.is_some() { None } else { row.get::<_, Option<String>>(3)? },
+                "token": row.get::<_, Option<String>>(3)?,
                 "tokenPreview": row.get::<_, String>(4)?,
                 "connected": connected.iter().any(|connected_id| connected_id == &id),
                 "connectedAt": Value::Null,
@@ -115,10 +107,7 @@ pub(crate) async fn relay_admin(
                 "ownerEmail": row.get::<_, String>(7)?,
                 "ipAddress": Value::Null,
                 "workspaces": [],
-                "threads": [],
-                "hostedStatus": hosted.as_ref().map(|value| value.0.as_str()),
-                "hostedActiveTurnCount": hosted.as_ref().map(|value| value.1).unwrap_or(0),
-                "hostedIdleDeadlineAt": hosted.and_then(|value| value.2)
+                "threads": []
             }))
         })
         .ok()
@@ -177,276 +166,6 @@ pub(crate) async fn relay_admin(
         "registrationEnabled": registration_enabled
     }))
     .into_response()
-}
-
-pub(crate) async fn hosted_sandbox_capability(
-    headers: HeaderMap,
-    Query(query): Query<TokenQuery>,
-    State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
-    if !hosted_admin_allowed(&state, &headers, &query).await {
-        return unauthorized();
-    }
-    Json(state.hosted.capability().await).into_response()
-}
-
-pub(crate) async fn hosted_admin_allowed(
-    state: &AppState,
-    headers: &HeaderMap,
-    query: &TokenQuery,
-) -> bool {
-    let conn = state.store.conn.lock().await;
-    authenticated_admin_user(&conn, &state.store.session_secret, headers, query).is_some()
-}
-
-pub(crate) fn hosted_response(result: std::result::Result<Value, hosted::HostedError>) -> Response {
-    match result {
-        Ok(value) => Json(value).into_response(),
-        Err(error) => {
-            (error.status, Json(ApiError::new(error.code, error.message))).into_response()
-        }
-    }
-}
-
-pub(crate) async fn list_hosted_sandboxes(
-    headers: HeaderMap,
-    Query(query): Query<TokenQuery>,
-    State(state): State<Arc<AppState>>,
-) -> Response {
-    if !hosted_admin_allowed(&state, &headers, &query).await {
-        return unauthorized();
-    }
-    hosted_response(state.hosted.list().await)
-}
-
-pub(crate) async fn create_hosted_sandbox(
-    headers: HeaderMap,
-    Query(query): Query<TokenQuery>,
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<hosted::CreateHostedInput>,
-) -> Response {
-    let admin = {
-        let conn = state.store.conn.lock().await;
-        authenticated_admin_user(&conn, &state.store.session_secret, &headers, &query)
-    };
-    let Some(admin) = admin else {
-        return unauthorized();
-    };
-    hosted_response(state.hosted.create(&admin.id, body).await)
-}
-
-pub(crate) async fn get_hosted_sandbox(
-    Path(sandbox_id): Path<String>,
-    headers: HeaderMap,
-    Query(query): Query<TokenQuery>,
-    State(state): State<Arc<AppState>>,
-) -> Response {
-    if !hosted_admin_allowed(&state, &headers, &query).await {
-        return unauthorized();
-    }
-    hosted_response(state.hosted.detail(&sandbox_id).await)
-}
-
-pub(crate) async fn update_hosted_sandbox_members(
-    Path(sandbox_id): Path<String>,
-    headers: HeaderMap,
-    Query(query): Query<TokenQuery>,
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<hosted::HostedMembersInput>,
-) -> Response {
-    if !hosted_admin_allowed(&state, &headers, &query).await {
-        return unauthorized();
-    }
-    let result = state
-        .hosted
-        .update_members(&sandbox_id, &body.assigned_user_ids)
-        .await;
-    if let Ok(value) = &result {
-        if value
-            .get("workspaceIsolationEnabled")
-            .and_then(Value::as_bool)
-            == Some(true)
-        {
-            if let Some(device_id) = value.get("deviceId").and_then(Value::as_str) {
-                schedule_hosted_bootstraps(state.clone(), device_id.to_string()).await;
-            }
-        }
-    }
-    hosted_response(result)
-}
-
-pub(crate) async fn update_hosted_sandbox_settings(
-    Path(sandbox_id): Path<String>,
-    headers: HeaderMap,
-    Query(query): Query<TokenQuery>,
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<hosted::HostedSettingsInput>,
-) -> Response {
-    if !hosted_admin_allowed(&state, &headers, &query).await {
-        return unauthorized();
-    }
-    let result = state
-        .hosted
-        .update_settings(&sandbox_id, body.workspace_isolation_enabled)
-        .await;
-    if body.workspace_isolation_enabled {
-        if let Ok(value) = &result {
-            if let Some(device_id) = value.get("deviceId").and_then(Value::as_str) {
-                schedule_hosted_bootstraps(state.clone(), device_id.to_string()).await;
-            }
-        }
-    }
-    hosted_response(result)
-}
-
-pub(crate) async fn retry_hosted_sandbox(
-    Path(sandbox_id): Path<String>,
-    headers: HeaderMap,
-    Query(query): Query<TokenQuery>,
-    State(state): State<Arc<AppState>>,
-) -> Response {
-    if !hosted_admin_allowed(&state, &headers, &query).await {
-        return unauthorized();
-    }
-    hosted_response(state.hosted.retry(&sandbox_id).await)
-}
-
-pub(crate) async fn start_hosted_sandbox(
-    Path(sandbox_id): Path<String>,
-    headers: HeaderMap,
-    Query(query): Query<TokenQuery>,
-    State(state): State<Arc<AppState>>,
-) -> Response {
-    if !hosted_admin_allowed(&state, &headers, &query).await {
-        return unauthorized();
-    }
-    hosted_response(state.hosted.start(&sandbox_id).await)
-}
-
-pub(crate) async fn stop_hosted_sandbox(
-    Path(sandbox_id): Path<String>,
-    headers: HeaderMap,
-    Query(query): Query<TokenQuery>,
-    State(state): State<Arc<AppState>>,
-) -> Response {
-    if !hosted_admin_allowed(&state, &headers, &query).await {
-        return unauthorized();
-    }
-    hosted_response(state.hosted.stop(&sandbox_id).await)
-}
-
-pub(crate) async fn snapshot_hosted_sandbox(
-    Path(sandbox_id): Path<String>,
-    headers: HeaderMap,
-    Query(query): Query<TokenQuery>,
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<hosted::HostedSnapshotInput>,
-) -> Response {
-    if !hosted_admin_allowed(&state, &headers, &query).await {
-        return unauthorized();
-    }
-    hosted_response(state.hosted.snapshot(&sandbox_id, &body.name).await)
-}
-
-pub(crate) async fn delete_hosted_sandbox(
-    Path(sandbox_id): Path<String>,
-    headers: HeaderMap,
-    Query(query): Query<TokenQuery>,
-    State(state): State<Arc<AppState>>,
-) -> Response {
-    if !hosted_admin_allowed(&state, &headers, &query).await {
-        return unauthorized();
-    }
-    hosted_response(state.hosted.delete(&sandbox_id).await)
-}
-
-pub(crate) async fn rotate_hosted_sandbox_credential(
-    Path(sandbox_id): Path<String>,
-    headers: HeaderMap,
-    Query(query): Query<TokenQuery>,
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<hosted::RotateCredentialInput>,
-) -> Response {
-    if !hosted_admin_allowed(&state, &headers, &query).await {
-        return unauthorized();
-    }
-    hosted_response(
-        state
-            .hosted
-            .rotate_credential(&sandbox_id, &body.openai_api_key)
-            .await,
-    )
-}
-
-pub(crate) async fn read_hosted_codex_files(
-    Path(sandbox_id): Path<String>,
-    headers: HeaderMap,
-    Query(query): Query<TokenQuery>,
-    State(state): State<Arc<AppState>>,
-) -> Response {
-    if !hosted_admin_allowed(&state, &headers, &query).await {
-        return unauthorized();
-    }
-    hosted_response(state.hosted.read_codex_files(&sandbox_id).await)
-}
-
-pub(crate) async fn write_hosted_codex_files(
-    Path(sandbox_id): Path<String>,
-    headers: HeaderMap,
-    Query(query): Query<TokenQuery>,
-    State(state): State<Arc<AppState>>,
-    Json(body): Json<hosted::CodexFiles>,
-) -> Response {
-    if !hosted_admin_allowed(&state, &headers, &query).await {
-        return unauthorized();
-    }
-    hosted_response(state.hosted.write_codex_files(&sandbox_id, &body).await)
-}
-
-pub(crate) async fn hosted_reconciliation(
-    headers: HeaderMap,
-    Query(query): Query<TokenQuery>,
-    State(state): State<Arc<AppState>>,
-) -> Response {
-    if !hosted_admin_allowed(&state, &headers, &query).await {
-        return unauthorized();
-    }
-    Json(state.hosted.reconciliation().await).into_response()
-}
-
-pub(crate) async fn run_hosted_reconciliation(
-    headers: HeaderMap,
-    Query(query): Query<TokenQuery>,
-    State(state): State<Arc<AppState>>,
-) -> Response {
-    if !hosted_admin_allowed(&state, &headers, &query).await {
-        return unauthorized();
-    }
-    Json(state.hosted.run_reconciliation().await).into_response()
-}
-
-pub(crate) async fn delete_hosted_orphan_instance(
-    Path(sandbox_id): Path<String>,
-    headers: HeaderMap,
-    Query(query): Query<TokenQuery>,
-    State(state): State<Arc<AppState>>,
-) -> Response {
-    if !hosted_admin_allowed(&state, &headers, &query).await {
-        return unauthorized();
-    }
-    hosted_response(state.hosted.delete_orphan_instance(&sandbox_id).await)
-}
-
-pub(crate) async fn delete_hosted_orphan_credential(
-    Path(credential_ref): Path<String>,
-    headers: HeaderMap,
-    Query(query): Query<TokenQuery>,
-    State(state): State<Arc<AppState>>,
-) -> Response {
-    if !hosted_admin_allowed(&state, &headers, &query).await {
-        return unauthorized();
-    }
-    hosted_response(state.hosted.delete_orphan_credential(&credential_ref).await)
 }
 
 pub(crate) fn set_relay_setting(conn: &Connection, key: &str, value: &str) -> rusqlite::Result<()> {
@@ -639,30 +358,6 @@ pub(crate) async fn admin_delete_user(
             Json(ApiError::new(
                 "bad_request",
                 "The admin user cannot be deleted",
-            )),
-        )
-            .into_response();
-    }
-    let sole_hosted_member = conn
-        .query_row(
-            "SELECT 1 FROM relay_hosted_sandbox_members m
-             WHERE m.user_id=?1 AND (
-               SELECT COUNT(*) FROM relay_hosted_sandbox_members all_members
-               WHERE all_members.sandbox_id=m.sandbox_id
-             )=1 LIMIT 1",
-            params![user_id],
-            |_| Ok(()),
-        )
-        .optional()
-        .ok()
-        .flatten()
-        .is_some();
-    if sole_hosted_member {
-        return (
-            StatusCode::CONFLICT,
-            Json(ApiError::new(
-                "conflict",
-                "Reassign or delete the user's hosted VM before deleting this account.",
             )),
         )
             .into_response();

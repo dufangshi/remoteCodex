@@ -27,7 +27,6 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { LongTextDialog } from '../components/LongTextDialog';
 import { RenameDialog } from '../components/RenameDialog';
 import {
-  ApiError,
   deleteWorkspace,
   fetchRuntimeConfig,
   fetchWorkspaces,
@@ -78,15 +77,9 @@ export function WorkspacesPage() {
   const [deletingWorkspace, setDeletingWorkspace] = useState<WorkspaceDto | null>(null);
   const [deletingWorkspaceBusy, setDeletingWorkspaceBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [vmStarting, setVmStarting] = useState(false);
-  const [wakeAttempt, setWakeAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    const isVmStarting = (result: PromiseRejectedResult) =>
-      result.reason instanceof ApiError &&
-      result.reason.payload.details?.reason === 'hosted_sandbox_starting';
 
     const load = async () => {
       const [workspaceResult, runtimeResult] = await Promise.allSettled([
@@ -96,19 +89,6 @@ export function WorkspacesPage() {
       if (cancelled) {
         return;
       }
-      if (
-        (workspaceResult.status === 'rejected' && isVmStarting(workspaceResult)) ||
-        (runtimeResult.status === 'rejected' && isVmStarting(runtimeResult))
-      ) {
-        setVmStarting(true);
-        setLoading(true);
-        setError(null);
-        setRuntimeError(null);
-        setWakeAttempt((current) => current + 1);
-        retryTimer = setTimeout(() => void load(), 1_500);
-        return;
-      }
-      setVmStarting(false);
       setLoading(false);
       if (workspaceResult.status === 'fulfilled') {
         setWorkspaces(workspaceResult.value);
@@ -127,9 +107,6 @@ export function WorkspacesPage() {
     void load();
     return () => {
       cancelled = true;
-      if (retryTimer) {
-        clearTimeout(retryTimer);
-      }
     };
   }, [loadAttempt]);
 
@@ -211,9 +188,7 @@ export function WorkspacesPage() {
 
   const runtimeSummary = runtimeConfig
     ? runtimeConfig.workspaceRoot
-    : vmStarting
-      ? translate("files.connectingToHostedSupervisor")
-      : runtimeError ?? translate("files.checkingRuntime");
+    : runtimeError ?? translate("files.checkingRuntime");
 
   return (
     <div className="product-page space-y-4">
@@ -227,7 +202,7 @@ export function WorkspacesPage() {
           <span
             aria-hidden="true"
             className={`h-2 w-2 shrink-0 rounded-full ${
-              runtimeError && !vmStarting
+              runtimeError
                 ? 'bg-[var(--status-warning-fg)]'
                 : runtimeConfig
                   ? 'bg-[var(--status-success-fg)]'
@@ -263,28 +238,6 @@ export function WorkspacesPage() {
         </dl>
       </details>
 
-      {vmStarting ? (
-        <div
-          aria-live="polite"
-          className="overflow-hidden border-y border-[var(--status-warning-border)] bg-[var(--status-warning-bg)]"
-          role="status"
-        >
-          <div className="flex items-center justify-between gap-4 px-4 py-3">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-[var(--status-warning-fg)]">{translate("files.startingHostedVM")}</p>
-              <p className="mt-0.5 text-sm text-[var(--theme-fg-muted)]">
-                {translate("files.waitingForTheSupervisorThisPageWill")}</p>
-            </div>
-            <span className="shrink-0 text-xs tabular-nums text-[var(--theme-fg-muted)]">
-              {translate("files.check")} {wakeAttempt}
-            </span>
-          </div>
-          <div className="h-1 overflow-hidden bg-[var(--theme-muted)]">
-            <div className="h-full w-1/3 animate-pulse bg-[var(--theme-accent-solid)]" />
-          </div>
-        </div>
-      ) : null}
-
       {error ? (
         <div className="host-error flex min-h-11 flex-col gap-3 rounded-md border px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between" role="alert">
           <span>{error}</span>
@@ -301,7 +254,7 @@ export function WorkspacesPage() {
         </div>
       ) : null}
 
-      {loading && !vmStarting ? (
+      {loading ? (
         <div className="product-list" aria-label={translate("files.loadingWorkspaces")} aria-busy="true">
           {[0, 1, 2].map((item) => (
             <div key={item} className="product-row min-h-[5.5rem]">

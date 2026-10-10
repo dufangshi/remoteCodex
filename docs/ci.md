@@ -8,16 +8,13 @@ There is no duplicate push workflow after merging to `main`.
 | --- | --- |
 | Rust, Cargo configuration, migrations | Linux formatting and `cargo check --workspace --locked` |
 | Supervisor Web, shared/plugin packages | Web typecheck and Vitest; build the external thread UI dependency required by Web |
-| Incus host agent | Its typecheck, Vitest, and shell syntax checks |
 | Native bootstrap, legacy npm launcher or Node scripts | Native SH/legacy launcher, updater, and historical publishing-script unit tests; no product installation or release build |
 | GitHub Actions workflows | actionlint; ShellCheck warnings/errors (not style or informational suggestions) |
 | Documentation, agent instructions, browser-only E2E files, Windows Device Manager | No automatic product build; agents validate relevant changes locally |
 
 Root Node manifests/lockfiles and TypeScript configuration select their affected
-package checks. Web changes do not compile Rust or test Incus. npm-only changes
-need neither pnpm installation nor Web compilation. The current pnpm workspace
-references thread UI as a local file dependency, so Incus validation also checks
-out that repository for installation, but does not build it.
+package checks. Web changes do not compile Rust. npm-only changes need neither
+pnpm installation nor Web compilation.
 
 `PR checks complete` aggregates selected job results, including failures and
 cancellations, and can be used as a stable required status check. Direct pushes
@@ -34,7 +31,7 @@ path filtering, even when invoked on a documentation-only commit:
 
 - Rust workspace tests on Linux, macOS, and Windows; Linux formatting and Clippy.
 - Windows Device Manager build, verification, and downloadable artifact.
-- Web and Incus typecheck, tests, and production builds.
+- Web typecheck, tests, and production build.
 - Rust release binary build and native bootstrap verification.
 
 An agent may dispatch it only when the user explicitly asks for full validation.

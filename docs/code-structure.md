@@ -53,7 +53,6 @@ working in the file, so the change carries test coverage with it.
 | `crates/relay/src/lib.rs` | ~6.8k | By far the largest. Sibling modules already `use super::*`, so plan the public surface first. |
 | `crates/runtime/src/service.rs` | ~3.6k | Already has a `service/` directory to grow into. |
 | `crates/runtime/src/acp/runtime.rs` | ~3.1k | Inside the harness boundary; keep adapters thin. |
-| `crates/relay/src/hosted.rs` | ~2.3k | |
 | `crates/supervisor/src/http.rs` | ~2.1k | Route table plus handlers; handlers extract more cleanly than the router. |
 | `apps/supervisor-web/src/pages/ThreadDetailPage.tsx` | ~3.7k | Follow the existing `threadDetailModel.ts` / `useThreadAuxiliaryActions.ts` / `useThreadWorkspaceAdapter.ts` extraction pattern. |
 | `apps/supervisor-web/src/pages/RelayAdminPage.tsx` | ~3.2k | |

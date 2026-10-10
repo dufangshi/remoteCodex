@@ -581,7 +581,7 @@ mod tests {
         first["payload"]["headers"] = json!({
             "Content-Type":"application/octet-stream", "Accept":"application/json",
             "X-RCD-Key":"key", "x-rcd-request":"a.0", "x-rcd-enc":"enc", "x-rcd-sealed":"1",
-            "x-rcd-resource":"threads/forged", "x-rcd-hosted-workspaces":"forged",
+            "x-rcd-resource":"threads/forged",
             "authorization":"forged", "cookie":"forged", "x-peer-device-id":"foreign"
         });
         write(&mut a, first).await;
@@ -627,7 +627,7 @@ mod tests {
         ));
         assert_eq!(fixture.state.pending.lock().unwrap().len(), 2);
         for (source, tunnel) in [("c", &mut c), ("a", &mut a)] {
-            let payload = json!({"statusCode":206, "headers":{"x-rcd-encrypted":"1", "x-rcd-result-resource":source}, "body":format!("sealed-{source}"), "bodyEncoding":"base64"});
+            let payload = json!({"statusCode":206, "headers":{"x-rcd-encrypted":"1", "x-test-source":source}, "body":format!("sealed-{source}"), "bodyEncoding":"base64"});
             write(&mut b, json!({"type":"relay.response", "requestId":requests[source]["requestId"], "payload":payload})).await;
             assert_eq!(
                 read(tunnel).await,

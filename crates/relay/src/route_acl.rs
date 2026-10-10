@@ -326,31 +326,6 @@ mod tests {
         ));
     }
     #[test]
-    fn global_search_is_denied_for_multi_user_hosted_isolation() {
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        for (path, workspace_id) in [
-            ("/api/search?q=private", None),
-            (
-                "/api/workspaces/own-workspace/search?q=private",
-                Some("own-workspace"),
-            ),
-        ] {
-            assert!(!hosted_resource_allowed(
-                &conn,
-                HostedResourceRequest {
-                    sandbox_id: "shared-vm",
-                    user_id: "tenant",
-                    thread_id: None,
-                    workspace_id,
-                    method: &Method::GET,
-                    path,
-                    body: &[],
-                }
-            ));
-        }
-    }
-
-    #[test]
     fn global_search_requires_device_conversation_access() {
         let mut access = owner_access();
         for path in [

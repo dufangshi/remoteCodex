@@ -3,7 +3,6 @@ mod apns;
 mod auth_api;
 mod auth_factors;
 mod device_tokens;
-mod hosted;
 mod notifications;
 mod oauth;
 mod peer;
@@ -90,8 +89,6 @@ struct AppState {
     legacy_supervisor_token: Option<String>,
     oauth: OAuthConfig,
     oauth_client: reqwest::Client,
-    hosted: Arc<hosted::HostedService>,
-    hosted_bootstraps: Mutex<HashSet<String>>,
     admission: security::Admission,
     preview: preview::Hub,
 }
@@ -208,11 +205,6 @@ pub async fn serve() -> Result<()> {
             [],
         )?;
     }
-    let hosted = hosted::HostedService::new(
-        store.conn.clone(),
-        hosted::HostedConfig::from_env(),
-        store.session_secret.clone(),
-    )?;
     let state = Arc::new(AppState {
         store,
         sockets: RwLock::new(HashMap::new()),
@@ -224,12 +216,9 @@ pub async fn serve() -> Result<()> {
         oauth_client: reqwest::Client::builder()
             .timeout(Duration::from_secs(20))
             .build()?,
-        hosted,
-        hosted_bootstraps: Mutex::new(HashSet::new()),
         admission: security::Admission::default(),
         preview: preview::Hub::from_env()?,
     });
-    state.hosted.start_background().await;
     notifications::start(&state)?;
     let app = Router::new()
         .merge(auth_api::routes())
@@ -269,66 +258,6 @@ pub async fn serve() -> Result<()> {
             patch(update_grant).delete(revoke_grant),
         )
         .route("/relay/admin", get(relay_admin))
-        .route(
-            "/relay/admin/hosted-sandboxes/capability",
-            get(hosted_sandbox_capability),
-        )
-        .route(
-            "/relay/admin/hosted-sandboxes",
-            get(list_hosted_sandboxes).post(create_hosted_sandbox),
-        )
-        .route(
-            "/relay/admin/hosted-sandboxes/reconciliation",
-            get(hosted_reconciliation),
-        )
-        .route(
-            "/relay/admin/hosted-sandboxes/reconciliation/run",
-            post(run_hosted_reconciliation),
-        )
-        .route(
-            "/relay/admin/hosted-sandboxes/reconciliation/orphan-instances/{sandbox_id}",
-            delete(delete_hosted_orphan_instance),
-        )
-        .route(
-            "/relay/admin/hosted-sandboxes/reconciliation/orphan-credentials/{credential_ref}",
-            delete(delete_hosted_orphan_credential),
-        )
-        .route(
-            "/relay/admin/hosted-sandboxes/{sandbox_id}",
-            get(get_hosted_sandbox).delete(delete_hosted_sandbox),
-        )
-        .route(
-            "/relay/admin/hosted-sandboxes/{sandbox_id}/members",
-            axum::routing::put(update_hosted_sandbox_members),
-        )
-        .route(
-            "/relay/admin/hosted-sandboxes/{sandbox_id}/settings",
-            patch(update_hosted_sandbox_settings),
-        )
-        .route(
-            "/relay/admin/hosted-sandboxes/{sandbox_id}/retry",
-            post(retry_hosted_sandbox),
-        )
-        .route(
-            "/relay/admin/hosted-sandboxes/{sandbox_id}/start",
-            post(start_hosted_sandbox),
-        )
-        .route(
-            "/relay/admin/hosted-sandboxes/{sandbox_id}/stop",
-            post(stop_hosted_sandbox),
-        )
-        .route(
-            "/relay/admin/hosted-sandboxes/{sandbox_id}/snapshots",
-            post(snapshot_hosted_sandbox),
-        )
-        .route(
-            "/relay/admin/hosted-sandboxes/{sandbox_id}/rotate-credential",
-            post(rotate_hosted_sandbox_credential),
-        )
-        .route(
-            "/relay/admin/hosted-sandboxes/{sandbox_id}/backends/codex/files",
-            get(read_hosted_codex_files).put(write_hosted_codex_files),
-        )
         .route(
             "/relay/admin/settings/registration",
             patch(update_registration_settings),
@@ -1580,11 +1509,7 @@ async fn list_user_devices(state: &AppState, user_id: &str) -> Vec<Value> {
         .prepare(
             "SELECT id,owner_user_id,name,created_at,token,token_preview
              FROM relay_devices
-             WHERE owner_user_id=?1 OR id IN (
-               SELECT s.device_id FROM relay_hosted_sandboxes s
-               JOIN relay_hosted_sandbox_members m ON m.sandbox_id=s.id
-               WHERE m.user_id=?1
-             )
+             WHERE owner_user_id=?1
              ORDER BY created_at ASC",
         )
         .expect("stmt");
@@ -1595,15 +1520,7 @@ async fn list_user_devices(state: &AppState, user_id: &str) -> Vec<Value> {
         let created_at: String = row.get(3)?;
         let _token: Option<String> = row.get(4)?;
         let token_preview: Option<String> = row.get(5)?;
-        let hosted: Option<(String, i64, Option<String>)> = conn
-            .query_row(
-                "SELECT status,active_turn_count,idle_deadline_at
-                 FROM relay_hosted_sandboxes WHERE device_id=?1",
-                params![id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .optional()?;
-        let mut value = device_json(DeviceJsonInput {
+        Ok(device_json(DeviceJsonInput {
             id: &id,
             owner_user_id: &owner,
             name: &name,
@@ -1617,13 +1534,7 @@ async fn list_user_devices(state: &AppState, user_id: &str) -> Vec<Value> {
                 .map(|socket| socket.last_heartbeat_at.as_str()),
             token: None,
             token_preview: token_preview.as_deref(),
-        });
-        if let Some((status, active_turns, idle_deadline)) = hosted {
-            value["hostedStatus"] = Value::String(status);
-            value["hostedActiveTurnCount"] = Value::from(active_turns);
-            value["hostedIdleDeadlineAt"] = idle_deadline.map_or(Value::Null, Value::String);
-        }
-        Ok(value)
+        }))
     })
     .ok()
     .map(|rows| rows.filter_map(|row| row.ok()).collect())
@@ -1736,26 +1647,6 @@ fn effective_access(
         .is_some();
     if owned {
         return Some(owner_access());
-    }
-
-    if table_exists(conn, "relay_hosted_sandbox_members")
-        && table_exists(conn, "relay_hosted_sandboxes")
-    {
-        let hosted_member = conn
-            .query_row(
-                "SELECT 1 FROM relay_hosted_sandbox_members m
-                 JOIN relay_hosted_sandboxes s ON s.id=m.sandbox_id
-                 WHERE m.user_id=?1 AND s.device_id=?2",
-                params![user_id, device_id],
-                |_| Ok(()),
-            )
-            .optional()
-            .ok()
-            .flatten()
-            .is_some();
-        if hosted_member {
-            return Some(owner_access());
-        }
     }
 
     let now = now_rfc3339();
@@ -2864,8 +2755,8 @@ async fn device_presence(
     if !allowed {
         return unauthorized();
     }
-    // A presence probe never wakes a hosted VM, renews user activity, or drops
-    // the tunnel. Only return reachability, including to thread-only guests.
+    // A presence probe never drops the tunnel. Only return reachability,
+    // including to thread-only guests.
     let response = forward_device_with_timeout(
         state,
         device_id,
@@ -2901,25 +2792,6 @@ async fn device_healthz(
     if !allowed {
         return unauthorized();
     }
-    if state
-        .hosted
-        .wake_for_request(
-            &device_id,
-            false,
-            state.sockets.read().await.contains_key(&device_id),
-        )
-        .await
-    {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({
-                "code": "service_unavailable",
-                "message": "Hosted supervisor VM is starting. Retry shortly.",
-                "details": { "reason": "hosted_sandbox_starting" }
-            })),
-        )
-            .into_response();
-    }
     forward_device(
         state,
         device_id,
@@ -2954,13 +2826,10 @@ async fn device_api(
                 thread_id.as_deref(),
                 workspace_id.as_deref(),
             )
-            .map(|access| {
-                let isolation = hosted_isolation_for_user(&conn, &device_id, &user.id);
-                (user.id, access, isolation)
-            })
+            .map(|access| (user.id, access))
         })
     };
-    let Some((user_id, access, isolation)) = resolved else {
+    let Some((user_id, access)) = resolved else {
         return unauthorized();
     };
     if !relay_target_allowed(&path) || !access_allows(&access, &method, &path) {
@@ -2970,61 +2839,6 @@ async fn device_api(
                 "forbidden",
                 "This relay session does not allow that operation",
             )),
-        )
-            .into_response();
-    }
-    let resource_body = if headers.contains_key("x-rcd-key") {
-        headers
-            .get("x-rcd-resource")
-            .map(|v| v.as_bytes())
-            .unwrap_or(&body)
-    } else {
-        &body
-    };
-    if let Some(sandbox_id) = isolation.as_deref() {
-        let allowed = {
-            let conn = state.store.conn.lock().await;
-            hosted_resource_allowed(
-                &conn,
-                HostedResourceRequest {
-                    sandbox_id,
-                    user_id: &user_id,
-                    thread_id: thread_id.as_deref(),
-                    workspace_id: workspace_id.as_deref(),
-                    method: &method,
-                    path: &path,
-                    body: resource_body,
-                },
-            )
-        };
-        if !allowed {
-            return (
-                StatusCode::FORBIDDEN,
-                Json(ApiError::new(
-                    "forbidden",
-                    "This workspace or thread belongs to another hosted VM user.",
-                )),
-            )
-                .into_response();
-        }
-    }
-    let is_activity = !matches!(method, Method::GET | Method::HEAD | Method::OPTIONS);
-    if state
-        .hosted
-        .wake_for_request(
-            &device_id,
-            is_activity,
-            state.sockets.read().await.contains_key(&device_id),
-        )
-        .await
-    {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({
-                "code": "service_unavailable",
-                "message": "Hosted supervisor VM is starting. Retry shortly.",
-                "details": { "reason": "hosted_sandbox_starting" }
-            })),
         )
             .into_response();
     }
@@ -3046,14 +2860,6 @@ async fn device_api(
             .map(|value| (name.as_str().to_string(), Value::String(value.to_string())))
     })
     .collect::<serde_json::Map<String, Value>>();
-    if let Some(sandbox_id) = isolation.as_deref() {
-        let conn = state.store.conn.lock().await;
-        let owned = hosted_workspace_ids(&conn, sandbox_id, &user_id);
-        forwarded_headers.insert(
-            "x-rcd-hosted-workspaces".into(),
-            json!(serde_json::to_string(&owned).unwrap_or_default()),
-        );
-    }
     forwarded_headers.insert("x-rcd-file-actor".into(), json!(user_id));
     let (body, body_encoding) = encode_relay_request_body(&body);
     let response = forward_device(
@@ -3068,11 +2874,7 @@ async fn device_api(
     .await;
     share_activity::record_response(&state, &access, &user_id, &method, &path, response.status())
         .await;
-    if let Some(sandbox_id) = isolation {
-        transform_hosted_response(&state, &sandbox_id, &user_id, &method, &path, response).await
-    } else {
-        response
-    }
+    response
 }
 
 async fn relay_api_compat(
@@ -3115,13 +2917,10 @@ async fn relay_api_compat(
                 thread_id.as_deref(),
                 workspace_id.as_deref(),
             )
-            .map(|access| {
-                let isolation = hosted_isolation_for_user(&conn, device_id, &user.id);
-                (device_id.clone(), user.id.clone(), access, isolation)
-            })
+            .map(|access| (device_id.clone(), user.id.clone(), access))
         })
     };
-    let Some((device_id, user_id, access, isolation)) = resolved else {
+    let Some((device_id, user_id, access)) = resolved else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(ApiError::new(
@@ -3138,53 +2937,6 @@ async fn relay_api_compat(
                 "forbidden",
                 "This relay session does not allow that operation",
             )),
-        )
-            .into_response();
-    }
-    if let Some(sandbox_id) = isolation.as_deref() {
-        let allowed = {
-            let conn = state.store.conn.lock().await;
-            hosted_resource_allowed(
-                &conn,
-                HostedResourceRequest {
-                    sandbox_id,
-                    user_id: &user_id,
-                    thread_id: thread_id.as_deref(),
-                    workspace_id: workspace_id.as_deref(),
-                    method: &method,
-                    path: &path,
-                    body: &body,
-                },
-            )
-        };
-        if !allowed {
-            return (
-                StatusCode::FORBIDDEN,
-                Json(ApiError::new(
-                    "forbidden",
-                    "This workspace or thread belongs to another hosted VM user.",
-                )),
-            )
-                .into_response();
-        }
-    }
-    let is_activity = !matches!(method, Method::GET | Method::HEAD | Method::OPTIONS);
-    if state
-        .hosted
-        .wake_for_request(
-            &device_id,
-            is_activity,
-            state.sockets.read().await.contains_key(&device_id),
-        )
-        .await
-    {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({
-                "code": "service_unavailable",
-                "message": "Hosted supervisor VM is starting. Retry shortly.",
-                "details": { "reason": "hosted_sandbox_starting" }
-            })),
         )
             .into_response();
     }
@@ -3220,423 +2972,7 @@ async fn relay_api_compat(
     .await;
     share_activity::record_response(&state, &access, &user_id, &method, &path, response.status())
         .await;
-    if let Some(sandbox_id) = isolation {
-        transform_hosted_response(&state, &sandbox_id, &user_id, &method, &path, response).await
-    } else {
-        response
-    }
-}
-
-fn hosted_isolation_for_user(conn: &Connection, device_id: &str, user_id: &str) -> Option<String> {
-    conn.query_row(
-        "SELECT s.id FROM relay_hosted_sandboxes s
-         JOIN relay_hosted_sandbox_members m ON m.sandbox_id=s.id
-         WHERE s.device_id=?1 AND m.user_id=?2 AND s.workspace_isolation_enabled=1",
-        params![device_id, user_id],
-        |row| row.get(0),
-    )
-    .optional()
-    .ok()
-    .flatten()
-}
-
-struct HostedResourceRequest<'a> {
-    sandbox_id: &'a str,
-    user_id: &'a str,
-    thread_id: Option<&'a str>,
-    workspace_id: Option<&'a str>,
-    method: &'a Method,
-    path: &'a str,
-    body: &'a [u8],
-}
-
-fn hosted_resource_allowed(conn: &Connection, request: HostedResourceRequest<'_>) -> bool {
-    // Hosted VMs can contain multiple users' journals. Until the encrypted
-    // request carries a device-enforced thread allowlist, never expose that
-    // shared VM's global index, even through a user-owned workspace route.
-    let pathname = request.path.split('?').next().unwrap_or(request.path);
-    if pathname == "/api/search"
-        || (request.workspace_id.is_some() && pathname.ends_with("/search"))
-    {
-        return false;
-    }
-
-    if request
-        .path
-        .split('?')
-        .next()
-        .unwrap_or("")
-        .contains("/linked-files/")
-    {
-        return false;
-    }
-    if let Some(workspace_id) = request.workspace_id {
-        let owns = conn
-            .query_row(
-                "SELECT 1 FROM relay_hosted_user_workspaces
-                 WHERE sandbox_id=?1 AND user_id=?2 AND workspace_id=?3",
-                params![request.sandbox_id, request.user_id, workspace_id],
-                |_| Ok(()),
-            )
-            .optional()
-            .ok()
-            .flatten()
-            .is_some();
-        if !owns {
-            return false;
-        }
-    }
-    if let Some(thread_id) = request.thread_id {
-        let owns = conn
-            .query_row(
-                "SELECT 1 FROM relay_hosted_user_threads
-                 WHERE sandbox_id=?1 AND user_id=?2 AND thread_id=?3",
-                params![request.sandbox_id, request.user_id, thread_id],
-                |_| Ok(()),
-            )
-            .optional()
-            .ok()
-            .flatten()
-            .is_some();
-        if !owns {
-            return false;
-        }
-    }
-    let pathname = request.path.split('?').next().unwrap_or(request.path);
-    if request.method == Method::POST && pathname == "/api/threads/import" {
-        return false;
-    }
-    if request.method == Method::POST && pathname == "/api/threads/start" {
-        let requested_workspace =
-            serde_json::from_slice::<Value>(request.body)
-                .ok()
-                .and_then(|value| {
-                    value
-                        .get("workspaceId")
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                });
-        return requested_workspace.is_some_and(|workspace_id| {
-            conn.query_row(
-                "SELECT 1 FROM relay_hosted_user_workspaces
-                     WHERE sandbox_id=?1 AND user_id=?2 AND workspace_id=?3",
-                params![request.sandbox_id, request.user_id, workspace_id],
-                |_| Ok(()),
-            )
-            .optional()
-            .ok()
-            .flatten()
-            .is_some()
-        });
-    }
-    true
-}
-
-async fn transform_hosted_response(
-    state: &AppState,
-    sandbox_id: &str,
-    user_id: &str,
-    method: &Method,
-    path: &str,
-    response: Response,
-) -> Response {
-    if !response.status().is_success() {
-        return response;
-    }
-    let pathname = path.split('?').next().unwrap_or(path);
-    let transforms = (method == Method::GET
-        && matches!(pathname, "/api/workspaces" | "/api/threads"))
-        || (method == Method::POST && matches!(pathname, "/api/workspaces" | "/api/threads/start"));
-    if !transforms {
-        return response;
-    }
-    if response.headers().get("x-rcd-encrypted").is_some() {
-        let mut response = response;
-        let resources = response
-            .headers()
-            .get("x-rcd-result-resource")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| serde_json::from_str::<Value>(v).ok());
-        let conn = state.store.conn.lock().await;
-        if let Some(values) = resources.as_ref().and_then(Value::as_array) {
-            let owned = hosted_workspace_ids(&conn, sandbox_id, user_id);
-            for value in values {
-                if let Some(id) = value["id"].as_str() {
-                    if method == Method::POST && pathname == "/api/workspaces" {
-                        let _ = record_hosted_workspace(&conn, sandbox_id, user_id, id, false);
-                    } else if let Some(workspace_id) = value["workspaceId"]
-                        .as_str()
-                        .filter(|id| owned.contains(*id))
-                    {
-                        let _ = record_hosted_thread(&conn, sandbox_id, user_id, id, workspace_id);
-                    }
-                }
-            }
-        }
-        response.headers_mut().remove("x-rcd-result-resource");
-        return response;
-    }
-    let (parts, body) = response.into_parts();
-    let Ok(bytes) = to_bytes(body, 32 * 1024 * 1024).await else {
-        return StatusCode::BAD_GATEWAY.into_response();
-    };
-    let Ok(mut payload) = serde_json::from_slice::<Value>(&bytes) else {
-        return Response::from_parts(parts, Body::from(bytes));
-    };
-    {
-        let conn = state.store.conn.lock().await;
-        if method == Method::GET && pathname == "/api/workspaces" {
-            let owned = hosted_workspace_ids(&conn, sandbox_id, user_id);
-            if let Some(values) = payload.as_array_mut() {
-                values.retain(|value| {
-                    value
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .is_some_and(|id| owned.contains(id))
-                });
-            }
-        } else if method == Method::GET && pathname == "/api/threads" {
-            let owned = hosted_workspace_ids(&conn, sandbox_id, user_id);
-            if let Some(values) = payload.as_array_mut() {
-                values.retain(|value| {
-                    let thread_id = value.get("id").and_then(Value::as_str);
-                    let workspace_id = value.get("workspaceId").and_then(Value::as_str);
-                    let keep = workspace_id.is_some_and(|id| owned.contains(id));
-                    if keep {
-                        if let (Some(thread_id), Some(workspace_id)) = (thread_id, workspace_id) {
-                            let _ = record_hosted_thread(
-                                &conn,
-                                sandbox_id,
-                                user_id,
-                                thread_id,
-                                workspace_id,
-                            );
-                        }
-                    }
-                    keep
-                });
-            }
-        } else if method == Method::POST && pathname == "/api/workspaces" {
-            if let Some(workspace_id) = payload.get("id").and_then(Value::as_str) {
-                let _ = record_hosted_workspace(&conn, sandbox_id, user_id, workspace_id, false);
-            }
-        } else if method == Method::POST && pathname == "/api/threads/start" {
-            if let (Some(thread_id), Some(workspace_id)) = (
-                payload.get("id").and_then(Value::as_str),
-                payload.get("workspaceId").and_then(Value::as_str),
-            ) {
-                let _ = record_hosted_thread(&conn, sandbox_id, user_id, thread_id, workspace_id);
-            }
-        }
-    }
-    let bytes = serde_json::to_vec(&payload).unwrap_or_default();
-    let mut response = Response::builder()
-        .status(parts.status)
-        .header(header::CONTENT_TYPE, "application/json; charset=utf-8");
-    if let Some(cache) = parts.headers.get(header::CACHE_CONTROL) {
-        response = response.header(header::CACHE_CONTROL, cache);
-    }
     response
-        .body(Body::from(bytes))
-        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
-}
-
-fn hosted_workspace_ids(conn: &Connection, sandbox_id: &str, user_id: &str) -> HashSet<String> {
-    conn.prepare(
-        "SELECT workspace_id FROM relay_hosted_user_workspaces
-         WHERE sandbox_id=?1 AND user_id=?2",
-    )
-    .ok()
-    .and_then(|mut stmt| {
-        stmt.query_map(params![sandbox_id, user_id], |row| row.get::<_, String>(0))
-            .ok()
-            .map(|rows| rows.flatten().collect())
-    })
-    .unwrap_or_default()
-}
-
-fn record_hosted_workspace(
-    conn: &Connection,
-    sandbox_id: &str,
-    user_id: &str,
-    workspace_id: &str,
-    initial: bool,
-) -> rusqlite::Result<()> {
-    conn.execute(
-        "INSERT INTO relay_hosted_user_workspaces
-         (sandbox_id,user_id,workspace_id,initial_workspace,created_at)
-         VALUES (?1,?2,?3,?4,?5)
-         ON CONFLICT(sandbox_id,workspace_id) DO UPDATE SET
-           initial_workspace=MAX(initial_workspace,excluded.initial_workspace)",
-        params![
-            sandbox_id,
-            user_id,
-            workspace_id,
-            i64::from(initial),
-            now_rfc3339()
-        ],
-    )?;
-    Ok(())
-}
-
-fn record_hosted_thread(
-    conn: &Connection,
-    sandbox_id: &str,
-    user_id: &str,
-    thread_id: &str,
-    workspace_id: &str,
-) -> rusqlite::Result<()> {
-    conn.execute(
-        "INSERT OR IGNORE INTO relay_hosted_user_threads
-         (sandbox_id,user_id,thread_id,workspace_id,created_at)
-         VALUES (?1,?2,?3,?4,?5)",
-        params![sandbox_id, user_id, thread_id, workspace_id, now_rfc3339()],
-    )?;
-    Ok(())
-}
-
-async fn schedule_hosted_bootstraps(state: Arc<AppState>, device_id: String) {
-    let users: Vec<(String, String, String)> = {
-        let conn = state.store.conn.lock().await;
-        let mut stmt = match conn.prepare(
-            "SELECT s.id,m.user_id,u.username
-             FROM relay_hosted_sandboxes s
-             JOIN relay_hosted_sandbox_members m ON m.sandbox_id=s.id
-             JOIN relay_users u ON u.id=m.user_id
-             WHERE s.device_id=?1 AND s.workspace_isolation_enabled=1 AND u.enabled=1
-             ORDER BY m.position,m.created_at",
-        ) {
-            Ok(stmt) => stmt,
-            Err(_) => return,
-        };
-        let values = stmt
-            .query_map(params![device_id], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-            })
-            .ok()
-            .map(|rows| rows.flatten().collect())
-            .unwrap_or_default();
-        values
-    };
-    for (sandbox_id, user_id, username) in users {
-        let key = format!("{sandbox_id}:{user_id}");
-        if !state.hosted_bootstraps.lock().await.insert(key.clone()) {
-            continue;
-        }
-        let state = state.clone();
-        let device_id = device_id.clone();
-        tokio::spawn(async move {
-            if let Err(error) =
-                ensure_hosted_user_bootstrap(&state, &device_id, &sandbox_id, &user_id, &username)
-                    .await
-            {
-                tracing::warn!(
-                    error = %error,
-                    device_id,
-                    sandbox_id,
-                    user_id,
-                    "hosted VM user bootstrap failed"
-                );
-            }
-            state.hosted_bootstraps.lock().await.remove(&key);
-        });
-    }
-}
-
-async fn ensure_hosted_user_bootstrap(
-    state: &Arc<AppState>,
-    device_id: &str,
-    sandbox_id: &str,
-    user_id: &str,
-    username: &str,
-) -> Result<()> {
-    let existing_workspace: Option<String> = {
-        let conn = state.store.conn.lock().await;
-        conn.query_row(
-            "SELECT workspace_id FROM relay_hosted_user_workspaces
-             WHERE sandbox_id=?1 AND user_id=?2 AND initial_workspace=1
-             ORDER BY created_at LIMIT 1",
-            params![sandbox_id, user_id],
-            |row| row.get(0),
-        )
-        .optional()?
-    };
-    let workspace_id = if let Some(id) = existing_workspace {
-        id
-    } else {
-        let slug = normalize_username(username);
-        let suffix: String = user_id.chars().take(8).collect();
-        let directory = format!("{}-{suffix}", if slug.is_empty() { "user" } else { &slug });
-        let abs_path = format!("/home/remote-codex/workspaces/{directory}");
-        let label = format!("{username}'s workspace");
-        let current =
-            internal_forward_json(state, device_id, "GET", "/api/workspaces", None).await?;
-        let existing = current.as_array().and_then(|workspaces| {
-            workspaces.iter().find(|workspace| {
-                workspace.get("absPath").and_then(Value::as_str) == Some(abs_path.as_str())
-            })
-        });
-        let workspace = if let Some(existing) = existing {
-            existing.clone()
-        } else {
-            internal_forward_json(
-                state,
-                device_id,
-                "POST",
-                "/api/workspaces",
-                Some(json!({ "absPath": abs_path, "label": label })),
-            )
-            .await?
-        };
-        let workspace_id = workspace
-            .get("id")
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| anyhow::anyhow!("initial workspace creation returned no id"))?
-            .to_string();
-        {
-            let conn = state.store.conn.lock().await;
-            record_hosted_workspace(&conn, sandbox_id, user_id, &workspace_id, true)?;
-        }
-        workspace_id
-    };
-    let has_thread = {
-        let conn = state.store.conn.lock().await;
-        conn.query_row(
-            "SELECT 1 FROM relay_hosted_user_threads
-             WHERE sandbox_id=?1 AND user_id=?2 AND workspace_id=?3 LIMIT 1",
-            params![sandbox_id, user_id, workspace_id],
-            |_| Ok(()),
-        )
-        .optional()?
-        .is_some()
-    };
-    if !has_thread {
-        let thread = internal_forward_json(
-            state,
-            device_id,
-            "POST",
-            "/api/threads/start",
-            Some(json!({
-                "workspaceId": workspace_id,
-                "title": "Getting started",
-                "provider": "codex",
-                "agentId": "codex",
-                "model": "gpt-5.6-sol",
-                "reasoningEffort": "low",
-                "approvalMode": "yolo"
-            })),
-        )
-        .await?;
-        let thread_id = thread
-            .get("id")
-            .and_then(Value::as_str)
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| anyhow::anyhow!("initial thread creation returned no id"))?;
-        let conn = state.store.conn.lock().await;
-        record_hosted_thread(&conn, sandbox_id, user_id, thread_id, &workspace_id)?;
-    }
-    Ok(())
 }
 
 async fn internal_forward_json(
@@ -3914,7 +3250,6 @@ fn forwarded_device_response(value: Value) -> Response {
             "content-security-policy",
             "referrer-policy",
             "x-rcd-encrypted",
-            "x-rcd-result-resource",
         ] {
             if let Some(header_value) = headers.get(name).and_then(Value::as_str) {
                 response = response.header(name, header_value);
@@ -4039,8 +3374,6 @@ async fn handle_supervisor_with_timeout(
             last_heartbeat_at: connected_at.clone(),
         },
     );
-    state.hosted.mark_online(&device_id).await;
-    schedule_hosted_bootstraps(state.clone(), device_id.clone()).await;
     let device_name = peer::device_name(&state, &device_id).await;
     let (mut sink, mut stream) = socket.split();
     let greeting = Message::Text(
@@ -4134,25 +3467,6 @@ async fn handle_supervisor_with_timeout(
                                     let result = notifications::accept(&*state.store.conn.lock().await, &device_id, &msg["payload"]);
                                     if let Ok(turn_id) = result {
                                         let _ = tx.try_send(json!({"type":"relay.notification.ack","turnId":turn_id}).to_string());
-                                    }
-                                }
-                                Some("relay.activity") => {
-                                    if let Some(payload) = msg.get("payload") {
-                                        if let (Some(thread_id), Some(turn_id), Some(kind)) = (
-                                            payload.get("threadId").and_then(Value::as_str),
-                                            payload.get("turnId").and_then(Value::as_str),
-                                            payload.get("kind").and_then(Value::as_str),
-                                        ) {
-                                            state
-                                                .hosted
-                                                .record_turn_activity(
-                                                    &device_id,
-                                                    thread_id,
-                                                    turn_id,
-                                                    kind,
-                                                )
-                                                .await;
-                                        }
                                     }
                                 }
                                 _ => {}
@@ -4249,50 +3563,12 @@ async fn client_ws(
                 query.thread_id.as_deref(),
                 None,
             )?;
-            if let (Some(sandbox_id), Some(thread_id)) = (
-                hosted_isolation_for_user(&conn, &device_id, &user.id),
-                query.thread_id.as_deref(),
-            ) {
-                let owns = conn
-                    .query_row(
-                        "SELECT 1 FROM relay_hosted_user_threads
-                         WHERE sandbox_id=?1 AND user_id=?2 AND thread_id=?3",
-                        params![sandbox_id, user.id, thread_id],
-                        |_| Ok(()),
-                    )
-                    .optional()
-                    .ok()
-                    .flatten()
-                    .is_some();
-                if !owns {
-                    return None;
-                }
-            }
             Some((user, access))
         })
     };
     let Some((user, access)) = user_and_access else {
         return unauthorized();
     };
-    if state
-        .hosted
-        .wake_for_request(
-            &device_id,
-            false,
-            state.sockets.read().await.contains_key(&device_id),
-        )
-        .await
-    {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({
-                "code": "service_unavailable",
-                "message": "Hosted supervisor VM is starting. Retry shortly.",
-                "details": { "reason": "hosted_sandbox_starting" }
-            })),
-        )
-            .into_response();
-    }
     if !state.sockets.read().await.contains_key(&device_id) {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -4350,25 +3626,6 @@ async fn client_ws_compat(
             device_ids.iter().find_map(|device_id| {
                 let access =
                     effective_access(&conn, &user.id, device_id, query.thread_id.as_deref(), None)?;
-                if let (Some(sandbox_id), Some(thread_id)) = (
-                    hosted_isolation_for_user(&conn, device_id, &user.id),
-                    query.thread_id.as_deref(),
-                ) {
-                    let owns = conn
-                        .query_row(
-                            "SELECT 1 FROM relay_hosted_user_threads
-                             WHERE sandbox_id=?1 AND user_id=?2 AND thread_id=?3",
-                            params![sandbox_id, user.id, thread_id],
-                            |_| Ok(()),
-                        )
-                        .optional()
-                        .ok()
-                        .flatten()
-                        .is_some();
-                    if !owns {
-                        return None;
-                    }
-                }
                 Some((device_id.clone(), user.clone(), access))
             })
         })
@@ -4376,25 +3633,6 @@ async fn client_ws_compat(
     let Some((device_id, user, access)) = resolved else {
         return unauthorized();
     };
-    if state
-        .hosted
-        .wake_for_request(
-            &device_id,
-            false,
-            state.sockets.read().await.contains_key(&device_id),
-        )
-        .await
-    {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({
-                "code": "service_unavailable",
-                "message": "Hosted supervisor VM is starting. Retry shortly.",
-                "details": { "reason": "hosted_sandbox_starting" }
-            })),
-        )
-            .into_response();
-    }
     let token = extract_session_token(&headers, &query.token_query()).unwrap_or_default();
     ws.on_upgrade(move |socket| {
         handle_client_socket(
@@ -4469,7 +3707,6 @@ async fn handle_client_socket(
                 match incoming {
                     Some(Ok(Message::Text(text))) => {
                         let Ok(payload) = serde_json::from_str::<Value>(&text) else { continue; };
-                        let _ = state.hosted.wake_for_request(&device_id, true, state.sockets.read().await.contains_key(&device_id)).await;
                         let message_thread = payload.get("threadId").and_then(Value::as_str);
                         if thread_id.as_deref().zip(message_thread).is_some_and(|(a,b)| a != b) { break; }
                         let kind = payload.get("type").and_then(Value::as_str).unwrap_or_default();
@@ -4641,24 +3878,7 @@ async fn forward_server_message_to_client(
             configured_thread.as_deref().or(event_thread),
             None,
         );
-        let isolated = hosted_isolation_for_user(&conn, device_id, &user_id);
-        let isolation_allows = isolated.is_none()
-            || control_event
-            || attached_shell_event
-            || event_thread.is_some_and(|thread_id| {
-                conn.query_row(
-                    "SELECT 1 FROM relay_hosted_user_threads
-                     WHERE sandbox_id=?1 AND user_id=?2 AND thread_id=?3",
-                    params![isolated.as_deref().unwrap_or_default(), user_id, thread_id],
-                    |_| Ok(()),
-                )
-                .optional()
-                .ok()
-                .flatten()
-                .is_some()
-            });
         access.is_some()
-            && isolation_allows
             && load_user_by_session(&conn, &state.store.session_secret, &session_token).is_some()
     };
     if !authorized || tx.try_send(payload.to_string()).is_err() {
@@ -4720,12 +3940,6 @@ mod tests {
             "test-secret".to_string(),
         )
         .unwrap();
-        let hosted = hosted::HostedService::new(
-            store.conn.clone(),
-            hosted::HostedConfig::disabled_for_test(),
-            store.session_secret.clone(),
-        )
-        .unwrap();
         (
             Arc::new(AppState {
                 store,
@@ -4736,8 +3950,6 @@ mod tests {
                 legacy_supervisor_token: None,
                 oauth: OAuthConfig::default(),
                 oauth_client: reqwest::Client::new(),
-                hosted,
-                hosted_bootstraps: Mutex::new(HashSet::new()),
                 admission: security::Admission::default(),
                 preview: preview::Hub::default(),
             }),
