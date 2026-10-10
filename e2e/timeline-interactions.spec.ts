@@ -50,6 +50,8 @@ test('workspace tabs include unvisited threads, keep their order and truncate lo
 test('turn navigation changes direction reliably and tool details load only on click', async ({ page, request }, testInfo) => {
   const id = await createThread(request);
   const db = new DatabaseSync(path.resolve(process.env.E2E_DATABASE_URL!));
+  db.function('search_fold', { deterministic: true }, value => typeof value === 'string' ? value.toLowerCase() : value);
+  db.function('search_body', { deterministic: true }, (text, kind, _source) => ['userMessage', 'agentMessage'].includes(String(kind)) ? text : null);
   const at = (turn: number, seconds = 0) => new Date(Date.UTC(2026, 8, 20, 1, turn, seconds)).toISOString();
   try {
     for (let i = -2; i < 3; i++) {
@@ -126,6 +128,15 @@ test('turn navigation changes direction reliably and tool details load only on c
   const last = page.locator(`[data-timeline-turn][data-turn-id="${id}-turn-2"]`);
   await last.getByRole('button', { name: /Expand turn 5/ }).click();
   await expect(last.getByText('Checking the first section', { exact: true })).toHaveCount(0);
+  await expect(last.getByText('Final reply 2.', { exact: false })).toBeVisible();
+  const operations = last.getByRole('button', { name: 'Expand 6 operations', exact: true });
+  await expect(operations).toBeVisible();
+  expect(detailRequests).toHaveLength(0);
+  await operations.scrollIntoViewIfNeeded();
+  await mkdir('.temp/activity-groups/screenshots', { recursive: true });
+  await page.screenshot({ path: `.temp/activity-groups/screenshots/${testInfo.project.name}-collapsed.png` });
+  await operations.click();
+  await page.screenshot({ path: `.temp/activity-groups/screenshots/${testInfo.project.name}-expanded.png` });
   await last.getByRole('button', { name: 'Expand 2 command entries' }).click();
   expect(detailRequests).toHaveLength(0);
   const command = last.getByRole('button', { name: 'Open grouped command 1', exact: true });
@@ -159,11 +170,12 @@ test('turn navigation changes direction reliably and tool details load only on c
   await page.screenshot({ path: `output/playwright/timeline-diff-${testInfo.project.name}.png` });
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click();
   await page.getByRole('button', { name: 'Open settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Global', exact: true }).click();
+  await page.getByRole('tab', { name: 'Preferences', exact: true }).click();
   const setting = page.getByRole('checkbox', { name: /Show agent status summaries/ });
   await expect(setting).not.toBeChecked();
   await setting.check();
   await page.getByRole('button', { name: 'Close', exact: true }).click();
+  await last.getByRole('button', { name: 'Expand 8 operations', exact: true }).click();
   await expect(last.getByText('Checking the first section', { exact: true })).toBeVisible();
   await expect(last.getByText('Checking the second section', { exact: true })).toBeVisible();
   await expect(last.locator(`[data-message-id$="reason-a"]`)).toContainText('4s');

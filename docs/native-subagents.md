@@ -20,7 +20,9 @@ path avoids repeatedly scanning the sessions directory; older installations can
 use the existing rollout discovery fallback.
 
 - `GET /api/threads/{threadId}/subagents`: `{ agents, refreshing }`.
-- `GET /api/threads/{threadId}/subagents/{agentId}`: `{ agent, items, hasEarlierItems }`.
+- `GET /api/threads/{threadId}/subagents/{agentId}`: `{ agent, items, hasEarlierItems, historyMode: "lazy-v1" }`.
+- Add `?before=SEQUENCE` to fetch the previous page (30 compact entries).
+- Add `?itemId=ITEM_ID` to fetch one selected record body; IDs and paths remain scoped to the parent.
 
 The managed parent thread determines provider, native session and available
 children. The caller cannot provide a transcript path or inspect a child of a
@@ -44,9 +46,17 @@ time the same message is persisted. Existing pricing handles cache usage and
 Codex fast/priority tier. Amounts are API price estimates, not provider invoices.
 Unavailable usage or pricing remains unknown rather than a fabricated zero.
 
-The detail retains the most recent 200 activity entries (up to 16,000 characters
-per entry). The activity count reflects the full parsed history; a label identifies
-when earlier entries are omitted. Native files that were deleted or not persisted
+The list shows the task name, status, one latest-activity line, creation time and
+relative event-update age (with the absolute time available on hover). Full prompt,
+IDs and accounting are reserved for the selected detail.
+
+The reader indexes compact entry previews and original JSONL byte positions instead
+of caching complete execution bodies. The selected agent loads a 30-entry directory;
+older entries page backwards without the former 200-entry cutoff. Record bodies are
+read only on explicit expansion, and include the original command and result without
+the former 16,000-character display limit. Continuous operations appear under a
+collapsed operation summary, keeping assistant paragraphs readable. Older devices
+without `historyMode` retain compatible inline expansion until migrated. Native files that were deleted or not persisted
 cannot be reconstructed. Live runtime discovery still supplies legacy cards when
 a native transcript is unavailable; an older device Supervisor needs a runtime
 update for the new read endpoints. The panel exposes observed transcript activity,

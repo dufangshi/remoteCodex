@@ -277,3 +277,24 @@
   gap: 10px;
   font-variant-numeric: tabular-nums;
 }
+
+/* Compact directory; the record body exists only after an explicit expansion. */
+.native-agents-list { gap: 0; }
+.native-agents-row { border: 0; border-bottom: 1px solid var(--theme-border); border-radius: 8px; padding: 16px 10px; }
+.native-agents-row-title strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.5; }
+.native-agents-row-meta { margin-top: 9px; gap: 6px 16px; font-size: 11px; }
+.native-agents-activity .native-agents-record { padding: 0; overflow: hidden; border-radius: 8px; }
+.native-agents-record-toggle { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 10px; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.native-agents-record-toggle:hover { background: var(--theme-hover); }
+.native-agents-record-toggle > svg { flex: none; transition: transform 150ms ease; }
+.native-agents-record-toggle > svg.is-expanded { transform: rotate(90deg); }
+.native-agents-record-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.native-agents-record-toggle time { flex: none; color: var(--theme-fg-muted); font-size: 10px; }
+.native-agents-record pre { margin: 0; padding: 12px; border-top: 1px solid var(--theme-border); max-height: 360px; }
+.native-agents-load-earlier { display: block; margin: 0 auto 12px; padding: 8px 14px; border: 1px solid var(--theme-border); border-radius: 8px; color: var(--theme-fg-muted); background: transparent; font-size: 12px; cursor: pointer; }
+@media (prefers-reduced-motion: reduce) { .native-agents-record-toggle > svg { transition: none; } }
+
+.native-agents-operation-group { margin: 8px 0; border: 1px solid var(--theme-border); border-radius: 10px; overflow: hidden; }
+.native-agents-operation-group > .native-agents-record-toggle { color: var(--theme-fg-muted); }
+.native-agents-operation-group > .native-agents-record-toggle > svg:first-child { color: #20bc87; }
+.native-agents-operation-group .native-agents-record { border: 0; border-top: 1px solid var(--theme-border); margin: 0; border-radius: 0; }

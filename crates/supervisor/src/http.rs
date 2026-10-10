@@ -1299,13 +1299,21 @@ async fn thread_subagents(
     ))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SubagentHistoryQuery {
+    before: Option<i64>,
+    item_id: Option<String>,
+}
+
 async fn thread_subagent_detail(
     Path((id, agent_id)): Path<(String, String)>,
+    Query(query): Query<SubagentHistoryQuery>,
     State(state): State<AppState>,
 ) -> Result<Json<Value>, ApiErr> {
     Ok(Json(
         state
-            .native_subagents(&id, Some(&agent_id))
+            .native_subagent_history(&id, Some(&agent_id), query.before, query.item_id.as_deref())
             .await
             .map_err(map_err)?,
     ))

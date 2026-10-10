@@ -1486,6 +1486,7 @@ export interface NativeSubagentDto extends ThreadSubagentDto {
 }
 
 export interface NativeSubagentDetailDto {
+  historyMode?: 'lazy-v1';
   agent: NativeSubagentDto;
   items: ThreadHistoryItemDto[];
   hasEarlierItems: boolean;
