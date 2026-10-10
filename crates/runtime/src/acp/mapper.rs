@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use pockymoe_protocol::{now_rfc3339, ThreadHistoryItemDto, ThreadSubagentDto};
 use serde_json::Value;
@@ -29,6 +29,8 @@ pub struct TurnMapper {
     plans: Vec<ThreadHistoryItemDto>,
     compactions: Vec<ThreadHistoryItemDto>,
     native_notices: Vec<ThreadHistoryItemDto>,
+    active_wait: Option<usize>,
+    seen_notices: HashSet<String>,
     subagents: HashMap<String, ThreadSubagentDto>,
     stream: Option<LiveStream>,
     agent_reconcile: Option<Reconcile>,
@@ -67,6 +69,8 @@ impl TurnMapper {
             plans: Vec::new(),
             compactions: Vec::new(),
             native_notices: Vec::new(),
+            active_wait: None,
+            seen_notices: HashSet::new(),
             subagents: HashMap::new(),
             stream: None,
             agent_reconcile: None,
@@ -256,45 +260,121 @@ impl TurnMapper {
         mapped
     }
 
-    /// The SDK's completion notification is distinct from a human prompt and
-    /// from ACP's tool result. Preserve the wake cause beside the ensuing work.
+    /// One durable timeline anchor per waiting episode. A wake updates this
+    /// same row, then its streamed reply starts the next segment in this turn.
+    pub fn native_background_wait(&mut self, count: usize) -> MappedUpdate {
+        if let Some(index) = self.active_wait {
+            let notice = &mut self.native_notices[index];
+            if notice.status.as_deref() == Some("waiting") {
+                return MappedUpdate::default();
+            }
+            notice.status = Some("waiting".into());
+            return MappedUpdate {
+                items: vec![notice.clone()],
+                ..Default::default()
+            };
+        }
+        self.close_text_segments();
+        let mut notice = item(
+            format!("{}:native-wait:{}", self.turn_id, self.native_notices.len()),
+            "generic",
+            String::new(),
+            "waiting",
+            &self.turn_id,
+        );
+        notice.sequence = Some(self.next_sequence());
+        notice
+            .extra
+            .insert("origin".into(), serde_json::json!("nativeBackgroundWait"));
+        notice
+            .extra
+            .insert("backgroundTaskCount".into(), serde_json::json!(count));
+        notice.extra.insert(
+            "waitingStartedAt".into(),
+            serde_json::json!(notice.created_at),
+        );
+        self.active_wait = Some(self.native_notices.len());
+        self.native_notices.push(notice.clone());
+        MappedUpdate {
+            items: vec![notice],
+            ..Default::default()
+        }
+    }
+
     pub fn native_task_notification(&mut self, message: &Value) -> MappedUpdate {
+        let normalized;
+        let message = if message["type"] == "user" {
+            let Some(value) = super::claude_tasks::normalize_notification(message) else {
+                return MappedUpdate::default();
+            };
+            normalized = value;
+            &normalized
+        } else {
+            message
+        };
         if message["type"] != "system" || message["subtype"] != "task_notification" {
             return MappedUpdate::default();
         }
         let Some(task) = message["task_id"].as_str().filter(|id| !id.is_empty()) else {
             return MappedUpdate::default();
         };
-        let id = format!("{}:native-task:{task}", self.turn_id);
-        if self.native_notices.iter().any(|notice| notice.id == id) {
+        let terminal = matches!(
+            message["status"].as_str(),
+            Some("completed" | "failed" | "stopped" | "killed" | "cancelled")
+        );
+        let key = if terminal {
+            format!("task:{task}")
+        } else {
+            message["notificationKey"].as_str().unwrap_or(task).into()
+        };
+        if !self.seen_notices.insert(key) {
             return MappedUpdate::default();
         }
         self.close_text_segments();
-        let mut notice = item(
-            id,
-            "generic",
-            message["summary"]
-                .as_str()
-                .unwrap_or("Background task notification received")
-                .into(),
-            "completed",
-            &self.turn_id,
-        );
-        notice.sequence = Some(self.next_sequence());
-        notice.extra.insert(
-            "origin".into(),
-            Value::String("nativeTaskNotification".into()),
-        );
+        let index = self.active_wait.take();
+        let mut notice = index
+            .map(|i| self.native_notices[i].clone())
+            .unwrap_or_else(|| {
+                let mut notice = item(
+                    format!("{}:native-task:{}", self.turn_id, self.native_notices.len()),
+                    "generic",
+                    String::new(),
+                    "completed",
+                    &self.turn_id,
+                );
+                notice.sequence = Some(self.next_sequence());
+                notice
+            });
+        notice.text = message["summary"]
+            .as_str()
+            .unwrap_or("Background task notification received")
+            .into();
+        notice.status = Some("completed".into());
         notice
             .extra
-            .insert("taskId".into(), Value::String(task.into()));
+            .insert("origin".into(), serde_json::json!("nativeTaskNotification"));
+        notice
+            .extra
+            .insert("taskId".into(), serde_json::json!(task));
         notice
             .extra
             .insert("taskStatus".into(), message["status"].clone());
-        if let Some(at) = message["timestamp"].as_str() {
-            notice.created_at = Some(at.into());
+        notice.extra.insert(
+            "awakenedAt".into(),
+            message["timestamp"]
+                .as_str()
+                .map(str::to_owned)
+                .map_or_else(now_rfc3339, |at| at)
+                .into(),
+        );
+        if let Some(event) = message["event"].as_str() {
+            notice.detail_text = Some(event.into());
         }
-        self.native_notices.push(notice.clone());
+        if let Some(i) = index {
+            self.native_notices[i] = notice.clone();
+        } else {
+            self.native_notices.push(notice.clone());
+        }
         MappedUpdate {
             items: vec![notice],
             ..Default::default()
@@ -308,6 +388,20 @@ impl TurnMapper {
             .and_then(Value::as_str)
             .unwrap_or("");
         let mut mapped = MappedUpdate::default();
+        if matches!(
+            kind,
+            "agent_message_chunk" | "agent_thought_chunk" | "tool_call"
+        ) {
+            if let Some(index) = self.active_wait {
+                let notice = &mut self.native_notices[index];
+                if notice.status.as_deref() == Some("waiting") {
+                    // Human steering can resume work before a task notification.
+                    // Retain the anchor so that its eventual wake reuses it.
+                    notice.status = Some("running".into());
+                    mapped.items.push(notice.clone());
+                }
+            }
+        }
         let created_at = acp_update_created_at(update);
         match kind {
             "agent_message_chunk" => {
@@ -577,6 +671,11 @@ impl TurnMapper {
             );
             agent.sequence = Some(self.next_sequence());
             self.agent_segments.push(agent);
+        }
+        for notice in &mut self.native_notices {
+            if matches!(notice.status.as_deref(), Some("waiting" | "running")) {
+                notice.status = Some(status.into());
+            }
         }
         let mut items = Vec::new();
         items.extend(self.thought_segments);
@@ -1296,4 +1395,63 @@ fn goal_from_update(update: &Value) -> Option<Option<GoalState>> {
             .and_then(Value::as_u64)
             .unwrap_or(0) as u32,
     }))
+}
+
+#[cfg(test)]
+mod background_wait_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn wake_reuses_wait_anchor_and_followup_segments_stay_in_order() {
+        let mut mapper = TurnMapper::new("turn");
+        mapper.apply(&json!({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Waiting."}}));
+        let wait = mapper.native_background_wait(1).items.remove(0);
+        assert!(mapper.native_background_wait(1).items.is_empty());
+        let message = json!({"type":"user","origin":{"kind":"task-notification"},"content":[{"type":"text","text":"<task-notification><task-id>watch</task-id><summary>Build progress</summary><event>Linux finished</event></task-notification>"}]});
+        let wake = mapper.native_task_notification(&message).items.remove(0);
+        assert_eq!(wait.id, wake.id);
+        assert_eq!(wait.sequence, wake.sequence);
+        assert!(mapper.native_task_notification(&message).items.is_empty());
+        mapper.apply(&json!({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Checking."}}));
+        let items = mapper.finish(false);
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].text, "Waiting.");
+        assert_eq!(items[1].text, "Build progress");
+        assert_eq!(items[2].text, "Checking.");
+        assert!(items
+            .iter()
+            .all(|i| i.source_turn_id.as_deref() == Some("turn")));
+    }
+    #[test]
+    fn steering_keeps_the_anchor_for_its_eventual_native_wake() {
+        let mut mapper = TurnMapper::new("turn");
+        let wait = mapper.native_background_wait(1).items.remove(0);
+        let resumed = mapper.apply(&json!({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Handling your correction."}}));
+        assert!(resumed
+            .items
+            .iter()
+            .any(|i| i.id == wait.id && i.status.as_deref() == Some("running")));
+        let waiting_again = mapper.native_background_wait(1).items.remove(0);
+        assert_eq!(wait.id, waiting_again.id);
+        let wake = mapper.native_task_notification(&json!({"type":"system","subtype":"task_notification","task_id":"build","status":"completed","summary":"Build done"})).items.remove(0);
+        assert_eq!(wake.id, wait.id);
+        assert_eq!(
+            mapper
+                .finish(false)
+                .iter()
+                .filter(|i| i.extra.contains_key("origin"))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn interrupted_wait_does_not_remain_waiting_after_reload() {
+        let mut mapper = TurnMapper::new("turn");
+        mapper.native_background_wait(1);
+        assert_eq!(
+            mapper.finish(true)[0].status.as_deref(),
+            Some("interrupted")
+        );
+    }
 }

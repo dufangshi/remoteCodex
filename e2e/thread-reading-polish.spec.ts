@@ -123,7 +123,7 @@ test('native task notifications use compact prose and expand without mobile over
   await page.goto(`/threads/${id}`);
   await page.locator('.thread-graph-worked-summary button[aria-expanded]').click();
   const notice = page.locator('.thread-graph-task-notice').first();
-  await expect(notice.locator('.thread-graph-task-notice-toggle')).toContainText('后台任务完成');
+  await expect(notice.locator('.thread-graph-task-notice-toggle')).toContainText('已唤醒');
   await expect(page.locator('.thread-graph-task-notice.is-failed')).toContainText('后台任务失败');
   await expect(notice.locator('.thread-graph-task-notice-detail')).toHaveCount(0);
   expect(await notice.locator('.thread-graph-task-notice-toggle').evaluate(el => getComputedStyle(el).fontSize)).toBe('12px');
@@ -496,4 +496,66 @@ test('reading layout stays still with bounded images, visible effort and ten rec
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.screenshot({ path: testInfo.outputPath('reading-layout.png') });
+});
+
+test('background wake replaces its waiting anchor and continues within the same chat turn', async ({ page, request }, testInfo) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('remote-codex.locale','zh-CN');
+    localStorage.setItem('remote-codex-theme-mode','dark');
+    localStorage.setItem(`pockymoe.onboarding.v1:${JSON.stringify([location.origin,'local:owner'])}`,JSON.stringify({welcomeDismissed:true,completed:[]}));
+  });
+  const id=await createThread(request);
+  const detail=await (await request.get(`${base}/api/threads/${id}`)).json();
+  const startedAt=new Date(Date.now()-60000).toISOString();
+  const turnId='background-wake';
+  const prompt={id:'prompt',kind:'userMessage',text:'等待发布完成后，检查部署并汇报。',sequence:1};
+  const foreground={id:'foreground',kind:'agentMessage',text:'发布任务正在后台运行，完成后我会继续检查。',status:'completed',sequence:2};
+  const wait={id:'waiting-anchor',kind:'generic',origin:'nativeBackgroundWait',status:'waiting',text:'',createdAt:startedAt,waitingStartedAt:startedAt,sequence:3};
+  let items: object[]=[prompt,foreground,wait];
+  let completed=false;
+  let socket: WebSocketRoute | undefined;
+  await page.routeWebSocket(/\/ws(?:\?.*)?$/, current => {
+    socket=current;
+    current.send(JSON.stringify({type:'supervisor.connected'}));
+    current.onMessage(() => current.send(JSON.stringify({type:'supervisor.pong'})));
+  });
+  const response=()=>({...detail,totalTurnCount:1,activeSubagents:[],
+    thread:{...detail.thread,status:completed?'idle':'running',activeTurnId:completed?null:turnId},
+    turns:[{id:turnId,status:completed?'completed':'inProgress',startedAt,completedAt:completed?new Date().toISOString():null,model:'claude-opus-5-5',items}]});
+  await page.route(`**/api/threads/${id}?**`,route=>route.fulfill({json:response()}));
+  await page.goto(`/threads/${id}`);
+  const waitRow=page.locator('.thread-graph-task-notice');
+  await expect(waitRow).toContainText('等待唤醒');
+  await expect(page.locator('.thread-graph-turn-footer')).toContainText('等待唤醒');
+  await expect(page.locator('.thread-graph-worked-summary')).toHaveCount(1);
+  // The waiting marker is durable and remains explicit after a full page reload.
+  await page.reload();
+  await expect(waitRow).toContainText('等待唤醒');
+  await page.screenshot({path:testInfo.outputPath('background-waiting.png'),scale:'css'});
+  const wake={...wait,origin:'nativeTaskNotification',taskStatus:'completed',status:'completed',text:'GitHub 发布任务已完成',detailText:'所有平台产物和部署检查已通过。',awakenedAt:new Date().toISOString()};
+  const checking={id:'checking',kind:'agentMessage',text:'已收到完成通知，正在核对线上版本。',status:'completed',sequence:4};
+  const command={id:'verification',kind:'commandExecution',text:'检查已部署版本',status:'completed',sequence:5};
+  const final={id:'final',kind:'agentMessage',text:'部署检查完成，线上版本与发布版本一致。',status:'completed',sequence:6};
+  const emit=(type:string,payload:object)=>socket!.send(JSON.stringify({type,threadId:id,timestamp:new Date().toISOString(),payload}));
+  items=[prompt,foreground,wake,checking,command,final];
+  for (const item of [wake,checking,command,final]) emit('thread.item.completed',{turnId,item});
+  await expect(waitRow).toHaveCount(1);
+  await expect(waitRow).toContainText('已唤醒');
+  await expect(page.getByText(final.text,{exact:true})).toBeVisible();
+  await expect(page.locator('.thread-graph-worked-summary')).toHaveCount(1);
+  await expect(page.locator('.thread-graph-turn-footer')).not.toContainText('等待唤醒');
+  await waitRow.locator('.thread-graph-task-notice-toggle').click();
+  await expect(waitRow).toContainText(wake.detailText);
+  const row=waitRow.locator('.thread-graph-task-notice-row');
+  expect(await row.evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);
+  const markers=await page.locator('.thread-graph-task-notice, [data-role="assistant"]').evaluateAll(els=>els.map(el=>el.textContent));
+  expect(markers.findIndex(text=>text?.includes('已唤醒'))).toBeLessThan(markers.findIndex(text=>text?.includes(final.text)));
+  await page.screenshot({path:testInfo.outputPath('background-awakened.png'),scale:'css'});
+  completed=true;
+  emit('thread.turn.completed',{turnId,status:'completed'});
+  await page.reload();
+  await page.locator('.thread-graph-worked-summary button[aria-expanded]').click();
+  await expect(waitRow).toContainText('已唤醒');
+  await expect(page.getByText(final.text,{exact:true})).toBeVisible();
+  await expect(page.locator('.thread-graph-turn-footer')).toHaveCount(0);
 });

@@ -194,7 +194,8 @@ impl HarnessAdapter for ClaudeAdapter {
     fn session_new_meta(&self, _reasoning_effort: Option<&str>) -> Value {
         // Request lifecycle bookends only; never duplicate streamed assistant text.
         json!({"claudeCode":{"emitRawSDKMessages":[
-            {"type":"command_lifecycle"}, {"type":"result"}, {"type":"system"}
+            {"type":"command_lifecycle"}, {"type":"result"}, {"type":"system"},
+            {"type":"user","origin":"task-notification"}
         ]}})
     }
     fn accepts_notification(&self, method: &str) -> bool {

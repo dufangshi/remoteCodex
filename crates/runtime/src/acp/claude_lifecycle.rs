@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 #[derive(Default)]
 pub(super) struct ClaudeLifecycle {
     sequence: u64,
+    initialized: bool,
     commands: HashMap<String, (u64, bool)>,
     tasks: HashSet<String>,
     settled_tasks: HashSet<String>,
@@ -28,6 +29,14 @@ impl ClaudeLifecycle {
     // removing the last task alone precedes the autonomous model execution.
     pub fn background_pending(&self) -> bool {
         self.background_seen && (!self.tasks_known || !self.tasks.is_empty() || !self.idle)
+    }
+
+    pub fn waiting_count(&self) -> usize {
+        if self.idle {
+            self.tasks.len()
+        } else {
+            0
+        }
     }
 
     pub fn steering_started(&mut self) -> bool {
@@ -84,12 +93,13 @@ impl ClaudeLifecycle {
             }
             Some("system") => match message["subtype"].as_str() {
                 Some("init") => {
-                    self.tasks_known = true;
-                    self.tasks.clear();
-                    self.settled_tasks.clear();
-                    self.background_seen = false;
+                    if !self.initialized {
+                        self.tasks_known = true;
+                        self.initialized = true;
+                    }
+                    // An autonomous wake emits init again before its first tool.
+                    // Preserve task ownership and duplicate protection across it.
                     self.idle = false;
-                    self.commands.clear();
                     self.successful_autonomous_result = None;
                 }
                 Some("session_state_changed") => {
@@ -172,9 +182,10 @@ mod tests {
         state.record(&json!({"type":"system","subtype":"session_state_changed","state":"idle"}));
         assert!(state.background_pending());
         state.record(&json!({"type":"system","subtype":"task_notification","task_id":"bash","status":"completed"}));
+        state.record(&json!({"type":"system","subtype":"init"}));
         assert!(
             state.background_pending(),
-            "the notification starts follow-up work"
+            "a repeated autonomous init cannot end follow-up work"
         );
         state.record(&json!({"type":"result","subtype":"success","is_error":false,"num_turns":1,"origin":{"kind":"task-notification"}}));
         assert!(

@@ -23,7 +23,15 @@ async fn claude_background_wake_output_stays_live_and_persists_after_foreground_
         return;
     }
 
-    for scenario in ["normal", "silent", "merged", "cancel", "disconnect"] {
+    for scenario in [
+        "normal",
+        "silent",
+        "merged",
+        "cancel",
+        "disconnect",
+        "native",
+        "monitor",
+    ] {
         let dir = tempfile::tempdir().unwrap();
         let script = dir.path().join("background.py");
         std::fs::write(
@@ -146,6 +154,16 @@ async fn claude_background_wake_output_stays_live_and_persists_after_foreground_
             runtime.execution_state(&session).await,
             crate::actor::ExecutionState::Running { .. }
         ));
+        let waiting = supervisor
+            .get_thread_turn_detail(&thread.id, turn_id)
+            .await
+            .unwrap();
+        assert!(
+            waiting.items.iter().any(|i| i.extra.get("origin")
+                == Some(&json!("nativeBackgroundWait"))
+                && i.status.as_deref() == Some("waiting")),
+            "{scenario}: waiting marker persists before wake"
+        );
         if scenario == "cancel" {
             cancel.cancel();
         } else {
@@ -218,7 +236,7 @@ async fn claude_background_wake_output_stays_live_and_persists_after_foreground_
                     .iter()
                     .filter(|i| i.extra.get("origin") == Some(&json!("nativeTaskNotification")))
                     .count(),
-                1
+                if scenario == "monitor" { 2 } else { 1 }
             );
             assert!(detail.items.iter().any(|i| i.id == "verify-release"));
             if scenario != "disconnect" {

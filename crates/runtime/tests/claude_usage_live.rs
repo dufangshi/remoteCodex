@@ -134,3 +134,158 @@ async fn haiku_reports_native_tokens_and_speed_during_first_tool_wait() {
         serde_json::json!({"model":model,"liveOutputTokens":live["total"]["outputTokens"],"liveSpeed":live["generationSpeed"]["latestOutputTokensPerSecond"],"finalOutputTokens":final_usage["total"]["outputTokens"],"finalSpeed":final_usage["generationSpeed"]["averageOutputTokensPerSecond"]})
     );
 }
+
+#[tokio::test]
+#[ignore = "uses real Claude authentication and tokens in an isolated session"]
+async fn haiku_native_background_wake_stays_in_one_durable_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let runtime = Arc::new(AcpRuntime::bound(Provider::Claude, "claude", 60000));
+    let models = runtime
+        .list_models(Some("claude"), Some(dir.path().to_str().unwrap()))
+        .await
+        .unwrap();
+    let model = models
+        .iter()
+        .find(|m| {
+            m.id.to_lowercase().contains("haiku") || m.display_name.to_lowercase().contains("haiku")
+        })
+        .expect("an advertised Haiku model is required to bound test cost")
+        .id
+        .clone();
+    let mut config = RuntimeConfig::from_env();
+    config.database_url = dir.path().join("isolated.sqlite");
+    config.workspace_root = dir.path().join("workspaces");
+    config.mode = Mode::Local;
+    config.fake_runtime = false;
+    config.relay_server_url = None;
+    config.relay_agent_token = None;
+    let state = Arc::new(Supervisor::new(
+        config.clone(),
+        Database::open(&config.database_url).unwrap(),
+        vec![runtime.clone()],
+    ));
+    state.spawn_live_item_persister();
+    let workspace = state
+        .create_workspace(CreateWorkspaceInput {
+            abs_path: Some(dir.path().to_string_lossy().into()),
+            git_url: None,
+            label: None,
+        })
+        .unwrap();
+    let thread = state
+        .create_thread(CreateThreadInput {
+            workspace_id: workspace.id,
+            provider: Some(Provider::Claude),
+            agent_id: None,
+            model: model.clone(),
+            reasoning_effort: None,
+            approval_mode: "yolo".into(),
+            parent_thread_id: None,
+            title: Some("isolated native wake acceptance".into()),
+        })
+        .await
+        .unwrap();
+    let turn_id = uuid::Uuid::new_v4().to_string();
+    state.db.with(|conn| {
+        conn.execute("INSERT INTO thread_turns(id,thread_id,status,model,started_at,ordinal) VALUES(?1,?2,'inProgress',?3,?4,1)", rusqlite::params![turn_id,thread.id,model,pockymoe_protocol::now_rfc3339()])?;
+        Ok(())
+    }).unwrap();
+    let mut events = state.bus.subscribe();
+    let cancel = CancellationToken::new();
+    let input = StartTurnInput {
+        provider_session_id: thread.provider_session_id.clone().unwrap(), thread_id:thread.id.clone(), turn_id:turn_id.clone(),
+        prompt:"Isolated background-wake regression probe. Do not edit files, create agents or run pockymoe. Launch exactly one background Bash task with command sleep 15; printf WAKE_ACCEPTANCE_EVENT using run_in_background=true. Then reply WAKE_ACCEPTANCE_WAITING and end your foreground response. Do not poll, wait or run other commands. When its native task completion notification arrives, run Bash printf WAKE_ACCEPTANCE_VERIFIED once and finally reply WAKE_ACCEPTANCE_DONE. Keep all replies very short.".into(),
+        model:Some(model.clone()), reasoning_effort:None, sandbox_mode:Some("danger-full-access".into()), collaboration_mode:None,
+        approval_mode:Some("yolo".into()), performance_mode:None, hidden:false, images:vec![], title:None, context_delivered:false,
+    };
+    let runner = runtime.clone();
+    let bus = state.bus.clone();
+    let token = cancel.clone();
+    let mut task = tokio::spawn(async move { runner.start_turn(input, bus, token).await });
+    let observed = tokio::time::timeout(Duration::from_secs(180), async {
+        let mut wait_id = None;
+        let mut awake = false;
+        loop {
+            let event = events.recv().await.map_err(|error| error.to_string())?;
+            let item = &event.payload["item"];
+            if item["origin"] == "nativeBackgroundWait" && item["status"] == "waiting" {
+                wait_id = item["id"].as_str().map(str::to_owned);
+            }
+            if item["origin"] == "nativeTaskNotification" {
+                if wait_id.as_deref() != item["id"].as_str() {
+                    return Err("wake must update the durable waiting anchor".to_owned());
+                }
+                awake = true;
+            }
+            if event.event_type == "thread.turn.completed" {
+                if !awake {
+                    return Err("completed without the waiting-to-wake transition".to_owned());
+                }
+                return Ok(wait_id.unwrap());
+            }
+        }
+    })
+    .await;
+    if !matches!(&observed, Ok(Ok(_))) {
+        cancel.cancel();
+    }
+    let done = tokio::time::timeout(Duration::from_secs(10), &mut task).await;
+    if done.is_err() {
+        cancel.cancel();
+        task.abort();
+    }
+    runtime.restart("claude").await.unwrap();
+    let wait_id = observed.expect("bounded real wake").unwrap();
+    let items = done.expect("test completes").unwrap().unwrap();
+    assert!(items
+        .iter()
+        .any(|item| item.text.contains("WAKE_ACCEPTANCE_DONE")));
+    let detail = state
+        .get_thread_turn_detail(&thread.id, &turn_id)
+        .await
+        .unwrap();
+    assert_eq!(detail.status, "completed");
+    assert!(
+        detail
+            .items
+            .iter()
+            .any(|i| i.text.contains("WAKE_ACCEPTANCE_DONE")),
+        "final report persisted before completion"
+    );
+    let notice = detail.items.iter().find(|i| i.id == wait_id).unwrap();
+    assert_eq!(notice.extra["origin"], "nativeTaskNotification");
+    assert!(notice.extra["waitingStartedAt"].is_string());
+    assert!(notice.extra["awakenedAt"].is_string());
+    assert!(detail
+        .items
+        .iter()
+        .all(|i| i.source_turn_id.as_deref() == Some(turn_id.as_str())));
+    assert!(
+        detail
+            .items
+            .iter()
+            .any(|i| i.kind == "commandExecution" && i.text.contains("WAKE_ACCEPTANCE_VERIFIED")),
+        "post-wake execution persisted"
+    );
+    assert!(
+        detail.token_usage.as_ref().unwrap()["total"]["outputTokens"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    let turn_count = state
+        .db
+        .with(|c| {
+            Ok(c.query_row(
+                "SELECT COUNT(*) FROM thread_turns WHERE thread_id=?1",
+                [&thread.id],
+                |r| r.get::<_, i64>(0),
+            )?)
+        })
+        .unwrap();
+    assert_eq!(turn_count, 1);
+    println!(
+        "{}",
+        serde_json::json!({"model":model,"turnCount":turn_count,"items":detail.items.len(),"waitingAnchor":wait_id,"finalReportSaved":true,"postWakeCommandSaved":true,"usageSaved":true})
+    );
+}

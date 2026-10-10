@@ -22,6 +22,7 @@ pub(super) struct ClaudeUsageReader {
     completion: super::claude_completion::ClaudeCompletion,
     background: super::claude_background::ClaudeBackgroundAgents,
     complete_tail: bool,
+    tasks: super::claude_tasks::ClaudeNativeTasks,
 }
 
 impl ClaudeUsageReader {
@@ -44,6 +45,7 @@ impl ClaudeUsageReader {
             completion: Default::default(),
             background: Default::default(),
             complete_tail: false,
+            tasks: Default::default(),
         };
         reader.find_path();
         // Exclude old turns without reading their potentially huge tool output.
@@ -132,6 +134,22 @@ impl ClaudeUsageReader {
         self.background.active()
     }
 
+    pub fn background_pending(&self) -> bool {
+        self.tasks.pending()
+    }
+
+    pub fn waiting_count(&self) -> usize {
+        self.tasks.waiting_count()
+    }
+
+    pub fn take_task_notices(&mut self) -> Vec<Value> {
+        self.tasks.take_notices()
+    }
+
+    pub fn record_sdk(&mut self, message: &Value) {
+        self.tasks.record_sdk(message);
+    }
+
     pub fn expect_prompt(&mut self, prompt: &str) {
         self.completion.expect_prompt(prompt);
     }
@@ -154,6 +172,7 @@ impl ClaudeUsageReader {
         let message = &entry["message"];
         self.completion.record(entry);
         self.background.record(entry);
+        self.tasks.record(entry);
         if entry["type"] != "assistant" {
             return None;
         }

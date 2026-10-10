@@ -17,6 +17,11 @@ rollout.parent.mkdir(parents=True, exist_ok=True)
 rollout.touch()
 
 
+def native(value):
+    with rollout.open("a") as stream:
+        stream.write(json.dumps({"sessionId": session, "timestamp": datetime.now(timezone.utc).isoformat(), **value}) + "\n")
+
+
 def usage(message_id, output):
     with rollout.open("a") as stream:
         stream.write(json.dumps({"type": "assistant", "sessionId": session,
@@ -51,9 +56,20 @@ def background(scenario):
     notification = {"type": "system", "subtype": "task_notification", "task_id": "release-watch",
                     "tool_use_id": "watch-tool", "status": "completed", "summary": "GitHub release finished"}
     raw(notification, "other-session")
-    raw(notification)
-    raw(notification)  # SDK retries must not duplicate the wake marker.
-    raw({"type": "system", "subtype": "background_tasks_changed", "tasks": []})
+    if scenario in ("native", "monitor"):
+        tag = "<summary>Monitor event: GitHub progress</summary><event>Linux completed</event>" if scenario == "monitor" else "<status>completed</status><summary>GitHub release finished</summary>"
+        notice = {"type": "user", "origin": {"kind": "task-notification"}, "message": {"content":
+            "<task-notification><task-id>release-watch</task-id>" + tag + "</task-notification>"}}
+        native(notice)
+        native(notice)
+    else:
+        raw(notification)
+        raw(notification)  # SDK retries must not duplicate the wake marker.
+    # Real SDK repeats init at the beginning of autonomous cycles.
+    raw({"type": "system", "subtype": "session_state_changed", "state": "running"})
+    raw({"type": "system", "subtype": "init"})
+    if scenario not in ("native", "monitor"):
+        raw({"type": "system", "subtype": "background_tasks_changed", "tasks": []})
     usage("followup", 1)
     usage("followup", 5)  # Snapshots of one model request count only once.
     update({"sessionUpdate": "agent_message_chunk", "messageId": "followup", "content": {
@@ -67,10 +83,15 @@ def background(scenario):
         os._exit(0)
     update({"sessionUpdate": "tool_call_update", "toolCallId": "verify-release",
             "status": "completed", "rawOutput": "Verified without repeating the release"})
+    if scenario == "monitor":
+        native({"type":"user","origin":{"kind":"task-notification"},"message":{"content":"<task-notification><task-id>release-watch</task-id><status>completed</status><summary>Monitor finished</summary></task-notification>"}})
     if scenario != "silent":
         usage("final", 3)
+        native({"type":"assistant","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"Release verified."}]}})
         update({"sessionUpdate": "agent_message_chunk", "messageId": "final", "content": {
             "type": "text", "text": "Release verified."}})
+    if scenario in ("native", "monitor"):
+        return
     raw({"type": "result", "subtype": "success", "is_error": False, "num_turns": 1,
          "origin": {"kind": "task-notification"}})
     raw({"type": "system", "subtype": "session_state_changed", "state": "idle"})
@@ -88,7 +109,14 @@ for line in sys.stdin:
     elif method == "session/prompt":
         scenario = request["params"]["prompt"][0]["text"]
         raw({"type": "system", "subtype": "init"})
-        raw({"type": "system", "subtype": "task_started", "task_id": "release-watch"})
+        if scenario in ("native", "monitor"):
+            name = "Monitor" if scenario == "monitor" else "Bash"
+            receipt = {"taskId":"release-watch"} if name == "Monitor" else {"backgroundTaskId":"release-watch"}
+            native({"type":"assistant","message":{"content":[{"type":"tool_use","name":name,"id":"launch"}]}})
+            native({"type":"user","toolUseResult":receipt,"message":{"content":[{"type":"tool_result","tool_use_id":"launch"}]}})
+            native({"type":"assistant","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"Waiting for GitHub."}]}})
+        else:
+            raw({"type": "system", "subtype": "task_started", "task_id": "release-watch"})
         usage("initial", 2)
         update({"sessionUpdate": "agent_message_chunk", "messageId": "initial", "content": {
             "type": "text", "text": "Waiting for GitHub."}})

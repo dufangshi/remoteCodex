@@ -2061,14 +2061,40 @@ impl AgentRuntime for AcpRuntime {
         let mut coalesced_ready_since = None;
         let mut draining_coalesced = false;
         let mut outcome = loop {
-            let claude_background_pending = adapter_id == "claude"
-                && self
-                    .inner
+            let (sdk_pending, sdk_waiting) = if adapter_id == "claude" {
+                self.inner
                     .sessions
                     .lock()
                     .await
                     .get(&input.provider_session_id)
-                    .is_some_and(|live| live.claude_lifecycle.background_pending());
+                    .map(|live| {
+                        (
+                            live.claude_lifecycle.background_pending(),
+                            live.claude_lifecycle.waiting_count(),
+                        )
+                    })
+                    .unwrap_or_default()
+            } else {
+                (false, 0)
+            };
+            let native_pending = claude_usage_reader
+                .as_ref()
+                .is_some_and(|reader| reader.background_pending());
+            let claude_background_pending = sdk_pending || native_pending;
+            let waiting = sdk_waiting.max(
+                claude_usage_reader
+                    .as_ref()
+                    .map_or(0, |reader| reader.waiting_count()),
+            );
+            if waiting > 0 && !cancel_sent {
+                emit_mapped(
+                    &bus,
+                    &input.thread_id,
+                    &input.turn_id,
+                    mapper.native_background_wait(waiting),
+                    input.hidden,
+                );
+            }
             tokio::select! {
                 biased;
                 _ = cancel.cancelled(), if !cancel_sent => {
@@ -2097,6 +2123,9 @@ impl AgentRuntime for AcpRuntime {
                             }
                             if let Some(reader) = claude_usage_reader.as_mut() {
                                 for usage in reader.poll_final() { emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden); }
+                                for notice in reader.take_task_notices() {
+                                    emit_mapped(&bus, &input.thread_id, &input.turn_id, mapper.native_task_notification(&notice), input.hidden);
+                                }
                             }
                             if let Some(usage) = response.get("usage").filter(|v| v.is_object() && !matches!(adapter_id.as_str(), "codex" | "copilot")) {
                                 emit_usage(&bus, &input.thread_id, &input.turn_id, usage.clone(), input.hidden);
@@ -2151,6 +2180,9 @@ impl AgentRuntime for AcpRuntime {
                     }
                     if let Some(reader) = claude_usage_reader.as_mut() {
                         for usage in reader.poll() { emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden); }
+                        for notice in reader.take_task_notices() {
+                            emit_mapped(&bus, &input.thread_id, &input.turn_id, mapper.native_task_notification(&notice), input.hidden);
+                        }
                         let subagents = merge_active_subagents(mapper.active_subagents(), Some(reader));
                         if self.update_subagents(&input, &subagents).await {
                             emit_mapped(&bus, &input.thread_id, &input.turn_id,
@@ -2260,9 +2292,16 @@ impl AgentRuntime for AcpRuntime {
                             }
                             coalesced_ready_since = None;
                             if update["_remoteMethod"] == "_claude/sdkMessage" {
+                                if let Some(reader) = claude_usage_reader.as_mut() { reader.record_sdk(&update["message"]); }
                                 let mapped = mapper.native_task_notification(&update["message"]);
                                 emit_mapped(&bus, &input.thread_id, &input.turn_id, mapped, input.hidden);
                                 continue;
+                            }
+                            if let Some(reader) = claude_usage_reader.as_mut() {
+                                for usage in reader.poll() { emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden); }
+                                for notice in reader.take_task_notices() {
+                                    emit_mapped(&bus, &input.thread_id, &input.turn_id, mapper.native_task_notification(&notice), input.hidden);
+                                }
                             }
                             if let Some(usage) = adapter.billing_usage(&update).and_then(|usage| adapter_usage.apply(usage)) {
                                 emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden);
