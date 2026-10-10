@@ -1,6 +1,6 @@
 import { translate, useI18n } from '@remote-codex/thread-ui/i18n';
 import type { FormEvent, ReactNode } from 'react';
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import {
@@ -12,6 +12,7 @@ import {
   ThreadDto,
   WorkspaceDto,
 } from '@remote-codex/shared';
+import { FormDialog } from '../../components/FormDialog';
 import { useAppShellNav } from '../../components/AppShellNavContext';
 import { dshRunModeHint, dshRunModeName, type DshRunMode } from '../../components/DshHarnessPanel';
 import {
@@ -60,6 +61,13 @@ function errorText(caught: unknown, fallback: string) {
     return caught.payload.message;
   }
   return caught instanceof Error ? caught.message : fallback;
+}
+
+/** The thread exists, but DSH did not accept its selected run mode. */
+class RunModeNotApplied extends Error {
+  constructor(readonly cause: unknown) {
+    super(errorText(cause, ''));
+  }
 }
 
 function Field({
@@ -125,6 +133,10 @@ export function ThreadCreateForm({
   const [runtimeBusyProvider, setRuntimeBusyProvider] = useState<AgentBackendIdDto | null>(null);
   const [installingAgentId, setInstallingAgentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [adapterPrompt, setAdapterPrompt] = useState<{ entry: ModelOptionDto; createAfter: boolean } | null>(null);
+  const [adapterError, setAdapterError] = useState<string | null>(null);
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
 
   const selectedBackend = backends.find((backend) => backend.provider === provider);
   const acpAdvertised = backends.some((backend) => backend.provider === 'acp');
@@ -241,6 +253,7 @@ export function ThreadCreateForm({
     setRunModes([]);
     setRunMode('');
     setError(null);
+    if (selectedAgent?.acpAgent?.availability === 'adapter_missing') return;
     fetchAgentBackendModelsFor('acp', { agentId, cwd: selectedWorkspace.absPath })
       .then((records) => {
         if (cancelled) return;
@@ -271,7 +284,7 @@ export function ThreadCreateForm({
     return () => {
       cancelled = true;
     };
-  }, [agentId, provider, selectedWorkspace]);
+  }, [agentId, provider, selectedWorkspace, selectedAgent?.acpAgent?.availability]);
 
   async function reloadBackends(nextProvider: AgentBackendIdDto = provider) {
     const records = await fetchAgentBackends();
@@ -310,22 +323,58 @@ export function ThreadCreateForm({
     }
   }
 
-  async function handleAcpAgentInstall(entry: ModelOptionDto) {
+  async function createSelectedThread(nextModel = model, nextEffort = reasoningEffort) {
+    const trimmed = title.trim();
+    // A retry after a failed run-mode selection reuses the thread already created.
+    const thread = created ?? await createThread({
+      workspaceId, provider, ...(provider === 'acp' ? { agentId } : {}), model: nextModel,
+      ...(nextEffort ? { reasoningEffort: nextEffort } : {}), approvalMode: 'yolo',
+      ...(trimmed ? { title: trimmed } : {}),
+    });
+    const mode = runModes.find((entry) => entry.id === runMode);
+    // Always explicit: the cached default can be stale once DSH's own default changes.
+    if (provider === 'acp' && agentId === 'deepseek' && mode) {
+      setCreated(thread);
+      try {
+        await postThreadHarnessAction(thread.id, { kind: 'selectRunMode', id: mode.id });
+      } catch (caught) {
+        throw new RunModeNotApplied(caught);
+      }
+    }
+    if (!alive.current) return;
+    setCreated(null);
+    onCreated(thread);
+  }
+  function askAdapterInstall(entry: ModelOptionDto, createAfter: boolean) {
+    setAdapterError(null);
+    setAdapterPrompt({ entry, createAfter });
+  }
+  async function confirmAdapterInstall() {
+    if (!adapterPrompt || busy) return;
+    const { entry, createAfter } = adapterPrompt;
+    setBusy(true);
     setInstallingAgentId(entry.id);
-    setError(null);
+    setAdapterError(null);
     try {
       await installOrUpdateAgentBackend('acp', 'install', entry.id);
+      if (!alive.current) return;
       const agents = await fetchAgentBackendAgents('acp');
+      if (!alive.current) return;
+      const installed = agents.find(candidate => candidate.id === entry.id);
+      if (installed?.acpAgent?.availability !== 'ready') throw new Error(translate('workbench.adapterInstallNotReady'));
+      const records = await fetchAgentBackendModelsFor('acp', { agentId: installed.model, cwd: selectedWorkspace?.absPath ?? null });
+      if (!alive.current) return;
+      const next = records.find(record => record.model === model) ?? pickModel(records);
+      if (!next) throw new Error(translate('workbench.unableToLoadAgentModels'));
       setAgentOptions(agents);
-      const installed = agents.find((candidate) => candidate.id === entry.id);
-      if (installed?.acpAgent?.availability === 'ready') {
-        setAgentId(installed.model);
-      }
-      setBackends(await fetchAgentBackends());
+      setAgentId(installed.model);
+      applyModels(records);
+      if (createAfter) await createSelectedThread(next.model, next.defaultReasoningEffort ?? null);
+      if (alive.current) setAdapterPrompt(null);
     } catch (caught) {
-      setError(errorText(caught, `Unable to install ${entry.displayName}.`));
+      if (alive.current) setAdapterError(errorText(caught, translate('workbench.adapterInstallFailed')));
     } finally {
-      setInstallingAgentId(null);
+      if (alive.current) { setInstallingAgentId(null); setBusy(false); }
     }
   }
 
@@ -335,31 +384,17 @@ export function ThreadCreateForm({
       setError(translate("workbench.chooseAnAvailableBackendBeforeCreatingA"));
       return;
     }
+    if (provider === 'acp' && selectedAgent?.acpAgent?.availability === 'adapter_missing') {
+      askAdapterInstall(selectedAgent, true);
+      return;
+    }
     setBusy(true);
     setError(null);
-    let thread = created;
     try {
-      const trimmed = title.trim();
-      thread ??= await createThread({
-        workspaceId,
-        provider,
-        ...(provider === 'acp' ? { agentId } : {}),
-        model,
-        ...(reasoningEffort ? { reasoningEffort } : {}),
-        approvalMode: 'yolo',
-        ...(trimmed ? { title: trimmed } : {}),
-      });
-      const mode = runModes.find((entry) => entry.id === runMode);
-      // Always explicit: the cached default can be stale once DSH's own default changes.
-      if (provider === 'acp' && agentId === 'deepseek' && mode) {
-        setCreated(thread);
-        await postThreadHarnessAction(thread.id, { kind: 'selectRunMode', id: mode.id });
-      }
-      setCreated(null);
-      onCreated(thread);
+      await createSelectedThread();
     } catch (caught) {
-      setError(thread
-        ? translate("workbench.dshRunModeNotApplied", { value1: errorText(caught, '') })
+      setError(caught instanceof RunModeNotApplied
+        ? translate("workbench.dshRunModeNotApplied", { value1: errorText(caught.cause, '') })
         : errorText(caught, translate("workbench.unableToCreateThread")));
     } finally {
       setBusy(false);
@@ -559,7 +594,7 @@ export function ThreadCreateForm({
                   {adapterMissing && meta?.installCommand ? (
                     <button
                       type="button"
-                      onClick={() => void handleAcpAgentInstall(entry)}
+                      onClick={() => askAdapterInstall(entry, false)}
                       disabled={busy || installing || installingAgentId !== null}
                       className="host-secondary-button my-auto min-h-11 shrink-0 rounded-md border px-3 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-60"
                     >
@@ -590,7 +625,7 @@ export function ThreadCreateForm({
             }}
             className={controlClass}
           >
-            {models.length === 0 ? <option value="">{translate("workbench.noModelsAvailable")}</option> : null}
+            {models.length === 0 ? <option value="">{translate(selectedAgent?.acpAgent?.availability === 'adapter_missing' ? "workbench.adapterNeeded" : "workbench.noModelsAvailable")}</option> : null}
             {models.map((entry) => (
               <option key={entry.id} value={entry.model}>
                 {entry.displayName}
@@ -650,6 +685,20 @@ export function ThreadCreateForm({
         />
       </Field>
 
+      {adapterPrompt ? (
+        <FormDialog title={translate('workbench.adapterInstallTitle')}
+          description={translate('workbench.adapterInstallDescription', { agent: adapterPrompt.entry.displayName })}
+          busy={busy} onClose={() => { setAdapterPrompt(null); setAdapterError(null); }}>
+          {adapterError ? <div role="alert" className="host-error rounded-md border px-3 py-2 text-sm">{adapterError}</div> : null}
+          <div className="mt-4 flex justify-end gap-2">
+            <button type="button" disabled={busy} onClick={() => setAdapterPrompt(null)} className="host-secondary-button min-h-11 rounded-md border px-4 text-sm disabled:opacity-50">{translate('workbench.cancel')}</button>
+            <button type="button" disabled={busy} onClick={() => void confirmAdapterInstall()} className="ui-action-primary min-h-11 rounded-md px-4 text-sm font-semibold disabled:opacity-50">
+              {busy ? translate('workbench.installing') : adapterError ? translate('workbench.adapterInstallRetry') : translate('workbench.adapterInstallConfirm')}
+            </button>
+          </div>
+        </FormDialog>
+      ) : null}
+
       {error ? <div className="host-error rounded-md border px-4 py-3 text-sm" role="alert">{error}</div> : null}
 
       <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -660,8 +709,7 @@ export function ThreadCreateForm({
             !selectedBackend ||
             !canStart(selectedBackend) ||
             !workspaceId ||
-            !model ||
-            !selectedModel ||
+            (selectedAgent?.acpAgent?.availability !== 'adapter_missing' && (!model || !selectedModel)) ||
             (provider === 'acp' && !['ready', 'adapter_missing'].includes(selectedAgent?.acpAgent?.availability ?? ''))
           }
           className={

@@ -2378,17 +2378,11 @@ function relaySupervisorCommand(
 ) {
   const relayUrl = relayWebsocketBaseUrl();
   const supervisorPort = RELAY_SUPERVISOR_PORT_BY_PLATFORM[platform];
+  const origin = relayUrl.replace(/^ws/, 'http');
   if (platform === 'windows') {
-    return [
-      'Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force',
-      `$env:REMOTE_CODEX_RELAY_SERVER_URL=${powershellQuote(relayUrl)}`,
-      `$env:REMOTE_CODEX_RELAY_AGENT_TOKEN=${powershellQuote(token)}`,
-      `$env:REMOTE_CODEX_RELAY_SUPERVISOR_PORT=${powershellQuote(String(supervisorPort))}`,
-      'remote-codex relay-supervisor',
-    ].join('\n');
+    return `& ([scriptblock]::Create((Invoke-WebRequest -UseBasicParsing ${powershellQuote(origin + '/setup.ps1')}).Content)) -Relay ${powershellQuote(origin)} -Token ${powershellQuote(token)} -Port ${supervisorPort}`;
   }
 
-  const origin = relayUrl.replace(/^ws/, 'http');
   return `curl -fsSL ${shellQuote(origin + '/setup.sh')} | sh -s -- --relay ${shellQuote(origin)} --token ${shellQuote(token)} --port ${supervisorPort}`;
 }
 

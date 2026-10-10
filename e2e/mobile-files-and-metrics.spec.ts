@@ -121,3 +121,46 @@ test('collapsed long prompts fade without losing text and expand on focus', asyn
     await expect(input).toHaveCSS('mask-image', 'none');
   }
 });
+
+test('image links return to their real parent directory, including outside the workspace', async ({ page, request }, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile-chromium', 'Mobile preview Back navigation');
+  await page.setViewportSize({ width: 390, height: 844 });
+  const root = path.resolve(process.env.E2E_WORKSPACE_ROOT!, randomUUID());
+  const absPath = path.join(root, 'project');
+  const outside = path.join(root, 'proposals', 'naming');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC', 'base64');
+  await mkdir(path.join(absPath, 'docs', 'assets'), { recursive: true });
+  await mkdir(outside, { recursive: true });
+  await writeFile(path.join(absPath, 'docs', 'assets', 'inside.png'), png);
+  await writeFile(path.join(outside, 'icon-felt-cream.png'), png);
+  const workspace = await (await request.post(base + '/api/workspaces', { data: { absPath, label: 'Image links' } })).json();
+  const started = await (await request.post(base + '/api/threads/start', { data: { workspaceId: workspace.id, title: 'Image links', provider: 'codex', model: 'ios-e2e-stream', approvalMode: 'yolo' } })).json();
+  const id = started.id ?? started.thread.id;
+  const detail = await (await request.get(base + `/api/threads/${id}`)).json();
+  const reply = `The icon is \`${outside}/icon-felt-cream.png\`; the project copy is \`docs/assets/inside.png\`.`;
+  await page.route(`**/api/threads/${id}?**`, route => route.fulfill({ json: { ...detail, totalTurnCount: 1, turns: [{
+    id: 'image-turn', status: 'completed', startedAt: new Date().toISOString(), completedAt: new Date().toISOString(),
+    items: [{ id: 'image-prompt', kind: 'userMessage', text: 'Where is the icon?' }, { id: 'image-reply', kind: 'agentMessage', text: reply }],
+  }] } }));
+  await page.goto(`/threads/${id}`);
+  const files = page.getByTestId('workspace-panel');
+  const tree = files.getByRole('tree', { name: 'Workspace files' });
+  await page.getByRole('link', { name: `${outside}/icon-felt-cream.png`, exact: true }).tap();
+  await expect(files.locator('img').first()).toBeVisible();
+  await files.getByRole('button', { name: 'Back to files', exact: true }).tap();
+  // The host directory that really contains the file, never a virtual folder.
+  const parent = tree.locator(`[data-explorer-path="${outside}"]`);
+  await expect(parent).toHaveAttribute('aria-expanded', 'true');
+  await expect(parent.locator('.workspace-linked-directory-label')).toHaveAttribute('title', new RegExp(`^${outside}\\n`));
+  const icon = tree.locator(`[data-explorer-path="${outside}/icon-felt-cream.png"]`);
+  await expect(icon).toHaveAttribute('aria-selected', 'true');
+  await expect(icon).toBeInViewport();
+  await expect(tree.getByText('Linked files', { exact: true })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('linked-image-parent.png') });
+  await page.goBack();
+  await page.getByRole('link', { name: 'docs/assets/inside.png', exact: true }).tap();
+  await expect(files.locator('img').first()).toBeVisible();
+  await files.getByRole('button', { name: 'Back to files', exact: true }).tap();
+  await expect(tree.locator('[data-explorer-path="docs/assets"]')).toHaveAttribute('aria-expanded', 'true');
+  await expect(tree.locator('[data-explorer-path="docs/assets/inside.png"]')).toHaveAttribute('aria-selected', 'true');
+});

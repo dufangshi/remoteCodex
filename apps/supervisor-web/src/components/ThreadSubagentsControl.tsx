@@ -5,6 +5,7 @@ import {
   Bot,
   ChevronRight,
   Clock3,
+  Layers3,
   RefreshCw,
   X,
 } from 'lucide-react';
@@ -13,6 +14,7 @@ import type {
   NativeSubagentDetailDto,
   NativeSubagentDto,
   ThreadDetailDto,
+  ThreadHistoryItemDto,
   ThreadSubagentDto,
 } from '@remote-codex/shared';
 import { request } from '../lib/api';
@@ -34,6 +36,66 @@ function statusLabel(status: string) {
 function dateLabel(date: string | null | undefined) {
   return date ? new Date(date).toLocaleString(getLocale()) : '—';
 }
+function relativeDate(date: string | null | undefined, now: number) {
+  if (!date) return '—';
+  const seconds = Math.max(0, Math.floor((now - Date.parse(date)) / 1000));
+  if (!Number.isFinite(seconds)) return '—';
+  const [value, unit] = seconds < 60 ? [seconds, 'second'] as const
+    : seconds < 3600 ? [Math.floor(seconds / 60), 'minute'] as const
+    : seconds < 86400 ? [Math.floor(seconds / 3600), 'hour'] as const
+    : [Math.floor(seconds / 86400), 'day'] as const;
+  return new Intl.RelativeTimeFormat(getLocale(), { numeric: 'always' }).format(-value, unit);
+}
+
+function SubagentActivityRow({ item, endpoint, lazy }: { item: ThreadHistoryItemDto; endpoint: string; lazy: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const [body, setBody] = useState<ThreadHistoryItemDto | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    if (!expanded) return;
+    if (!lazy) { setBody(item); return; }
+    const controller = new AbortController();
+    setError(null);
+    void request<ThreadHistoryItemDto>(`${endpoint}?itemId=${encodeURIComponent(item.id)}`, { signal: controller.signal })
+      .then(result => { if (!controller.signal.aborted) setBody(result); })
+      .catch(cause => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : translate('workbench.subagentLoadFailed')); });
+    return () => controller.abort();
+  }, [expanded, endpoint, item.id, item.status, lazy, retry]);
+  return <article className="native-agents-record">
+    <button type="button" className="native-agents-record-toggle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
+      <ChevronRight size={14} className={expanded ? 'is-expanded' : ''} />
+      <span className="native-agents-record-title">{item.text || translate(item.kind === 'agentMessage' ? 'workbench.subagentMessage' : 'workbench.subagentTool')}</span>
+      <span className="native-agents-status" data-status={item.status}>{statusLabel(item.status ?? 'completed')}</span>
+      <time title={dateLabel(item.createdAt)}>{item.createdAt ? new Date(item.createdAt).toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) : '—'}</time>
+    </button>
+    {expanded && (error ? <div role="alert" className="native-agents-notice">{error}<button type="button" onClick={() => setRetry(value => value + 1)}>{translate('workbench.subagentRefresh')}</button></div>
+      : body ? <pre>{body.text}</pre> : <p className="native-agents-empty">{translate('workbench.subagentLoading')}</p>)}
+  </article>;
+}
+
+function NativeActivityGroup({ items, endpoint, lazy }: { items: ThreadHistoryItemDto[]; endpoint: string; lazy: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  if (items.length === 1) return <SubagentActivityRow item={items[0]!} endpoint={endpoint} lazy={lazy} />;
+  return <div className="native-agents-operation-group">
+    <button type="button" className="native-agents-record-toggle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
+      <Layers3 size={15} />
+      <span className="native-agents-record-title">{translate(items.some(item => item.status === 'running') ? 'chat.performingOperations' : 'chat.performedOperations')} {translate('chat.operationCount', { count: items.length })}</span>
+      <ChevronRight size={14} className={expanded ? 'is-expanded' : ''} />
+    </button>
+    {expanded && items.map(item => <SubagentActivityRow key={item.id} item={item} endpoint={endpoint} lazy={lazy} />)}
+  </div>;
+}
+function groupNativeActivity(items: ThreadHistoryItemDto[]) {
+  const entries: Array<{ key: string; items: ThreadHistoryItemDto[]; message: boolean }> = [];
+  for (const item of items) {
+    const previous = entries.at(-1);
+    if (item.kind !== 'agentMessage' && previous && !previous.message) previous.items.push(item);
+    else entries.push({ key: item.id, items: [item], message: item.kind === 'agentMessage' });
+  }
+  return entries;
+}
+
 function fallbackAgent(
   agent: ThreadSubagentDto,
   provider: string,
@@ -70,6 +132,9 @@ export function ThreadSubagentsControl({
   const [inspect, setInspect] = useState<NativeSubagentDetailDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
+  const [now, setNow] = useState(Date.now);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const earlierRequest = useRef<AbortController | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLElement>(null);
   const listButtons = useRef(new Map<string, HTMLButtonElement>());
@@ -113,7 +178,12 @@ export function ThreadSubagentsControl({
               { signal: activeController.signal },
             );
             if (!stopped && !activeController.signal.aborted) {
-              setInspect(result);
+              setInspect(previous => {
+                if (!previous || previous.agent.id !== result.agent.id) return result;
+                const items = new Map(previous.items.map(item => [item.id, item]));
+                result.items.forEach(item => items.set(item.id, item));
+                return { ...result, items: [...items.values()].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0)), hasEarlierItems: previous.hasEarlierItems && result.hasEarlierItems };
+              });
               setError(null);
               setAgents(
                 (current) =>
@@ -187,6 +257,13 @@ export function ThreadSubagentsControl({
 
   useEffect(() => {
     if (!open) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [open]);
+  useEffect(() => () => { earlierRequest.current?.abort(); setLoadingEarlier(false); }, [threadId, selected, open]);
+  useEffect(() => {
+    if (!open) return;
     const previous = document.activeElement as HTMLElement | null;
     dialog.current?.querySelector<HTMLElement>('button')?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
@@ -220,6 +297,24 @@ export function ThreadSubagentsControl({
 
   const current = inspect?.agent.id === selected ? inspect : null;
   const agent = current?.agent ?? rows.find((agent) => agent.id === selected);
+  const historyEndpoint = `/api/threads/${encodeURIComponent(threadId)}/subagents/${encodeURIComponent(selected ?? '')}`;
+  async function loadEarlier() {
+    const before = current?.items[0]?.sequence;
+    if (!before || loadingEarlier) return;
+    const controller = new AbortController();
+    earlierRequest.current = controller;
+    setLoadingEarlier(true);
+    try {
+      const result = await request<NativeSubagentDetailDto>(`${historyEndpoint}?before=${before}`, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      setInspect(previous => {
+        if (!previous || previous.agent.id !== result.agent.id) return previous;
+        const items = new Map([...result.items, ...previous.items].map(item => [item.id, item]));
+        return { ...previous, items: [...items.values()].sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0)), hasEarlierItems: result.hasEarlierItems };
+      });
+    } catch (cause) { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : translate('workbench.subagentLoadFailed')); }
+    finally { if (!controller.signal.aborted) setLoadingEarlier(false); }
+  }
   function back() {
     const id = selected;
     setSelected(null);
@@ -332,7 +427,7 @@ export function ThreadSubagentsControl({
                     >
                       <div className="native-agents-row-main">
                         <div className="native-agents-row-title">
-                          <strong>{agent.name || agent.id}</strong>
+                          <strong>{agent.name || translate('workbench.subagentDetails')}</strong>
                           <span
                             className="native-agents-status"
                             data-status={agent.status}
@@ -342,37 +437,10 @@ export function ThreadSubagentsControl({
                               : statusLabel(agent.status)}
                           </span>
                         </div>
-                        <p>
-                          {agent.latestActivity ||
-                            agent.prompt ||
-                            agent.nativeSessionId ||
-                            agent.id}
-                        </p>
+                        {agent.latestActivity && <p>{agent.latestActivity}</p>}
                         <div className="native-agents-row-meta">
-                          <span>{agent.provider}</span>
-                          {agent.tokenUsage && (
-                            <span>
-                              {new Intl.NumberFormat(getLocale(), {
-                                notation: 'compact',
-                              }).format(
-                                agent.tokenUsage.total.totalTokens,
-                              )}{' '}
-                              tok
-                            </span>
-                          )}
-                          {agent.updatedAt && (
-                            <span title={dateLabel(agent.updatedAt)}>
-                              <Clock3 size={11} />
-                              {new Date(agent.updatedAt).toLocaleTimeString(
-                                getLocale(),
-                                {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                  second: '2-digit',
-                                },
-                              )}
-                            </span>
-                          )}
+                          <span title={dateLabel(agent.startedAt)}>{translate('workbench.subagentCreated')} {agent.startedAt ? new Date(agent.startedAt).toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
+                          <span title={dateLabel(agent.updatedAt)}><Clock3 size={11} />{translate('workbench.subagentUpdated')} {relativeDate(agent.updatedAt, now)}</span>
                         </div>
                       </div>
                       <ChevronRight size={16} />
@@ -445,33 +513,8 @@ export function ThreadSubagentsControl({
                         </p>
                       ) : current?.items.length ? (
                         <>
-                          {current.hasEarlierItems && (
-                            <p className="native-agents-notice">
-                              {translate('workbench.subagentRecentActivity')}
-                            </p>
-                          )}
-                          {current.items.map((item) => (
-                            <article key={item.id}>
-                              <div>
-                                <span>
-                                  {item.kind === 'agentMessage'
-                                    ? translate('workbench.subagentMessage')
-                                    : translate('workbench.subagentTool')}
-                                </span>
-                                <time title={dateLabel(item.createdAt)}>
-                                  {item.createdAt
-                                    ? new Date(
-                                        item.createdAt,
-                                      ).toLocaleTimeString(getLocale())
-                                    : '—'}
-                                </time>
-                                <span>
-                                  {statusLabel(item.status ?? 'completed')}
-                                </span>
-                              </div>
-                              <pre>{item.text}</pre>
-                            </article>
-                          ))}
+                          {current.hasEarlierItems && <button type="button" className="native-agents-load-earlier" disabled={loadingEarlier} onClick={() => void loadEarlier()}>{translate(loadingEarlier ? 'workbench.subagentLoading' : 'workbench.subagentLoadEarlier')}</button>}
+                          {groupNativeActivity(current.items).map(entry => <NativeActivityGroup key={`${selected}:${entry.key}`} items={entry.items} endpoint={historyEndpoint} lazy={current.historyMode === 'lazy-v1'} />)}
                         </>
                       ) : (
                         <p className="native-agents-empty">

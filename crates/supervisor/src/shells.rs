@@ -10,10 +10,44 @@ use serde_json::{json, Value};
 use tokio::sync::broadcast;
 use uuid::Uuid;
 
+/// Bytes kept per shell so a reattaching viewer (reload, reconnect, a second
+/// pane) sees the recent screen instead of a blank terminal.
+const REPLAY_LIMIT: usize = 256 * 1024;
+
 #[derive(Clone)]
 pub struct ShellOutput {
     pub shell_id: String,
+    pub thread_id: String,
     pub data: String,
+    /// Per-shell order. Attach replays everything up to a sequence number and
+    /// skips broadcast chunks at or below it, so no output is shown twice.
+    pub seq: u64,
+    pub exited: bool,
+}
+
+#[derive(Default)]
+struct ReplayBuffer {
+    data: String,
+    seq: u64,
+}
+
+impl ReplayBuffer {
+    fn push(&mut self, chunk: &str) -> u64 {
+        self.data.push_str(chunk);
+        if self.data.len() > REPLAY_LIMIT {
+            let mut cut = self.data.len() - REPLAY_LIMIT;
+            while !self.data.is_char_boundary(cut) {
+                cut += 1;
+            }
+            // Prefer a line start so replay does not begin inside an escape sequence.
+            if let Some(newline) = self.data[cut..].find('\n') {
+                cut += newline + 1;
+            }
+            self.data.drain(..cut);
+        }
+        self.seq += 1;
+        self.seq
+    }
 }
 
 struct LiveShell {
@@ -28,6 +62,7 @@ struct LiveShell {
     tmux_session_name: String,
     created_at: String,
     metadata: Arc<Mutex<ShellMetadata>>,
+    replay: Arc<Mutex<ReplayBuffer>>,
 }
 
 struct ShellMetadata {
@@ -93,7 +128,11 @@ impl ShellHub {
             let hub = self.inner.lock().unwrap();
             hub.all.clone()
         };
+        let hub_state = self.inner.clone();
         let output_id = id.clone();
+        let output_thread = thread_id.to_string();
+        let replay = Arc::new(Mutex::new(ReplayBuffer::default()));
+        let output_replay = replay.clone();
         let now = now_rfc3339();
         let metadata = Arc::new(Mutex::new(ShellMetadata {
             label: label.and_then(|label| {
@@ -106,27 +145,61 @@ impl ShellHub {
             last_activity_at: None,
         }));
         let output_metadata = metadata.clone();
-        thread::spawn(move || {
+        let read_output = move || {
             let mut buf = [0u8; 4096];
+            let mut pending = Vec::new();
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
-                        let data = String::from_utf8_lossy(&buf[..n]).into_owned();
+                        // Keep an incomplete UTF-8 sequence for the next read instead
+                        // of replacing it, so split CJK/emoji output stays intact.
+                        pending.extend_from_slice(&buf[..n]);
+                        let valid = match std::str::from_utf8(&pending) {
+                            Ok(_) => pending.len(),
+                            Err(error) if error.error_len().is_none() => error.valid_up_to(),
+                            Err(_) => pending.len(),
+                        };
+                        if valid == 0 {
+                            continue;
+                        }
+                        let data = String::from_utf8_lossy(&pending[..valid]).into_owned();
+                        pending.drain(..valid);
                         let activity_at = now_rfc3339();
                         let mut metadata = output_metadata.lock().unwrap();
                         metadata.updated_at = activity_at.clone();
                         metadata.last_activity_at = Some(activity_at);
                         drop(metadata);
                         let _ = events.send(data.clone());
+                        // Sequence and broadcast under the replay lock; attach snapshots
+                        // under the same lock, which makes the split exact.
+                        let mut replay = output_replay.lock().unwrap();
+                        let seq = replay.push(&data);
                         let _ = all.send(ShellOutput {
                             shell_id: output_id.clone(),
+                            thread_id: output_thread.clone(),
                             data,
+                            seq,
+                            exited: false,
                         });
                     }
                 }
             }
-        });
+            // The process ended (`exit`, a crash or terminate). Drop the entry so it
+            // no longer lists as running, reap it, and tell attached viewers.
+            let removed = hub_state.lock().unwrap().shells.remove(&output_id);
+            if let Some(shell) = removed {
+                let _ = shell.child.lock().unwrap().wait();
+            }
+            let seq = output_replay.lock().unwrap().seq + 1;
+            let _ = all.send(ShellOutput {
+                shell_id: output_id,
+                thread_id: output_thread,
+                data: String::new(),
+                seq,
+                exited: true,
+            });
+        };
         self.inner.lock().unwrap().shells.insert(
             id.clone(),
             LiveShell {
@@ -140,8 +213,11 @@ impl ShellHub {
                 tmux_session_name: format!("remote-codex-pty-{id}"),
                 created_at: now,
                 metadata,
+                replay,
             },
         );
+        // Start reading only once the entry exists, so an immediate exit removes it.
+        thread::spawn(read_output);
         Ok((id.clone(), self.shell_json(&id)?))
     }
 
@@ -228,6 +304,20 @@ impl ShellHub {
 
     pub(crate) fn get(&self, id: &str) -> Result<Value> {
         self.shell_json(id)
+    }
+
+    /// Recent output for a new viewer and the last sequence it covers.
+    pub(crate) fn replay(&self, id: &str) -> Result<(String, u64)> {
+        let replay = {
+            let hub = self.inner.lock().unwrap();
+            hub.shells
+                .get(id)
+                .ok_or_else(|| anyhow!("shell not found"))?
+                .replay
+                .clone()
+        };
+        let replay = replay.lock().unwrap();
+        Ok((replay.data.clone(), replay.seq))
     }
 
     fn shell_json(&self, id: &str) -> Result<Value> {

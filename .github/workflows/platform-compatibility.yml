@@ -80,7 +80,7 @@ jobs:
           retention-days: 14
 
   web:
-    name: Web and npm package
+    name: Web and native runtime
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -137,5 +137,5 @@ jobs:
           rustup toolchain install "${RUST_VERSION}" --profile minimal
           cargo +"${RUST_VERSION}" build --locked --release --package remote-codex
 
-      - name: Verify installed npm product
-        run: node scripts/verify-npm-package.mjs
+      - name: Verify native bootstrap
+        run: node --test scripts/native-setup.test.mjs

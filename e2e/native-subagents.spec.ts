@@ -62,6 +62,8 @@ for (const backend of ['codex', 'claude'])
       },
     };
     let complete = false;
+    let detailLoads = 0;
+    let itemLoads = 0;
     const summary = () => ({
       ...agent,
       status: complete ? 'completed' : 'running',
@@ -88,9 +90,13 @@ for (const backend of ['codex', 'claude'])
         },
       }),
     );
-    await page.route(`**/api/threads/${id}/subagents/native-child`, (route) =>
-      route.fulfill({
+    await page.route(`**/api/threads/${id}/subagents/native-child*`, (route) => {
+      const itemId = new URL(route.request().url()).searchParams.get('itemId');
+      if (itemId) { itemLoads++; return route.fulfill({ json: { id: itemId, kind: 'agentMessage', text: 'Selected full execution body', status: 'completed' } }); }
+      detailLoads++;
+      return route.fulfill({
         json: {
+          historyMode: 'lazy-v1',
           agent: summary(),
           hasEarlierItems: false,
           items: [
@@ -119,8 +125,8 @@ for (const backend of ['codex', 'claude'])
             },
           ],
         },
-      }),
-    );
+      });
+    });
     await page.route(`**/api/threads/${id}/subagents/earlier-child`, (route) =>
       route.fulfill({
         json: {
@@ -146,6 +152,10 @@ for (const backend of ['codex', 'claude'])
       exact: true,
     });
     await expect(panel).toContainText('1 running · 2 total');
+    expect(detailLoads).toBe(0);
+    expect(itemLoads).toBe(0);
+    await expect(panel.locator('.native-agents-row-meta').first()).toContainText('Created');
+    await expect(panel.locator('.native-agents-row-meta').first()).toContainText(/Updated .* ago/);
     const screenshotDir = path.resolve('.temp/native-subagents/screenshots');
     await mkdir(screenshotDir, { recursive: true });
     await page.screenshot({
@@ -160,6 +170,11 @@ for (const backend of ['codex', 'claude'])
       panel.getByText(/Transcript parsing and usage accounting/),
     ).toBeVisible();
     await expect(panel.getByText('Tokens & estimated cost')).toBeVisible();
+    expect(itemLoads).toBe(0);
+    await expect(panel.locator('.native-agents-record pre')).toHaveCount(0);
+    await panel.locator('.native-agents-record-toggle').last().click();
+    await expect(panel.getByText('Selected full execution body', { exact: true })).toBeVisible();
+    expect(itemLoads).toBe(1);
     await expect(panel.locator('.thread-turn-usage-price')).toContainText(
       '$0.12',
     );

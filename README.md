@@ -8,8 +8,7 @@ This branch replaces the TypeScript `supervisor-api` / `relay-server` / per-harn
 
 Read [AGENTS.md](AGENTS.md) before changing or releasing this project.
 When a Supervisor is already running, prefer its own device-scoped update API
-(the same **Check updates** / **Update** controls in Settings) over a manual npm
-install and process kill:
+(the same **Check updates** / **Update** controls in Settings) over manually replacing its executable and killing the process:
 
 - `POST /api/management/supervisor/check`
 - `POST /api/management/supervisor/update`
@@ -46,30 +45,20 @@ pnpm --filter @remote-codex/supervisor-web exec vite --host localhost --port 517
 
 Open `http://localhost:5173`. Local mode has no login.
 
-The packaged supervisor serves the Web UI itself:
+The native supervisor serves the Web UI itself. Copy a setup command from the
+Devices page: macOS/Linux use SH, Windows uses PowerShell. Both download the
+matching Rust executable directly from GitHub Releases and verify its SHA256 and
+actual version. No Node/npm is required to install or update Remote Codex.
 
-```bash
-npm install -g remote-codex@next
-remote-codex start
-remote-codex status
-remote-codex stop
-```
+GitHub Releases are the authoritative runtime versions. Each immutable release
+contains all four supported binaries, the pinned Web bundle, `runtime-version.txt`
+and `SHA256SUMS`. See [native installation and releases](docs/github-runtime.md).
+Node.js is only prepared on demand for Agent/ACP dependencies that require it.
 
-The npm launcher downloads a prebuilt Rust executable for the current OS, CPU,
-and Linux libc on first use, verifies its pinned SHA-256 digest, and caches it.
-It does not compile Rust or run network access in `postinstall`.
-
-See [the native npm release design](docs/npm-native-release.zh.md).
-The controlled main/relay rollout is documented in
-[the Rust main cutover runbook](docs/rust-main-cutover.zh.md).
-
-The native Windows Relay Device Manager is a stable bootstrap application. Its
-WinForms UI manages pasted Relay configuration, workspace and port selection,
-the private `remote-codex` npm runtime, connect/disconnect, runtime updates,
-login startup, recovery, logs, and the notification-area icon. Runtime releases
-do not rebuild the Device Manager: its Check and Update actions install the
-newest `remote-codex` npm version. The `-cli.exe` asset in each runtime release
-is used by the npm launcher and retains the general-purpose command surface.
+The Windows Device Manager remains an independently released legacy bootstrap;
+this runtime migration does not change its installer or version. Prefer the new
+PowerShell setup and Web Settings for GitHub-native installation/updates. Existing
+npm installations require the one-time migration described in the runbook.
 
 Relay:
 

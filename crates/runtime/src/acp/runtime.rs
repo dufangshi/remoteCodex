@@ -1314,7 +1314,7 @@ impl AgentRuntime for AcpRuntime {
         };
         let last_error = self.inner.health.lock().unwrap().get(&bound).cloned().flatten().or_else(|| {
             def.as_ref().and_then(|def| match availability {
-                "adapter_missing" => Some(format!("Missing executable {} (package {}). Install in Settings > Harnesses > ACP adapter; it is also prepared automatically before execution.", def.server_command, super::dependencies::package(&def.id).unwrap_or("unknown"))),
+                "adapter_missing" => Some(format!("Missing executable {} (package {}). Install in the new-thread dialog or Settings > Harnesses > ACP adapter.", def.server_command, super::dependencies::package(&def.id).unwrap_or("unknown"))),
                 "base_missing" => Some(format!("Missing base executable: {}", def.base_command)),
                 "server_unavailable" => Some(format!("Missing ACP executable: {}", def.server_command)),
                 _ => None,
@@ -1501,7 +1501,6 @@ impl AgentRuntime for AcpRuntime {
                     .collect());
             }
         }
-        super::dependencies::ensure(&def, false).await?;
         if classify_availability(&def) != "ready" {
             return Ok(default_model_stub(Some(&def.id)));
         }
