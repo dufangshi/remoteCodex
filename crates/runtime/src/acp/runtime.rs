@@ -2061,6 +2061,14 @@ impl AgentRuntime for AcpRuntime {
         let mut coalesced_ready_since = None;
         let mut draining_coalesced = false;
         let mut outcome = loop {
+            let claude_background_pending = adapter_id == "claude"
+                && self
+                    .inner
+                    .sessions
+                    .lock()
+                    .await
+                    .get(&input.provider_session_id)
+                    .is_some_and(|live| live.claude_lifecycle.background_pending());
             tokio::select! {
                 biased;
                 _ = cancel.cancelled(), if !cancel_sent => {
@@ -2251,7 +2259,11 @@ impl AgentRuntime for AcpRuntime {
                                 }
                             }
                             coalesced_ready_since = None;
-                            if update["_remoteMethod"] == "_claude/sdkMessage" { continue; }
+                            if update["_remoteMethod"] == "_claude/sdkMessage" {
+                                let mapped = mapper.native_task_notification(&update["message"]);
+                                emit_mapped(&bus, &input.thread_id, &input.turn_id, mapped, input.hidden);
+                                continue;
+                            }
                             if let Some(usage) = adapter.billing_usage(&update).and_then(|usage| adapter_usage.apply(usage)) {
                                 emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden);
                             }
@@ -2298,13 +2310,16 @@ impl AgentRuntime for AcpRuntime {
                 }
                 // DSH keeps working after its ACP prompt settles: goal rounds, and
                 // background subagents (the bridge reports a session busy while any
-                // descendant runs). The turn lasts until DSH is idle; an active
-                // goal gets time for its driver to admit the next round.
+                // descendant runs). Claude's native tasks likewise keep this
+                // subscription alive through their task-notification follow-up
+                // and SDK idle bookend. ACP foreground completion alone must
+                // not discard that output. An active DSH goal gets time for
+                // its driver to admit the next round.
                 _ = tokio::time::sleep(Duration::from_millis(if dsh_goal_active { 3000 } else { 250 })),
-                    if prompt_done && (!dsh_running || cancel.is_cancelled()) => {
+                    if prompt_done && ((!dsh_running && !claude_background_pending) || cancel.is_cancelled()) => {
                     break if cancel.is_cancelled() { TurnOutcome::Interrupted } else { TurnOutcome::Completed };
                 }
-                _ = tokio::time::sleep(Duration::from_millis(500)), if !prompt_done => {
+                _ = tokio::time::sleep(Duration::from_millis(500)), if !prompt_done || claude_background_pending => {
                     match process.exited().await {
                         Ok(true) => {
                             if cancel_sent { discard_session = true; break TurnOutcome::Interrupted; }
@@ -2394,6 +2409,8 @@ impl AgentRuntime for AcpRuntime {
             if item.status.as_deref() != Some("failed")
                 && !abandoned_tools.contains(&item.id)
                 && !completed_tools.contains(&item.id)
+                && item.extra.get("origin").and_then(Value::as_str)
+                    != Some("nativeTaskNotification")
             {
                 item.status = Some(status.into());
             }

@@ -1,6 +1,270 @@
 use super::*;
 
 #[tokio::test]
+async fn claude_background_wake_output_stays_live_and_persists_after_foreground_reply() {
+    use crate::{config::RuntimeConfig, db::Database, fake::FakeRuntime, Supervisor};
+    use pockymoe_protocol::{CreateThreadInput, CreateWorkspaceInput};
+    use rusqlite::params;
+
+    // Isolate native usage logs without mutating process-wide environment in
+    // parallel Rust tests, just as the existing Claude completion fixtures do.
+    if std::env::var("POCKYMOE_WAKE_TEST_CHILD").is_err() {
+        let home = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "acp::runtime::completion_tests::claude_background_wake_output_stays_live_and_persists_after_foreground_reply", "--nocapture"])
+            .env("POCKYMOE_WAKE_TEST_CHILD", "1")
+            .env("CLAUDE_CONFIG_DIR", home.path()).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+
+    for scenario in ["normal", "silent", "merged", "cancel", "disconnect"] {
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("background.py");
+        std::fs::write(
+            &script,
+            include_str!("../../tests/fixtures/claude_background_wake_agent.py"),
+        )
+        .unwrap();
+        let python = which::which("python3").unwrap();
+        let command = shell_words::join([python.to_str().unwrap(), script.to_str().unwrap()]);
+        let def = AcpAgentDef {
+            id: "claude".into(),
+            display_name: "Background wake fixture".into(),
+            description: String::new(),
+            transport: "native".into(),
+            base_command: command.clone(),
+            server_command: command,
+            install_command: None,
+            model_list_command: None,
+        };
+        let runtime = AcpRuntime::bound(Provider::Acp, "claude", 5_000);
+        let (session, live) = runtime
+            .spawn_session(
+                &def,
+                dir.path().to_str().unwrap(),
+                ProductSessionPolicy::default(),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let _cleanup = StartupProcess(Some(live.process.clone()));
+        runtime
+            .inner
+            .sessions
+            .lock()
+            .await
+            .insert(session.clone(), live);
+
+        // Use the real durable event persister and history API, with an isolated
+        // fake-owned thread. No live account, model call or formal DB is touched.
+        let mut config = RuntimeConfig::from_env();
+        config.database_url = dir.path().join("history.sqlite");
+        config.workspace_root = dir.path().join("workspaces");
+        config.fake_runtime = true;
+        config.relay_server_url = None;
+        config.relay_agent_token = None;
+        let supervisor = Arc::new(Supervisor::new(
+            config.clone(),
+            Database::open(&config.database_url).unwrap(),
+            vec![Arc::new(FakeRuntime::new(Provider::Codex))],
+        ));
+        let workspace = supervisor
+            .create_workspace(CreateWorkspaceInput {
+                abs_path: Some(dir.path().to_string_lossy().into_owned()),
+                git_url: None,
+                label: None,
+            })
+            .unwrap();
+        let thread = supervisor
+            .create_thread(CreateThreadInput {
+                workspace_id: workspace.id,
+                title: Some("native wake".into()),
+                provider: Some(Provider::Codex),
+                agent_id: None,
+                model: "default".into(),
+                reasoning_effort: None,
+                approval_mode: "yolo".into(),
+                parent_thread_id: None,
+            })
+            .await
+            .unwrap();
+        let turn_id = "owned-turn";
+        supervisor.db.with(|c| {
+            c.execute("INSERT INTO thread_turns(id,thread_id,status,started_at,ordinal) VALUES(?1,?2,'inProgress',?3,1)",
+                params![turn_id,thread.id,now_rfc3339()])?;
+            Ok(())
+        }).unwrap();
+        supervisor.spawn_live_item_persister();
+        let bus = supervisor.bus.for_turn(&thread.id, turn_id);
+        let cancel = CancellationToken::new();
+        let mut events = bus.subscribe();
+        let turn = runtime.start_turn(
+            StartTurnInput {
+                provider_session_id: session.clone(),
+                prompt: scenario.into(),
+                model: None,
+                reasoning_effort: None,
+                sandbox_mode: None,
+                collaboration_mode: None,
+                approval_mode: None,
+                performance_mode: None,
+                thread_id: thread.id.clone(),
+                turn_id: turn_id.into(),
+                hidden: false,
+                images: vec![],
+                title: None,
+                context_delivered: false,
+            },
+            bus,
+            cancel.clone(),
+        );
+        tokio::pin!(turn);
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                tokio::select! {
+                    result = &mut turn => panic!("{scenario}: foreground prematurely completed: {result:?}"),
+                    event = events.recv() => {
+                        if event.unwrap().event_type == "thread.output.delta" { break; }
+                    }
+                }
+            }
+        }).await.unwrap();
+        // Past the old 250ms foreground drain: no wake yet, so the turn must
+        // remain owned, cancellable, and not report a manufactured completion.
+        assert!(tokio::time::timeout(Duration::from_millis(400), &mut turn)
+            .await
+            .is_err());
+        assert!(dir.path().join("foreground-returned").exists());
+        assert!(matches!(
+            runtime.execution_state(&session).await,
+            crate::actor::ExecutionState::Running { .. }
+        ));
+        if scenario == "cancel" {
+            cancel.cancel();
+        } else {
+            std::fs::write(dir.path().join("release"), "").unwrap();
+            tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    tokio::select! {
+                        result = &mut turn => panic!("{scenario}: task notification ended follow-up early: {result:?}"),
+                        event = events.recv() => {
+                            let event = event.unwrap();
+                            if event.payload["item"]["id"] == "verify-release" { break; }
+                        }
+                    }
+                }
+            }).await.unwrap();
+            let before = supervisor
+                .get_thread_turn_detail(&thread.id, turn_id)
+                .await
+                .unwrap();
+            assert_eq!(before.status, "inProgress");
+            assert_eq!(
+                before
+                    .items
+                    .iter()
+                    .filter(|i| i.extra.get("origin") == Some(&json!("nativeTaskNotification")))
+                    .count(),
+                1
+            );
+            assert!(before
+                .items
+                .iter()
+                .any(|i| i.text == "Checking the completed release."));
+            assert!(before
+                .items
+                .iter()
+                .any(|i| i.id == "verify-release" && i.status.as_deref() == Some("running")));
+            assert!(tokio::time::timeout(Duration::from_millis(350), &mut turn)
+                .await
+                .is_err());
+            if scenario == "merged" {
+                runtime
+                    .send_input(&session, turn_id, "check the deployment too")
+                    .await
+                    .unwrap();
+            }
+            std::fs::write(dir.path().join("finish"), "").unwrap();
+        }
+        let result = tokio::time::timeout(Duration::from_secs(4), &mut turn)
+            .await
+            .unwrap();
+        let detail = supervisor
+            .get_thread_turn_detail(&thread.id, turn_id)
+            .await
+            .unwrap();
+        let expected = match scenario {
+            "cancel" => "interrupted",
+            "disconnect" => "recovering",
+            _ => "completed",
+        };
+        assert_eq!(detail.status, expected, "{scenario}");
+        if scenario == "disconnect" {
+            assert!(result.unwrap_err().is::<crate::actor::ExecutionUncertain>());
+        } else {
+            result.unwrap();
+        }
+        if scenario != "cancel" {
+            assert_eq!(
+                detail
+                    .items
+                    .iter()
+                    .filter(|i| i.extra.get("origin") == Some(&json!("nativeTaskNotification")))
+                    .count(),
+                1
+            );
+            assert!(detail.items.iter().any(|i| i.id == "verify-release"));
+            if scenario != "disconnect" {
+                let tool = detail
+                    .items
+                    .iter()
+                    .find(|i| i.id == "verify-release")
+                    .unwrap();
+                assert_eq!(tool.status.as_deref(), Some("completed"));
+                assert!(tool
+                    .detail_text
+                    .as_deref()
+                    .unwrap()
+                    .contains("Verified without repeating"));
+                let usage = detail.token_usage.as_ref().unwrap();
+                assert_eq!(
+                    usage["total"]["inputTokens"],
+                    if scenario == "silent" { 20 } else { 30 }
+                );
+                assert_eq!(
+                    usage["total"]["outputTokens"],
+                    if scenario == "silent" { 7 } else { 10 }
+                );
+            }
+            if scenario == "merged" {
+                assert!(detail
+                    .items
+                    .iter()
+                    .any(|i| i.text == "User correction processed."));
+            }
+            if scenario == "silent" {
+                assert!(!detail.items.iter().any(|i| i.text == "Release verified."));
+            }
+        }
+        let transcript = supervisor
+            .transcript(&thread.id, &crate::interaction::TranscriptQuery::default())
+            .unwrap();
+        assert_eq!(
+            transcript["turns"].as_array().unwrap().len(),
+            1,
+            "no duplicate synthetic turn"
+        );
+    }
+}
+
+#[tokio::test]
 async fn claude_coalesced_prompt_drains_only_proven_completed_work() {
     let dir = tempfile::tempdir().unwrap();
     if std::env::var("POCKYMOE_COALESCED_TEST_CHILD").is_err() {

@@ -28,6 +28,7 @@ pub struct TurnMapper {
     tool_payloads: HashMap<String, Value>,
     plans: Vec<ThreadHistoryItemDto>,
     compactions: Vec<ThreadHistoryItemDto>,
+    native_notices: Vec<ThreadHistoryItemDto>,
     subagents: HashMap<String, ThreadSubagentDto>,
     stream: Option<LiveStream>,
     agent_reconcile: Option<Reconcile>,
@@ -65,6 +66,7 @@ impl TurnMapper {
             tool_payloads: HashMap::new(),
             plans: Vec::new(),
             compactions: Vec::new(),
+            native_notices: Vec::new(),
             subagents: HashMap::new(),
             stream: None,
             agent_reconcile: None,
@@ -252,6 +254,51 @@ impl TurnMapper {
             }
         }
         mapped
+    }
+
+    /// The SDK's completion notification is distinct from a human prompt and
+    /// from ACP's tool result. Preserve the wake cause beside the ensuing work.
+    pub fn native_task_notification(&mut self, message: &Value) -> MappedUpdate {
+        if message["type"] != "system" || message["subtype"] != "task_notification" {
+            return MappedUpdate::default();
+        }
+        let Some(task) = message["task_id"].as_str().filter(|id| !id.is_empty()) else {
+            return MappedUpdate::default();
+        };
+        let id = format!("{}:native-task:{task}", self.turn_id);
+        if self.native_notices.iter().any(|notice| notice.id == id) {
+            return MappedUpdate::default();
+        }
+        self.close_text_segments();
+        let mut notice = item(
+            id,
+            "generic",
+            message["summary"]
+                .as_str()
+                .unwrap_or("Background task notification received")
+                .into(),
+            "completed",
+            &self.turn_id,
+        );
+        notice.sequence = Some(self.next_sequence());
+        notice.extra.insert(
+            "origin".into(),
+            Value::String("nativeTaskNotification".into()),
+        );
+        notice
+            .extra
+            .insert("taskId".into(), Value::String(task.into()));
+        notice
+            .extra
+            .insert("taskStatus".into(), message["status"].clone());
+        if let Some(at) = message["timestamp"].as_str() {
+            notice.created_at = Some(at.into());
+        }
+        self.native_notices.push(notice.clone());
+        MappedUpdate {
+            items: vec![notice],
+            ..Default::default()
+        }
     }
 
     pub fn apply(&mut self, update: &Value) -> MappedUpdate {
@@ -518,6 +565,7 @@ impl TurnMapper {
             && self.tools.is_empty()
             && self.plans.is_empty()
             && self.compactions.is_empty()
+            && self.native_notices.is_empty()
             && !interrupted
         {
             let mut agent = item(
@@ -535,6 +583,7 @@ impl TurnMapper {
         items.extend(self.tools);
         items.extend(self.plans);
         items.extend(self.compactions);
+        items.extend(self.native_notices);
         items.extend(self.agent_segments);
         items.sort_by_key(|item| item.sequence.unwrap_or(i64::MAX));
         items

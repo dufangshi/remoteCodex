@@ -8,7 +8,9 @@ pub(super) struct ClaudeLifecycle {
     sequence: u64,
     commands: HashMap<String, (u64, bool)>,
     tasks: HashSet<String>,
+    settled_tasks: HashSet<String>,
     tasks_known: bool,
+    background_seen: bool,
     successful_autonomous_result: Option<u64>,
     idle: bool,
     draining: bool,
@@ -17,7 +19,15 @@ pub(super) struct ClaudeLifecycle {
 impl ClaudeLifecycle {
     pub fn begin_turn(&mut self) -> u64 {
         self.draining = false;
+        self.background_seen = !self.tasks.is_empty();
         self.sequence + 1
+    }
+
+    // ACP may settle the foreground reply while SDK tasks still own follow-up
+    // work. Keep the same output subscription until their actual idle bookend;
+    // removing the last task alone precedes the autonomous model execution.
+    pub fn background_pending(&self) -> bool {
+        self.background_seen && (!self.tasks_known || !self.tasks.is_empty() || !self.idle)
     }
 
     pub fn steering_started(&mut self) -> bool {
@@ -76,6 +86,8 @@ impl ClaudeLifecycle {
                 Some("init") => {
                     self.tasks_known = true;
                     self.tasks.clear();
+                    self.settled_tasks.clear();
+                    self.background_seen = false;
                     self.idle = false;
                     self.commands.clear();
                     self.successful_autonomous_result = None;
@@ -91,6 +103,7 @@ impl ClaudeLifecycle {
                                 .iter()
                                 .filter_map(|task| task["task_id"].as_str().map(str::to_owned))
                                 .collect();
+                            self.background_seen |= !self.tasks.is_empty();
                             self.tasks_known = true;
                         } else {
                             self.tasks_known = false;
@@ -100,15 +113,24 @@ impl ClaudeLifecycle {
                 Some("task_started") => {
                     if let Some(id) = message["task_id"].as_str() {
                         self.tasks.insert(id.into());
+                        self.settled_tasks.remove(id);
+                        self.background_seen = true;
                     }
                 }
                 Some("task_notification" | "task_updated") => {
+                    let status = message["status"]
+                        .as_str()
+                        .or_else(|| message["patch"]["status"].as_str());
                     if matches!(
-                        message["status"].as_str(),
+                        status,
                         Some("completed" | "failed" | "stopped" | "killed" | "cancelled")
                     ) {
                         if let Some(id) = message["task_id"].as_str() {
                             self.tasks.remove(id);
+                            if self.settled_tasks.insert(id.into()) {
+                                self.background_seen = true;
+                                self.idle = false;
+                            }
                         }
                     }
                 }
@@ -140,6 +162,50 @@ impl ClaudeLifecycle {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn foreground_idle_does_not_end_background_work_or_its_autonomous_followup() {
+        let mut state = ClaudeLifecycle::default();
+        state.begin_turn();
+        state.record(&json!({"type":"system","subtype":"init"}));
+        state.record(&json!({"type":"system","subtype":"task_started","task_id":"bash"}));
+        state.record(&json!({"type":"system","subtype":"session_state_changed","state":"idle"}));
+        assert!(state.background_pending());
+        state.record(&json!({"type":"system","subtype":"task_notification","task_id":"bash","status":"completed"}));
+        assert!(
+            state.background_pending(),
+            "the notification starts follow-up work"
+        );
+        state.record(&json!({"type":"result","subtype":"success","is_error":false,"num_turns":1,"origin":{"kind":"task-notification"}}));
+        assert!(
+            state.background_pending(),
+            "result alone lacks its idle bookend"
+        );
+        state.record(&json!({"type":"system","subtype":"session_state_changed","state":"idle"}));
+        assert!(!state.background_pending());
+        state.record(&json!({"type":"system","subtype":"task_notification","task_id":"bash","status":"completed"}));
+        assert!(
+            !state.background_pending(),
+            "a repeated notification cannot reopen idle work"
+        );
+        state.begin_turn();
+        assert!(
+            !state.background_pending(),
+            "ordinary turns do not inherit a stale hold"
+        );
+    }
+
+    #[test]
+    fn background_snapshot_and_terminal_patch_keep_the_followup_open() {
+        let mut state = ClaudeLifecycle::default();
+        state.record(&json!({"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"older-task"}]}));
+        state.begin_turn();
+        assert!(state.background_pending());
+        state.record(&json!({"type":"system","subtype":"task_updated","task_id":"older-task","patch":{"status":"completed"}}));
+        assert!(state.background_pending());
+        state.record(&json!({"type":"system","subtype":"session_state_changed","state":"idle"}));
+        assert!(!state.background_pending());
+    }
     fn ready() -> ClaudeLifecycle {
         let mut state = ClaudeLifecycle::default();
         for message in [

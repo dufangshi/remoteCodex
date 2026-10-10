@@ -1,9 +1,10 @@
-Remote Codex is now **Pockymoe**.
+Fix Claude native background-task follow-up history.
 
-- New name and icon across the Web app, CLI and docs. The `pockymoe` command is the new name; `remote-codex` keeps working, and existing `REMOTE_CODEX_*` settings, devices, sign-ins, encryption keys, history and harness configuration are unchanged.
-- Devices still on npm (0.12.74 or older) can finally reach GitHub releases. This version is also published as the final `remote-codex` npm package: update once in Settings to install it, then press Update again to move the device to the native GitHub runtime. Later updates come from GitHub. Windows Device Manager devices run the Windows setup command from the Devices page instead.
-- Native devices update from Settings as usual; release asset names are unchanged.
+- Keep recording after the foreground ACP reply while native background tasks are pending, through the SDK's follow-up completion and idle notification.
+- Save the task-completion notification, subsequent progress, tool calls and token usage in the original turn. Duplicate notifications are recorded once.
+- Preserve streamed history when a user adds input during the follow-up, stops the turn, or the adapter disconnects. Follow-ups without final reply text are also retained.
+- This changes future live recording only; it does not backfill previously missing history.
 
-Verified with targeted Rust, Web and shared UI regressions, the native bootstrap tests, and an npm-launched Supervisor migrating itself to the native GitHub runtime end to end.
+Verified with an isolated ACP fixture and real SQLite persistence/history APIs covering normal completion, no final text, additional user input, cancellation and disconnection, plus Claude lifecycle, stream mapping and coalesced-turn regressions.
 
 This release does not change the independently released Windows Device Manager.
