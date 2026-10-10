@@ -1,7 +1,7 @@
-Native Supervisors find agents installed from your shell, and Harness settings are easier to read.
+Claude cache writes now use the duration reported by Claude Code, and token details distinguish total input from uncached input.
 
-- Native service units used to start the Supervisor with the service manager's minimal PATH. Agent CLIs installed through nvm, `~/.local/bin`, `~/.grok/bin` and similar directories were then reported as "Not installed" in Settings, and their ACP adapters refused to install. The Supervisor now merges your login shell's PATH at startup and records it in its systemd or launchd unit. If the shell PATH cannot be read, it also searches nvm's default Node, Volta and Bun.
-- Settings → Harnesses shows each harness's overall status, also as a dot on its picker button. The command-line tool and ACP adapter are listed side by side with their command, version, install source and path. A missing command now explains where the Supervisor looked. The adapter action waits until the command-line tool is installed.
-- Devices still on npm: update once to the final npm release (0.12.77), then press Update again to move to the native GitHub runtime.
+- Native Claude usage reports include separate five-minute and one-hour cache-write counts. Previously the duration was dropped and every cache write used the five-minute rate. The Supervisor now preserves the one-hour subset through accumulation, saved usage and public history, and charges mixed-duration writes at their respective rates. Settings → Model pricing includes a separate one-hour write rate.
+- The audited image turn contained 15,121,954 input tokens across 69 responses: 138 uncached, 14,045,452 cache-read and 1,076,364 one-hour cache-write tokens. At the configured Opus 5.5 API rates its estimate should be $12.5424544; the previous five-minute assumption produced $9.3133624.
+- The cost popover now shows total input and visible category labels. One-hour-only writes carry a small 1h marker. Existing records without saved duration information retain the previous five-minute fallback; this release does not scan or rewrite old records.
 
-This release does not change the independently released Windows Device Manager.
+This release includes the 0.12.81 shell PATH and Harness settings fixes. The Windows Device Manager remains independently released.
