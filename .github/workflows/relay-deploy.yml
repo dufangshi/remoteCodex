@@ -37,12 +37,16 @@ jobs:
           cmd-format: rustup run ${{ env.RUST_VERSION }} {0}
       - name: Build and smoke native executable
         run: |
-          cargo +"${RUST_VERSION}" build --locked --release --package remote-codex
-          target/release/remote-codex version
+          cargo +"${RUST_VERSION}" build --locked --release --package pockymoe
+          target/release/pockymoe version
+          # The relay host's unit runs /opt/remote-codex-rust-relay/remote-codex.
+          # Host paths and units are renamed in a coordinated infrastructure change.
+          mkdir -p relay-native
+          cp target/release/pockymoe relay-native/remote-codex
       - uses: actions/upload-artifact@v4
         with:
           name: relay-native
-          path: target/release/remote-codex
+          path: relay-native/remote-codex
           if-no-files-found: error
           retention-days: 3
 
@@ -58,13 +62,13 @@ jobs:
         with:
           repository: dufangshi/remote-codex-thread-ui-rust
           ref: ${{ inputs.thread_ui_sha }}
-          path: remote-codex-thread-ui
+          path: pockymoe-thread-ui
       - name: Validate shared UI revision
         env:
           THREAD_UI_SHA: ${{ inputs.thread_ui_sha }}
         run: |
           [[ "${THREAD_UI_SHA}" =~ ^[0-9a-f]{40}$ ]]
-          test "$(git -C remote-codex-thread-ui rev-parse HEAD)" = "${THREAD_UI_SHA}"
+          test "$(git -C pockymoe-thread-ui rev-parse HEAD)" = "${THREAD_UI_SHA}"
       - uses: pnpm/action-setup@v4
         with:
           version: 10.11.1
@@ -74,13 +78,13 @@ jobs:
           cache: pnpm
           cache-dependency-path: |
             pnpm-lock.yaml
-            remote-codex-thread-ui/pnpm-lock.yaml
+            pockymoe-thread-ui/pnpm-lock.yaml
       - name: Build Web assets
         run: |
-          pnpm --dir remote-codex-thread-ui install --frozen-lockfile
-          pnpm --dir remote-codex-thread-ui --filter @remote-codex/thread-ui build
-          pnpm --filter @remote-codex/supervisor-web... install --frozen-lockfile
-          pnpm --filter @remote-codex/supervisor-web build
+          pnpm --dir pockymoe-thread-ui install --frozen-lockfile
+          pnpm --dir pockymoe-thread-ui --filter @pockymoe/thread-ui build
+          pnpm --filter @pockymoe/supervisor-web... install --frozen-lockfile
+          pnpm --filter @pockymoe/supervisor-web build
       - uses: actions/upload-artifact@v4
         with:
           name: relay-web

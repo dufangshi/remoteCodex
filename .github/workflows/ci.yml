@@ -118,8 +118,15 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 10.11.1
+      # A same-named thread UI branch carries changes that must land together.
       - name: Check out thread UI dependency
-        run: git clone --depth 1 --branch main https://github.com/dufangshi/remote-codex-thread-ui-rust.git ./pockymoe-thread-ui
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          repo=https://github.com/dufangshi/remote-codex-thread-ui-rust.git
+          ref=main
+          if git ls-remote --exit-code --heads "${repo}" "${BRANCH}" >/dev/null; then ref="${BRANCH}"; fi
+          git clone --depth 1 --branch "${ref}" "${repo}" ./pockymoe-thread-ui
       - name: Install thread UI dependencies
         run: pnpm --dir ./pockymoe-thread-ui install --frozen-lockfile
       - name: Install workspace dependencies

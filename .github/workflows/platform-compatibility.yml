@@ -99,7 +99,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git clone --depth 1 --branch "${THREAD_UI_REF}" "${THREAD_UI_REPO}" ./pockymoe-thread-ui
+          ref="${THREAD_UI_REF}"
+          # A same-named thread UI branch carries changes that must land together.
+          if git ls-remote --exit-code --heads "${THREAD_UI_REPO}" "${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}" >/dev/null; then ref="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"; fi
+          git clone --depth 1 --branch "${ref}" "${THREAD_UI_REPO}" ./pockymoe-thread-ui
           echo "Thread UI: $(git -C ./pockymoe-thread-ui rev-parse HEAD)" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Install dependencies
