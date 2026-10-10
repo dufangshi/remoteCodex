@@ -184,6 +184,90 @@ test('turn navigation changes direction reliably and tool details load only on c
   expect(await page.evaluate(() => localStorage.getItem('remote-codex-show-reasoning-summaries'))).toBe('true');
 });
 
+test('operation summaries stay compact in Chinese with long timestamps and file names', async ({ page, request }, testInfo) => {
+  await page.emulateMedia({ colorScheme: 'dark' });
+  const id = await createThread(request);
+  const turnId = `${id}-compact-turn`;
+  const at = (seconds: number) => new Date(Date.UTC(2026, 8, 20, 1, 30, seconds)).toISOString();
+  const db = new DatabaseSync(path.resolve(process.env.E2E_DATABASE_URL!));
+  db.function('search_fold', { deterministic: true }, value => typeof value === 'string' ? value.toLowerCase() : value);
+  db.function('search_body', { deterministic: true }, (text, kind, _source) => ['userMessage', 'agentMessage'].includes(String(kind)) ? text : null);
+  try {
+    db.prepare('INSERT INTO thread_turns(id,thread_id,status,started_at,completed_at,ordinal,display_prompt) VALUES (?,?,?,?,?,?,?)').run(turnId, id, 'completed', at(0), at(300), 0, '优化操作记录的阅读体验');
+    const items = [
+      { kind: 'userMessage', text: '优化操作记录的阅读体验', seconds: 0 },
+      { kind: 'agentMessage', text: '先检查项目文件，再调整布局。完整运行记录按需展开。', seconds: 78 },
+      { kind: 'commandExecution', text: 'cd /tmp && for name in project-a project-b; do npm view "$name" version; done', seconds: 80 },
+      { kind: 'commandExecution', text: 'git status --short && git diff --stat', seconds: 117 },
+      { kind: 'fileRead', text: '/home/user/workspace/packages/application/src/components/VeryLongComponentName.tsx', seconds: 120 },
+      { kind: 'fileRead', text: '/home/user/workspace/packages/application/src/styles/VeryLongStylesheetName.css', seconds: 125 },
+      { kind: 'fileChange', text: 'scripts/generate.py', changedFiles: 1, addedLines: 95, removedLines: 8, seconds: 130 },
+      { kind: 'fileChange', text: 'scripts/icon_tools.py', changedFiles: 1, addedLines: 82, removedLines: 4, seconds: 135 },
+      { kind: 'fileChange', text: '/home/user/.claude/skills/a-very-long-skill-directory-name/SKILL.md', changedFiles: 1, addedLines: 78, removedLines: 0, seconds: 147 },
+      { kind: 'commandExecution', text: 'pnpm test', seconds: 267 },
+      { kind: 'agentMessage', text: '布局已调整，命令、文件读取和修改都可以继续展开查看。', seconds: 295 },
+    ];
+    items.forEach(({seconds, ...item}, index) => {
+      const key = `${turnId}-${index}`, time = at(seconds);
+      db.prepare('INSERT INTO thread_history_items(id,thread_id,turn_id,item_id,item_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?)').run(randomUUID(), id, turnId, key, JSON.stringify({ ...item, id: key, createdAt: time, updatedAt: time, status: 'completed' }), time, time);
+    });
+  } finally { db.close(); }
+  const details: string[] = [];
+  page.on('request', r => { if (r.url().includes(`/api/threads/${id}/items/`)) details.push(r.url()); });
+  await page.addInitScript(() => localStorage.setItem('remote-codex.locale', 'zh-CN'));
+  await page.goto(`/threads/${id}`);
+  await page.locator('.thread-graph-worked-summary > button').click();
+  const activity = page.locator('.thread-graph-history-group-activity');
+  const header = activity.locator(':scope > .thread-graph-history-group-card > button');
+  await expect(header).toContainText('8 个步骤');
+  await expect(header.locator('.thread-graph-history-group-time')).toHaveText('3m 7s');
+  await expect(header.locator('.thread-graph-history-group-inline-icon')).toHaveCount(0);
+  await expect(header).toHaveAttribute('aria-expanded', 'false');
+  expect(details).toHaveLength(0);
+  await mkdir('.temp/activity-compact/screenshots', { recursive: true });
+  await header.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `.temp/activity-compact/screenshots/${testInfo.project.name}-collapsed.png` });
+  await header.click();
+  const fileGroup = activity.locator('.thread-graph-history-group-file-change');
+  const fileHeader = fileGroup.locator(':scope > .thread-graph-history-group-card > button');
+  await expect(fileHeader).toContainText('3 个文件');
+  await expect(fileHeader.getByLabel('新增 255 行', { exact: true })).toBeVisible();
+  await expect(fileHeader.getByLabel('删除 12 行', { exact: true })).toBeVisible();
+  for (const group of ['command', 'file-read', 'file-change']) {
+    for (const toggle of await activity.locator(`.thread-graph-history-group-${group} > .thread-graph-history-group-card > button`).all()) await toggle.click();
+  }
+  expect(details).toHaveLength(0);
+  // Full timestamps used to consume all header width and squeeze Chinese into a column.
+  await fileHeader.getByRole('button', { name: /切换时间戳/ }).click();
+  await expect(fileHeader.locator('time')).not.toHaveText('17s');
+  const headers = activity.locator('.thread-graph-history-group-toggle');
+  const geometry = await headers.evaluateAll(nodes => nodes.map(n => {
+    const label = n.querySelector('.thread-graph-history-group-summary')!, time = n.querySelector('.thread-graph-history-group-time')!;
+    return { height: n.getBoundingClientRect().height, labelHeight: label.getBoundingClientRect().height, end: n.getBoundingClientRect().right, timeEnd: time.getBoundingClientRect().right, width: n.clientWidth, scrollWidth: n.scrollWidth };
+  }));
+  for (const row of geometry) {
+    expect(row.height).toBeLessThanOrEqual(36);
+    expect(row.labelHeight).toBeLessThanOrEqual(24);
+    expect(row.timeEnd).toBeLessThanOrEqual(row.end);
+    expect(row.scrollWidth).toBeLessThanOrEqual(row.width + 1);
+  }
+  const longFile = fileGroup.locator('.matter-step-title').last();
+  await expect(longFile).toHaveCSS('white-space', 'nowrap');
+  await expect(longFile).toHaveCSS('text-overflow', 'ellipsis');
+  await fileHeader.getByRole('button', { name: /切换时间戳/ }).click();
+  await expect(fileHeader.locator('time')).toHaveText('17s');
+  await fileHeader.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `.temp/activity-compact/screenshots/${testInfo.project.name}-expanded.png` });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  if (testInfo.project.name === 'mobile-chromium') {
+    await page.setViewportSize({ width: 320, height: 800 });
+    expect(await headers.evaluateAll(nodes => nodes.every(n => n.scrollWidth <= n.clientWidth + 1 && n.getBoundingClientRect().height <= 36))).toBe(true);
+  }
+  await header.click();
+  await expect(header).toHaveAttribute('aria-expanded', 'false');
+  expect(details).toHaveLength(0);
+});
+
 test('failed sends preserve the prompt and all attachments for correction and retry', async ({ page, request }) => {
   const id = await createThread(request);
   await page.goto(`/threads/${id}`);
