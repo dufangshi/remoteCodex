@@ -14,6 +14,41 @@ async function createThread(request: APIRequestContext) {
   return value.id ?? value.thread.id as string;
 }
 
+test('interrupted history keeps one turn status without repeated message circles or blank event badges', async ({ page, request }, testInfo) => {
+  const id = await createThread(request);
+  const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
+  const startedAt = new Date(Date.now() - 60_000).toISOString();
+  const completedAt = new Date().toISOString();
+  await page.routeWebSocket(/\/ws(?:\?.*)?$/, socket => {
+    socket.send(JSON.stringify({type:'supervisor.connected'}));
+    socket.onMessage(() => socket.send(JSON.stringify({type:'supervisor.pong'})));
+  });
+  await page.route(`**/api/threads/${id}?**`, route => route.fulfill({json:{
+    ...detail, totalTurnCount:1, activeSubagents:[],
+    thread:{...detail.thread,status:'idle',activeTurnId:null},
+    turns:[{id:'interrupted-history',status:'interrupted',startedAt,completedAt,items:[
+      {id:'prompt',kind:'userMessage',text:'Check background recording'},
+      {id:'checkpoint-one',kind:'agentMessage',text:'Background progress is saved.',status:'interrupted'},
+      {id:'compaction',kind:'contextCompaction',text:'Context compaction',status:'interrupted'},
+      {id:'checkpoint-two',kind:'agentMessage',text:'The update will resume this thread.',status:'interrupted'},
+      {id:'failure',kind:'generic',text:'A verification command failed.',status:'failed'},
+    ]}],
+  }}));
+  await page.goto(`/threads/${id}`);
+  const summary = page.locator('.thread-graph-worked-summary');
+  await expect(summary).toContainText('Interrupted');
+  await summary.getByRole('button',{name:/Expand turn 1$/}).click();
+  await expect(page.getByText('Background progress is saved.',{exact:true})).toBeVisible();
+  await expect(page.getByText('The update will resume this thread.',{exact:true})).toBeVisible();
+  await expect(page.locator('[data-role="assistant"] .thread-graph-message-status')).toHaveCount(0);
+  await expect(page.locator('.thread-graph-event-context')).toContainText('Context compacted');
+  await expect(page.locator('.thread-graph-event-context .thread-graph-tool-badge')).toHaveCount(0);
+  const failure = page.locator('.thread-graph-event-generic .thread-graph-status-label');
+  await expect(failure).toHaveText('Failed');
+  expect((await failure.boundingBox())!.width).toBeGreaterThan(15);
+  await page.screenshot({path:testInfo.outputPath('clean-history.png'),scale:'css'});
+});
+
 test('opening a detached thread automatically connects once and hides the healthy indicator', async ({ page, request }) => {
   const id = await createThread(request);
   const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
