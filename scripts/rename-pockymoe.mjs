@@ -162,6 +162,7 @@ const KEEP = [
   'remote-codex-win32-x64-msvc-cli.exe',
   'remote-codex-web.zip',
   'remote-codex-${setup_os}',
+  'remote-codex-linux-${',
   // The npm launcher entry that native setup bridges on legacy devices.
   'remote-codex.mjs',
   'npm/remote-codex',
