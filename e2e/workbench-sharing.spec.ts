@@ -14,7 +14,7 @@ test('workbench shares images publicly and grants device access without leaving 
   const rp = await freePort(), sp = await freePort();
   const base = `http://127.0.0.1:${rp}`;
   const password = randomBytes(24).toString('hex');
-  const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('POCKYMOE_')));
+  const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(POCKYMOE|REMOTE_CODEX)_/.test(key)));
   const start = (command: string, extra: Record<string, string>) => {
     const proc = spawn(resolve('target/debug/pockymoe'), [command], { env: { ...environment, HOST: '127.0.0.1', POCKYMOE_ADMIN_USERNAME: 'testadmin', POCKYMOE_ADMIN_PASSWORD: password, POCKYMOE_SESSION_SECRET: randomBytes(32).toString('hex'), POCKYMOE_RELAY_SESSION_SECRET: randomBytes(32).toString('hex'), POCKYMOE_E2E_FAKE_RUNTIME: '1', ...extra }, stdio: 'ignore' });
     processes.push(proc);

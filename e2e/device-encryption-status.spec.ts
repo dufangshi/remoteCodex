@@ -21,7 +21,7 @@ test('device locks are verified independently of browser visit history', async (
   const external = process.env.E2E_DEVICE_LOCK_RELAY;
   const base = external ?? `http://127.0.0.1:${await freePort()}`;
   const password = process.env.E2E_DEVICE_LOCK_PASSWORD ?? randomBytes(24).toString('hex');
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('POCKYMOE_')));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(POCKYMOE|REMOTE_CODEX)_/.test(key)));
   function start(command: string, extra: Record<string, string>) {
     const proc = spawn(resolve('target/debug/pockymoe'), [command], {
       env: { ...env, HOST: '127.0.0.1', POCKYMOE_E2E_FAKE_RUNTIME: '1', POCKYMOE_ADMIN_USERNAME: 'lockadmin', POCKYMOE_ADMIN_PASSWORD: password, POCKYMOE_SESSION_SECRET: randomBytes(32).toString('hex'), ...extra },

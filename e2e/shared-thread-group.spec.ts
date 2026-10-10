@@ -25,7 +25,7 @@ test('shared Claude families keep provider models, effort controls and consisten
     password = randomBytes(24).toString('hex');
   const clean = Object.fromEntries(
     Object.entries(process.env).filter(
-      ([key]) => !key.startsWith('POCKYMOE_'),
+      ([key]) => !/^(POCKYMOE|REMOTE_CODEX)_/.test(key),
     ),
   );
   const start = (command: string, extra: Record<string, string>) => {

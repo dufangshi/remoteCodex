@@ -13,7 +13,7 @@ test('left avatar menu opens shared settings and persists uploaded profile image
   await new Promise<void>(done => reservation.close(() => done()));
   const base = `http://127.0.0.1:${port}`;
   const password = randomBytes(20).toString('hex');
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('POCKYMOE_')));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(POCKYMOE|REMOTE_CODEX)_/.test(key)));
   const logs: string[] = [];
   const relay = spawn(resolve('target/debug/pockymoe'), ['relay'], {
     env: { ...env, HOST: '127.0.0.1', PORT: String(port), POCKYMOE_PUBLIC_BASE_URL: `http://localhost:${process.env.E2E_WEB_PORT ?? 5173}`, POCKYMOE_ADMIN_USERNAME: 'test-admin', POCKYMOE_ADMIN_PASSWORD: password, POCKYMOE_RELAY_DATA_DIR: directory,

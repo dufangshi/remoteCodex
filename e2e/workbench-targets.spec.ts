@@ -37,7 +37,7 @@ test('cross-device split keeps both chats writable and tools follow the last foc
   const password = randomBytes(24).toString('hex');
   const environment = Object.fromEntries(
     Object.entries(process.env).filter(
-      ([key]) => !key.startsWith('POCKYMOE_'),
+      ([key]) => !/^(POCKYMOE|REMOTE_CODEX)_/.test(key),
     ),
   );
   const start = (command: string, extra: Record<string, string>) => {

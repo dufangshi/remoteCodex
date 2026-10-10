@@ -13,7 +13,7 @@ test('private device ports support browser links, HTTP streaming, WebSocket and 
   const root = await mkdtemp(resolve('.local/port-preview-'));
   const processes: ChildProcess[] = [];
   const logs: string[] = [];
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('POCKYMOE_')));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(POCKYMOE|REMOTE_CODEX)_/.test(key)));
   const password = randomBytes(24).toString('hex');
   const freePort = async () => {
     const server = createServer();

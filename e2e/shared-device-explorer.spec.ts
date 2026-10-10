@@ -22,7 +22,7 @@ test('shared device Explorer honors full, read-only and no filesystem access', a
   const rp = await freePort(), sp = await freePort();
   const base = `http://127.0.0.1:${rp}`;
   const password = randomBytes(24).toString('hex');
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('POCKYMOE_')));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(POCKYMOE|REMOTE_CODEX)_/.test(key)));
   function start(command: string, extra: Record<string, string>) {
     const proc = spawn(resolve('target/debug/pockymoe'), [command], {
       env: { ...env, HOST: '127.0.0.1', POCKYMOE_ADMIN_USERNAME: 'testadmin',

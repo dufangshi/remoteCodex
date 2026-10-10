@@ -24,7 +24,7 @@ test('account shortcuts sync across devices and browsers and steer without an ex
   const password = randomBytes(24).toString('hex');
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
-      ([key]) => !key.startsWith('POCKYMOE_'),
+      ([key]) => !/^(POCKYMOE|REMOTE_CODEX)_/.test(key),
     ),
   );
   function start(command: string, extra: Record<string, string>) {

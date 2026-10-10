@@ -33,7 +33,7 @@ export default defineConfig({
       env: {
         ...Object.fromEntries(
           Object.keys(process.env)
-            .filter((key) => key.startsWith('POCKYMOE_'))
+            .filter((key) => /^(POCKYMOE|REMOTE_CODEX)_/.test(key))
             .map((key) => [key, '']),
         ),
         POCKYMOE_MODE: 'local',

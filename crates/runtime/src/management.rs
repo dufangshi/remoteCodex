@@ -252,6 +252,8 @@ pub fn installation(path: PathBuf, agent: &str) -> Installation {
                 | "@agentclientprotocol/codex-acp"
                 | "@agentclientprotocol/claude-agent-acp"
                 | "pockymoe"
+                // Global npm installs from before the native runtime and the rename.
+                | "remote-codex"
         );
         if !allowed {
             continue;

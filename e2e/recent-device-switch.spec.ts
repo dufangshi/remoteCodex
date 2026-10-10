@@ -8,7 +8,7 @@ import { createServer } from 'node:net';
 test('cross-device recent chats preserve complete agent families and navigation DOM', async ({ browser }) => {
   const root = await mkdtemp(resolve('.local/recent-switch-'));
   const processes: ChildProcess[] = [];
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('POCKYMOE_')));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(POCKYMOE|REMOTE_CODEX)_/.test(key)));
   const port = () => new Promise<number>(done => { const server = createServer(); server.listen(0, '127.0.0.1', () => { const value = (server.address() as { port: number }).port; server.close(() => done(value)); }); });
   const relay = `http://127.0.0.1:${await port()}`;
   const password = randomBytes(24).toString('hex');

@@ -28,7 +28,7 @@ test('account push registration, durable completion and background tab read stat
   const password = randomBytes(24).toString('hex');
   const cleanEnv = Object.fromEntries(
     Object.entries(process.env).filter(
-      ([key]) => !key.startsWith('POCKYMOE_'),
+      ([key]) => !/^(POCKYMOE|REMOTE_CODEX)_/.test(key),
     ),
   );
   function start(command: string, extra: Record<string, string>) {

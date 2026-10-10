@@ -39,7 +39,7 @@ def main():
     temp = tempfile.TemporaryDirectory(prefix="unified-hooks-cli-")
     root = Path(temp.name)
     base = f"http://127.0.0.1:{args.port}"
-    clean = {k: v for k, v in os.environ.items() if not k.startswith("POCKYMOE_") and k not in ("DATABASE_URL", "WORKSPACE_ROOT")}
+    clean = {k: v for k, v in os.environ.items() if not k.startswith(("POCKYMOE_", "REMOTE_CODEX_")) and k not in ("DATABASE_URL", "WORKSPACE_ROOT")}
     env = dict(clean, POCKYMOE_MODE="local", POCKYMOE_E2E_FAKE_RUNTIME="1", POCKYMOE_DATABASE_PATH=str(root / "db.sqlite"), DATABASE_URL=str(root / "db.sqlite"), POCKYMOE_WORKSPACE_ROOT=str(root), WORKSPACE_ROOT=str(root), HOST="127.0.0.1", PORT=str(args.port))
     process = None
     cli_process = None

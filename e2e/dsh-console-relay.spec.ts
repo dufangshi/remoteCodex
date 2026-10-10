@@ -39,7 +39,7 @@ test('opens the native DSH console from a Relay page', async ({ page, context },
   const root = await mkdtemp(path.resolve('.local/dsh-console-relay-'));
   const processes: ChildProcess[] = [];
   const logs: string[] = [];
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('POCKYMOE_')));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(POCKYMOE|REMOTE_CODEX)_/.test(key)));
   const password = randomBytes(24).toString('hex');
   const freePort = async () => {
     const server = createServer();
