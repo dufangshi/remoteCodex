@@ -1,6 +1,6 @@
 # Supervisor updates and interrupted-task recovery
 
-When a Supervisor is already running, prefer its device-scoped management API (the same API as Settings → Supervisor → Check updates / Update). See [AGENTS.md](../AGENTS.md). Do not replace its npm package and kill its process independently when this API is available.
+When a Supervisor is already running, prefer its device-scoped management API (the same API as Settings → Supervisor → Check updates / Update). See [AGENTS.md](../AGENTS.md). Do not replace its native executable and kill its process independently when this API is available.
 
 - `POST /api/management/supervisor/check`: installed/running/latest versions and update availability.
 - `POST /api/management/supervisor/restart`: restart the currently running version without downloading or installing a package, then continue only tasks paused by this restart.
@@ -16,7 +16,7 @@ Through a relay, use the selected device's `/relay/devices/<deviceId>` prefix an
 1. Reject concurrent updates and avoid pausing anything if no update is available.
 2. Block new turns, record the currently running turn IDs in SQLite, and request cancellation. Wait for runtime cancellation and history persistence before installing/restarting.
 3. Launch an updater outside the Supervisor's process lifetime: launchd on macOS, systemd user service on Linux, WMI on Windows. Linux machines without a user service manager use `setsid` to create a separate OS session.
-4. Back up the npm package, install the new version in the owning npm prefix, verify the downloaded native binary and version, stop the old PID, then start the new Supervisor with its existing configuration. Verify HTTP health, process/version change, and relay reconnection in relay mode. The `verifying` phase distinguishes a started process from a fully verified operation. Before the new process is launched, installation failure can restore the previous package. Once launch has been attempted, retain the current installation: even an unsuccessful startup may have migrated the database, so a package-only downgrade is unsafe.
+4. Stage an immutable GitHub native release and Web bundle in a versioned user-owned directory, verify SHA256 and the binary version, stop the old PID, then start the new Supervisor with its existing configuration. Verify HTTP health, process/version change, and relay reconnection in relay mode. The `verifying` phase distinguishes a started process from a fully verified operation. Before the new process is launched, installation failure can restore the previous installation. Once launch has been attempted, retain the current installation: even an unsuccessful startup may have migrated the database, so a package-only downgrade is unsafe.
 5. On startup, wait for the independent worker to finish health/relay verification, then automatically continue only tasks carrying an update recovery marker. The recovery journal remains intact while verification is active. Retain the native session, workspace, model, permission settings and queued instructions. Continuation tells the agent to inspect partial work before resuming; a filesystem operation or external request already completed cannot be rolled back automatically.
 
 The recovery marker is consumed in the same SQLite transaction as the new turn. Repeated recovery notifications do not create duplicate turns. Queued prompts follow the recovered task. Internal recovery markers do not appear as pending user input; the actual continuation is recorded in conversation history for transparency.
@@ -27,11 +27,19 @@ This is task continuation, not transparent process checkpointing. Running shell 
 
 ## Installation ownership
 
-The updater resolves the actual launcher independently of npm's configured global prefix. Writable conventional global npm installations update in their owning prefix, including distro npm and nvm. Read-only installations, pnpm stores, local dependencies and installations without npm stage an official release under the current user's `~/.remote-codex/installations/`. Registry SHA-512 integrity and the native manifest/binary are verified before atomically routing the original launcher to the staged release. No sudo, PATH rewrite or package-manager store mutation is required.
+GitHub Releases are authoritative. See [native installation and migration](github-runtime.md).
+The native updater stages each version under `~/.local/share/remote-codex/native/releases/`,
+verifies every downloaded asset and the executable's version, and switches the current
+installation only after the original Supervisor has drained and stopped. Source and
+unmanaged executables are never silently overwritten. Database and device identity
+paths are preserved. A failed download leaves the current installation intact.
 
-Routing is scoped to the canonical original launcher and survives service and machine restarts. An explicit package-manager upgrade of the original package supersedes its previous route. Preparation failure leaves the old service running; failure before a new launch restores the previous route. After launch is attempted, retain the new installation because the database may already have migrated. Managed releases preserve the service's existing configuration, database, device identity and service manager.
-
-Source checkouts are detected and never overwritten with published releases. Standalone native processes without a launcher still require a one-time launcher bootstrap. Older launchers that predate routing also require bootstrap when their original update API cannot complete an upgrade. A user must have a writable home installation directory; the updater reports this before stopping the Supervisor.
+Existing writable npm installations migrate once by rerunning the same setup command.
+A minimal compatibility bridge lets the old management API keep its maintenance and
+recovery contract while delegating downloads and restart to the native updater. Future
+updates require neither npm nor Node. A legacy installation whose helper cannot be
+written needs explicit bootstrap/service recovery; the installer reports this before
+stopping anything. Legacy npm tests and incident records below remain historical evidence.
 
 ## Verification
 

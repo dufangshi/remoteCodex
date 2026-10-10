@@ -86,41 +86,7 @@ async fn updater(state: &Supervisor, action: &str) -> anyhow::Result<Value> {
             return Ok(status);
         }
     }
-    let node = std::env::var_os("REMOTE_CODEX_LAUNCHER_NODE").ok_or_else(|| {
-        anyhow::anyhow!("This Supervisor was not started by an updatable npm launcher")
-    })?;
-    let launcher = std::path::PathBuf::from(
-        std::env::var_os("REMOTE_CODEX_LAUNCHER_PATH")
-            .ok_or_else(|| anyhow::anyhow!("Launcher path unavailable"))?,
-    );
-    let helper = launcher.with_file_name("supervisor-update.mjs");
-    let mut cmd = tokio::process::Command::new(node);
-    cmd.args([helper.as_os_str(), action.as_ref()])
-        .env("REMOTE_CODEX_UPDATE_DATABASE", &state.config.database_url)
-        .env(
-            "REMOTE_CODEX_UPDATE_RUNNING_VERSION",
-            env!("CARGO_PKG_VERSION"),
-        )
-        .env("REMOTE_CODEX_UPDATE_PID", std::process::id().to_string())
-        .env("REMOTE_CODEX_UPDATE_EXECUTABLE", std::env::current_exe()?)
-        .env(
-            "REMOTE_CODEX_UPDATE_MODE",
-            if state.config.mode == remote_codex_protocol::Mode::Relay {
-                "relay"
-            } else {
-                "local"
-            },
-        )
-        .env("REMOTE_CODEX_UPDATE_PORT", state.config.port.to_string())
-        .env("REMOTE_CODEX_UPDATE_HOST", &state.config.host)
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .kill_on_drop(true);
-    let result = tokio::time::timeout(std::time::Duration::from_secs(20), cmd.output()).await??;
-    if !result.status.success() {
-        anyhow::bail!("Update helper failed. Check the device update log.");
-    }
-    Ok(serde_json::from_slice(&result.stdout)?)
+    crate::distribution::updater(state, action).await
 }
 pub async fn supervisor_status(State(state): State<Arc<Supervisor>>) -> Json<Value> {
     let mut value = updater(&state, "status").await.unwrap_or_else(|error| json!({"runningVersion":env!("CARGO_PKG_VERSION"),"canUpdate":false,"canRestart":false,"reason":error.to_string()}));

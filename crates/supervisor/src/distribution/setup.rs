@@ -1,0 +1,421 @@
+use super::{releases, service, *};
+use anyhow::{bail, ensure};
+use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
+use std::{collections::BTreeMap, net::TcpListener, time::Duration};
+
+pub struct SetupOptions {
+    pub relay: String,
+    pub token: Option<String>,
+    pub code: Option<String>,
+    pub port: u16,
+}
+fn digest(value: &[u8]) -> String {
+    hex::encode(Sha256::digest(value))
+}
+fn identity(origin: &str, options: &SetupOptions) -> String {
+    digest(
+        &serde_json::to_vec(&json!([
+            origin,
+            options.port,
+            if options.token.is_some() {
+                "token"
+            } else {
+                "code"
+            },
+            options.token.as_ref().or(options.code.as_ref())
+        ]))
+        .unwrap(),
+    )
+}
+pub fn matches(saved: &Value, origin: &str, token: &str, port: u16) -> bool {
+    let stored = saved["REMOTE_CODEX_RELAY_SERVER_URL"]
+        .as_str()
+        .unwrap_or("")
+        .replacen("wss:", "https:", 1)
+        .replacen("ws:", "http:", 1);
+    url::Url::parse(&stored).is_ok_and(|u| u.origin().ascii_serialization() == origin)
+        && saved["REMOTE_CODEX_RELAY_AGENT_TOKEN"] == token
+        && saved["REMOTE_CODEX_RELAY_SUPERVISOR_PORT"]
+            .as_str()
+            .unwrap_or("8787")
+            .parse::<u16>()
+            .ok()
+            == Some(port)
+}
+fn local_client() -> Result<reqwest::Client> {
+    Ok(reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(20))
+        .build()?)
+}
+pub async fn device_api(port: u16, saved: &Value, route: &str, post: bool) -> Result<Value> {
+    let base = format!("http://127.0.0.1:{port}");
+    let client = local_client()?;
+    let login = client.post(format!("{base}/api/auth/login")).json(&json!({"username":saved["REMOTE_CODEX_ADMIN_USERNAME"],"password":saved["REMOTE_CODEX_ADMIN_PASSWORD"]})).send().await?.error_for_status()?;
+    let cookie = login
+        .headers()
+        .get(reqwest::header::SET_COOKIE)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.split(';').next())
+        .map(str::to_string);
+    let body: Value = login.json().await?;
+    let mut request = if post {
+        client.post(format!("{base}{route}")).json(&json!({}))
+    } else {
+        client.get(format!("{base}{route}"))
+    };
+    if let Some(cookie) = cookie {
+        request = request.header(reqwest::header::COOKIE, cookie);
+    } else if let Some(token) = body["token"].as_str() {
+        request = request.bearer_auth(token);
+    }
+    Ok(request.send().await?.error_for_status()?.json().await?)
+}
+pub async fn health(port: u16, host: &str) -> Option<Value> {
+    let host = match host {
+        "0.0.0.0" => "127.0.0.1",
+        "::" => "[::1]",
+        h => h,
+    };
+    local_client()
+        .ok()?
+        .get(format!("http://{host}:{port}/healthz"))
+        .timeout(Duration::from_secs(2))
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json()
+        .await
+        .ok()
+}
+async fn online(port: u16, version: &str) -> Result<()> {
+    for _ in 0..120 {
+        if let Some(h) = health(port, "127.0.0.1").await {
+            if h["status"] == "ok" && h["runningVersion"] == version && h["relayConnected"] == true
+            {
+                println!("Device is online and running Remote Codex {version}.");
+                return Ok(());
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+    bail!(
+        "Device did not reconnect at the requested version. Logs: {}",
+        service::log_path().display()
+    )
+}
+fn bridge(path: &Path, binary: &Path) -> Result<()> {
+    ensure!(
+        path.file_name().and_then(|n| n.to_str()) == Some("remote-codex.mjs"),
+        "Unrecognized legacy launcher path"
+    );
+    let package: Value = read(
+        &path
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("package.json"),
+    )?;
+    ensure!(
+        package["name"] == "remote-codex",
+        "Unrecognized legacy launcher package"
+    );
+    let helper = path.with_file_name("supervisor-update.mjs");
+    let source = std::fs::read(&helper)?;
+    let backup = helper.with_extension("mjs.pre-native");
+    if !backup.exists() {
+        write_bytes(&backup, &source)?;
+    }
+    let js_path = serde_json::to_string(&binary.to_string_lossy())?;
+    let code = format!("// One-time compatibility bridge: native updater owns all downloads.\nimport {{spawnSync}} from 'node:child_process';\nconst r=spawnSync({js_path},['runtime-maintenance',process.argv[2]],{{stdio:'inherit',env:process.env}});\nif(r.error){{console.error(r.error.message);process.exit(1);}}\nprocess.exit(r.status??1);\n");
+    write_bytes(&helper, code.as_bytes())?;
+    Ok(())
+}
+pub async fn setup(options: SetupOptions) -> Result<()> {
+    ensure!(
+        options.port > 0 && options.token.is_some() != options.code.is_some(),
+        "Provide one device token or setup code and a valid port"
+    );
+    let url = url::Url::parse(&options.relay)?;
+    ensure!(
+        url.username().is_empty()
+            && url.password().is_none()
+            && url.query().is_none()
+            && url.fragment().is_none(),
+        "Invalid relay URL"
+    );
+    ensure!(
+        url.scheme() == "https"
+            || (url.scheme() == "http"
+                && matches!(url.host_str(), Some("localhost" | "127.0.0.1"))),
+        "Relay must use HTTPS"
+    );
+    let origin = url.origin().ascii_serialization();
+    let file = config_path();
+    let mut saved: Value = if file.exists() {
+        read(&file)?
+    } else {
+        json!({})
+    };
+    ensure!(saved.is_object(), "Invalid device configuration");
+    let receipt_file = file.with_extension("json.setup.json");
+    let receipt = read::<Value>(&receipt_file).unwrap_or(Value::Null);
+    let resume = options
+        .token
+        .as_deref()
+        .is_some_and(|t| matches(&saved, &origin, t, options.port))
+        || (options.code.is_some()
+            && (receipt["identity"] == identity(&origin, &options)
+                || receipt["identity"]
+                    == digest(
+                        &serde_json::to_vec(&json!([origin, options.port, options.code])).unwrap(),
+                    ))
+            && receipt["configHash"] == digest(&std::fs::read(&file).unwrap_or_default()));
+    let occupied = TcpListener::bind(("127.0.0.1", options.port)).is_err();
+    ensure!(
+        !occupied || resume,
+        "Port is already in use by another device or service"
+    );
+    ensure!(
+        !file.exists() || resume,
+        "A different device configuration already exists; it will not be overwritten"
+    );
+    let version = env!("CARGO_PKG_VERSION");
+    let installed = releases::install(version, Some(&std::env::current_exe()?)).await?;
+    if occupied {
+        let status = device_api(options.port, &saved, "/api/management/supervisor", false).await?;
+        if status["runningVersion"] == version {
+            println!("Device is already running Remote Codex {version}.");
+            return Ok(());
+        }
+        if status["manager"] != "github-release" {
+            let legacy = status["path"].as_str().context("Existing installation cannot migrate automatically; no legacy launcher path was reported")?;
+            bridge(Path::new(legacy), &installed.executable)
+                .context("Install native updater compatibility bridge")?;
+        }
+        let result = device_api(
+            options.port,
+            &saved,
+            "/api/management/supervisor/update",
+            true,
+        )
+        .await?;
+        ensure!(
+            result["job"]["phase"] != "failed" && result["canUpdate"] != false,
+            "Existing device could not start the native update"
+        );
+        return online(options.port, version).await;
+    }
+    if !resume {
+        let token = if let Some(token) = &options.token {
+            token.clone()
+        } else {
+            let response = reqwest::Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()?
+                .post(format!("{origin}/relay/setup/redeem"))
+                .json(&json!({"code":options.code}))
+                .send()
+                .await?
+                .error_for_status()?;
+            let enrollment: Value = response.json().await?;
+            enrollment["token"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .context("Invalid setup enrollment response")?
+                .into()
+        };
+        saved["REMOTE_CODEX_RELAY_SERVER_URL"] = json!(origin
+            .replacen("https:", "wss:", 1)
+            .replacen("http:", "ws:", 1));
+        saved["REMOTE_CODEX_RELAY_AGENT_TOKEN"] = json!(token);
+        saved["REMOTE_CODEX_RELAY_SUPERVISOR_PORT"] = json!(options.port.to_string());
+        saved["REMOTE_CODEX_ADMIN_USERNAME"] = json!("admin");
+        saved["REMOTE_CODEX_ADMIN_PASSWORD"] = json!(format!(
+            "{}{}",
+            uuid::Uuid::new_v4().simple(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        saved["REMOTE_CODEX_SESSION_SECRET"] = json!(format!(
+            "{}{}",
+            uuid::Uuid::new_v4().simple(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        saved["REMOTE_CODEX_DATABASE_PATH"] =
+            json!(home().join(".remote-codex/relay-supervisor.sqlite"));
+        write(&file, &saved)?;
+        write(
+            &receipt_file,
+            &json!({"identity":identity(&origin, &options),"configHash":digest(&std::fs::read(&file)?)}),
+        )?;
+    }
+    releases::activate(&installed)?;
+    let manager = service::detect();
+    service::start(&installed, &file, manager.as_deref())?;
+    if manager.is_none() {
+        println!("Running detached. Automatic startup after reboot is unavailable without a user service manager.");
+    }
+    online(options.port, version).await
+}
+pub fn load_environment(config: &Path) -> Result<BTreeMap<String, String>> {
+    let saved: Value = read(config)?;
+    let mut env = BTreeMap::new();
+    for (key, value) in saved.as_object().context("Invalid device configuration")? {
+        if key.starts_with("REMOTE_CODEX_") {
+            if let Some(value) = value.as_str() {
+                env.insert(key.clone(), value.into());
+            }
+        }
+    }
+    env.insert("REMOTE_CODEX_MODE".into(), "relay".into());
+    env.insert(
+        "REMOTE_CODEX_RELAY_SUPERVISOR_HOST".into(),
+        "127.0.0.1".into(),
+    );
+    env.insert(
+        "REMOTE_CODEX_RELAY_SUPERVISOR_CONFIG".into(),
+        config.to_string_lossy().into_owned(),
+    );
+    ensure!(
+        env.get("REMOTE_CODEX_RELAY_AGENT_TOKEN")
+            .is_some_and(|t| !t.is_empty()),
+        "Device token is missing from config"
+    );
+    let fallback = home().join(".remote-codex/relay-supervisor.sqlite");
+    let configured = saved["REMOTE_CODEX_DATABASE_PATH"]
+        .as_str()
+        .or_else(|| saved["DATABASE_URL"].as_str())
+        .filter(|v| !v.is_empty());
+    let database = match configured {
+        Some(value) if is_database_url(value) => {
+            ensure!(fallback.is_file() && fallback.with_extension("transport-identity").is_file(),
+                "Saved configuration contains a database URL. Restore its original absolute SQLite path before starting");
+            eprintln!("Restoring the original relay database path saved by an older launcher.");
+            fallback
+        }
+        Some(value) => PathBuf::from(value),
+        None => fallback,
+    };
+    ensure!(
+        database.is_absolute(),
+        "Device database path must be absolute"
+    );
+    env.insert(
+        "REMOTE_CODEX_DATABASE_PATH".into(),
+        database.to_string_lossy().into_owned(),
+    );
+    Ok(env)
+}
+fn is_database_url(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() > 2
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'/' | b'\\')
+    {
+        return false;
+    }
+    value.split_once(':').is_some_and(|(scheme, _)| {
+        !scheme.is_empty()
+            && scheme
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'-' | b'.'))
+    })
+}
+pub async fn run_device(config: PathBuf) -> Result<()> {
+    let env = load_environment(&config)?;
+    for (key, _) in std::env::vars().filter(|(k, _)| k.starts_with("REMOTE_CODEX_")) {
+        if key != "REMOTE_CODEX_MANAGED_SERVICE" {
+            std::env::remove_var(key);
+        }
+    }
+    for (key, value) in env {
+        std::env::set_var(key, value);
+    }
+    std::env::remove_var("TMUX");
+    std::env::remove_var("TMUX_PANE");
+    if let Ok(installed) = releases::current() {
+        std::env::set_var("REMOTE_CODEX_WEB_DIST_DIR", installed.web_dist);
+    }
+    let state = remote_codex_runtime::boot().await?;
+    crate::serve(state).await
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn native_setup_preserves_connection_identity_and_rejects_different_device() {
+        let saved = json!({"REMOTE_CODEX_RELAY_SERVER_URL":"wss://relay.example.test/","REMOTE_CODEX_RELAY_AGENT_TOKEN":"synthetic","REMOTE_CODEX_RELAY_SUPERVISOR_PORT":"8787"});
+        assert!(matches(
+            &saved,
+            "https://relay.example.test",
+            "synthetic",
+            8787
+        ));
+        assert!(!matches(
+            &saved,
+            "https://other.example.test",
+            "synthetic",
+            8787
+        ));
+        assert!(!matches(
+            &saved,
+            "https://relay.example.test",
+            "other",
+            8787
+        ));
+        assert!(!matches(
+            &saved,
+            "https://relay.example.test",
+            "synthetic",
+            8788
+        ));
+    }
+    #[tokio::test]
+    async fn native_management_login_uses_session_cookie_and_does_not_send_password_as_bearer() {
+        async fn login(
+            axum::Json(input): axum::Json<Value>,
+        ) -> (
+            [(axum::http::HeaderName, &'static str); 1],
+            axum::Json<Value>,
+        ) {
+            assert_eq!(input, json!({"username":"admin","password":"synthetic"}));
+            (
+                [(
+                    axum::http::header::SET_COOKIE,
+                    "session=synthetic-session; HttpOnly; Path=/",
+                )],
+                axum::Json(json!({"ok":true})),
+            )
+        }
+        async fn status(headers: axum::http::HeaderMap) -> axum::Json<Value> {
+            assert_eq!(
+                headers[axum::http::header::COOKIE],
+                "session=synthetic-session"
+            );
+            assert!(!headers.contains_key(axum::http::header::AUTHORIZATION));
+            axum::Json(json!({"runningVersion":"9.1.0"}))
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let router = axum::Router::new()
+            .route("/api/auth/login", axum::routing::post(login))
+            .route("/api/management/supervisor", axum::routing::get(status));
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        let saved = json!({"REMOTE_CODEX_ADMIN_USERNAME":"admin","REMOTE_CODEX_ADMIN_PASSWORD":"synthetic"});
+        assert_eq!(
+            device_api(port, &saved, "/api/management/supervisor", false)
+                .await
+                .unwrap()["runningVersion"],
+            "9.1.0"
+        );
+        server.abort();
+    }
+}

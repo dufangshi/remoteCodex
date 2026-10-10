@@ -48,6 +48,7 @@ pub async fn install_harness(state: &Supervisor, id: &str) -> Result<()> {
         }
     }
     if let Some(package) = npm_package(id) {
+        crate::node_runtime::ensure().await?;
         let command = shell_words::join([
             "npm",
             "install",

@@ -9,28 +9,7 @@ const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), '..');
 
 if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {
-  const channel = process.argv[2] ?? 'next';
-  const inputDir = path.resolve(
-    process.argv[3] ?? path.join(repoRoot, 'dist', 'npm'),
-  );
-  const manifest = JSON.parse(
-    fs.readFileSync(path.join(inputDir, 'manifest.json'), 'utf8'),
-  );
-
-  publishRelease({
-    channel,
-    inputDir,
-    manifest,
-    dryRun: process.argv.includes('--dry-run'),
-    allowLatest: process.env.REMOTE_CODEX_ALLOW_LATEST === '1',
-    runNpm(args, options = {}) {
-      return spawnSync('npm', args, {
-        cwd: repoRoot,
-        encoding: 'utf8',
-        stdio: options.inherit ? 'inherit' : 'pipe',
-      });
-    },
-  });
+  throw new Error('Runtime npm publication is retired. Publish an immutable GitHub Release through runtime-release.yml.');
 }
 
 export function publishRelease({

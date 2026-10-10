@@ -11,12 +11,19 @@ use serde_json::{json, Value};
 use std::{
     collections::{HashMap, VecDeque},
     fs::File,
-    io::{BufRead, BufReader, Seek, SeekFrom},
+    io::{BufRead, BufReader, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
-const RECENT_ITEMS: usize = 200;
+const HISTORY_PAGE_SIZE: usize = 30;
+
+#[derive(Clone)]
+struct RecordRef {
+    path: PathBuf,
+    start: u64,
+    end: u64,
+}
 const MAX_PARENTS: usize = 64;
 
 #[derive(Default)]
@@ -37,6 +44,9 @@ struct Agent {
     path: Option<PathBuf>,
     offset: u64,
     items: VecDeque<ThreadHistoryItemDto>,
+    sources: HashMap<String, Vec<RecordRef>>,
+    current_record: Option<RecordRef>,
+    collect_details: bool,
     messages: HashMap<String, Tokens>,
     tier: Option<String>,
     pending: bool,
@@ -70,7 +80,7 @@ fn status(value: &str) -> &str {
         _ => "unknown",
     }
 }
-fn records(path: &Path, offset: &mut u64, mut record: impl FnMut(Value)) -> bool {
+fn records_at(path: &Path, offset: &mut u64, mut record: impl FnMut(Value, u64, u64)) -> bool {
     let Ok(mut file) = File::open(path) else {
         return false;
     };
@@ -88,10 +98,11 @@ fn records(path: &Path, offset: &mut u64, mut record: impl FnMut(Value)) -> bool
         if count == 0 || !line.ends_with('\n') {
             break;
         }
+        let start = *offset;
         *offset += count as u64;
         bytes += count;
         if let Ok(entry) = serde_json::from_str(&line) {
-            record(entry);
+            record(entry, start, *offset);
         }
         if bytes >= 8 * 1024 * 1024 {
             return true;
@@ -126,6 +137,9 @@ impl Agent {
             path: None,
             offset: 0,
             items: VecDeque::new(),
+            sources: HashMap::new(),
+            current_record: None,
+            collect_details: false,
             messages: HashMap::new(),
             tier: None,
             pending: false,
@@ -142,14 +156,34 @@ impl Agent {
             return;
         }
         self.summary.latest_activity = Some(short(&body));
+        if !self.collect_details {
+            if let Some(source) = self.current_record.clone() {
+                let refs = self.sources.entry(id.clone()).or_default();
+                if refs.is_empty() {
+                    refs.push(source);
+                } else if refs[0].start != source.start || refs[0].path != source.path {
+                    // Keep the invocation and latest result, never the output body.
+                    refs.truncate(1);
+                    refs.push(source);
+                }
+            }
+        }
+        let preview = body
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .take(if kind == "toolCall" { 2 } else { 1 })
+            .collect::<Vec<_>>()
+            .join(" · ")
+            .chars()
+            .take(160)
+            .collect::<String>();
         if let Some(item) = self.items.iter_mut().find(|item| item.id == id) {
-            item.text = match &item.preview_text {
-                Some(command) if state != "running" => format!("{command}\n\n{body}")
-                    .chars()
-                    .take(16_000)
-                    .collect(),
-                _ => body.chars().take(16_000).collect(),
-            };
+            if self.collect_details {
+                item.text = match &item.preview_text {
+                    Some(command) if state != "running" => format!("{command}\n\n{body}"),
+                    _ => body,
+                };
+            }
             item.status = Some(state.into());
             return;
         }
@@ -158,9 +192,18 @@ impl Agent {
             id,
             created_at: at,
             kind: kind.into(),
-            text: body.chars().take(16_000).collect(),
-            preview_text: (kind == "toolCall" && state == "running")
-                .then(|| body.chars().take(4_000).collect()),
+            text: if self.collect_details {
+                body.clone()
+            } else {
+                preview.clone()
+            },
+            preview_text: (kind == "toolCall" && state == "running").then(|| {
+                if self.collect_details {
+                    body
+                } else {
+                    preview
+                }
+            }),
             detail_text: None,
             status: Some(state.into()),
             sequence: Some(self.summary.activity_count as i64),
@@ -168,9 +211,55 @@ impl Agent {
             artifact: None,
             extra: Default::default(),
         });
-        if self.items.len() > RECENT_ITEMS {
-            self.items.pop_front();
+    }
+    fn item_detail(&self, id: &str) -> Result<ThreadHistoryItemDto> {
+        let metadata = self
+            .items
+            .iter()
+            .find(|item| item.id == id)
+            .ok_or_else(|| anyhow!("native subagent item not found"))?;
+        let mut reader = Self::new(
+            &self.summary.agent.id,
+            &self.summary.provider,
+            None,
+            self.summary.agent.started_at.clone(),
+        );
+        reader.summary = self.summary.clone();
+        reader.summary.activity_count = 0;
+        reader.collect_details = true;
+        reader.codex_own_history = true;
+        for source in self.sources.get(id).into_iter().flatten() {
+            let mut file = File::open(&source.path)?;
+            if file.metadata()?.len() < source.end {
+                return Err(anyhow!("native subagent history changed; refresh the list"));
+            }
+            file.seek(SeekFrom::Start(source.start))?;
+            let entry: Value = serde_json::from_reader(file.take(source.end - source.start))?;
+            reader.offset = source.start;
+            if source.path == self.path.clone().unwrap_or_default() {
+                reader.record(entry);
+            } else {
+                // A synchronous Claude receipt can precede its child transcript.
+                for block in entry["message"]["content"].as_array().into_iter().flatten() {
+                    if block["tool_use_id"] == self.summary.agent.id {
+                        reader.activity(
+                            id.into(),
+                            "agentMessage",
+                            content_text(&block["content"]),
+                            metadata.created_at.clone(),
+                            metadata.status.as_deref().unwrap_or("completed"),
+                        );
+                    }
+                }
+            }
         }
+        let mut item = reader
+            .items
+            .into_iter()
+            .find(|item| item.id == id)
+            .ok_or_else(|| anyhow!("native subagent record unavailable; refresh the list"))?;
+        item.sequence = metadata.sequence;
+        Ok(item)
     }
     fn price_delta(&mut self, usage: &Tokens, previous: Option<&Tokens>) {
         let current = estimate_price(
@@ -431,8 +520,13 @@ impl Agent {
             self.path = Some(path.clone());
         }
         let mut offset = self.offset;
-        self.pending = records(&path, &mut offset, |entry| {
-            self.offset += 1;
+        self.pending = records_at(&path, &mut offset, |entry, start, end| {
+            self.offset = start;
+            self.current_record = Some(RecordRef {
+                path: path.clone(),
+                start,
+                end,
+            });
             self.record(entry);
         });
         self.offset = offset;
@@ -709,7 +803,14 @@ impl Parent {
                 self.path = Some(path.clone());
             }
             let mut offset = self.offset;
-            self.pending = records(&path, &mut offset, |entry| {
+            self.pending = records_at(&path, &mut offset, |entry, start, end| {
+                for agent in self.agents.values_mut() {
+                    agent.current_record = Some(RecordRef {
+                        path: path.clone(),
+                        start,
+                        end,
+                    });
+                }
                 self.record(entry, provider, session)
             });
             self.offset = offset;
@@ -767,7 +868,11 @@ impl NativeSubagentsCache {
         let mut agents: Vec<_> = parent
             .agents
             .values()
-            .map(|agent| agent.summary.clone())
+            .map(|agent| {
+                let mut summary = agent.summary.clone();
+                summary.prompt = summary.prompt.as_deref().map(short);
+                summary
+            })
             .collect();
         agents.sort_by(|a, b| {
             (b.agent.status == "running")
@@ -785,22 +890,45 @@ impl NativeSubagentsCache {
                 parent.pending || parent.agents.values().any(|agent| agent.pending)
             })
     }
-    fn detail(&self, provider: &str, session: &str, id: &str) -> Option<NativeSubagentDetailDto> {
+    fn detail(
+        &self,
+        provider: &str,
+        session: &str,
+        id: &str,
+        before: Option<i64>,
+    ) -> Option<NativeSubagentDetailDto> {
         let session = crate::import_id::parse_session_ref(session).raw_id;
         let agent = self
             .parents
             .get(&(provider.into(), session))?
             .agents
             .get(id)?;
+        let eligible: Vec<_> = agent
+            .items
+            .iter()
+            .filter(|item| before.is_none_or(|before| item.sequence.unwrap_or(0) < before))
+            .collect();
+        let skip = eligible.len().saturating_sub(HISTORY_PAGE_SIZE);
         Some(NativeSubagentDetailDto {
             agent: agent.summary.clone(),
-            items: agent.items.iter().cloned().collect(),
-            has_earlier_items: agent.summary.activity_count > agent.items.len(),
+            items: eligible.into_iter().skip(skip).cloned().collect(),
+            has_earlier_items: skip > 0,
         })
     }
 }
 impl crate::Supervisor {
     pub async fn native_subagents(&self, thread_id: &str, agent_id: Option<&str>) -> Result<Value> {
+        self.native_subagent_history(thread_id, agent_id, None, None)
+            .await
+    }
+    pub async fn native_subagent_history(
+        &self,
+        thread_id: &str,
+        agent_id: Option<&str>,
+        before: Option<i64>,
+        item_id: Option<&str>,
+    ) -> Result<Value> {
+        let item_id = item_id.map(str::to_owned);
         let thread = self.get_thread(thread_id)?;
         let provider = match thread.provider {
             remote_codex_protocol::Provider::Codex | remote_codex_protocol::Provider::Claude => {
@@ -851,8 +979,19 @@ impl crate::Supervisor {
                 }
             }
             if let Some(target) = target {
-                if let Some(detail) = cache.detail(&provider, &session, &target) {
-                    return Ok(json!(detail));
+                if let Some(item_id) = item_id {
+                    let raw = crate::import_id::parse_session_ref(&session).raw_id;
+                    let agent = cache
+                        .parents
+                        .get(&(provider.clone(), raw))
+                        .and_then(|parent| parent.agents.get(&target))
+                        .ok_or_else(|| anyhow!("native subagent not found"))?;
+                    return Ok(json!(agent.item_detail(&item_id)?));
+                }
+                if let Some(detail) = cache.detail(&provider, &session, &target, before) {
+                    let mut response = json!(detail);
+                    response["historyMode"] = json!("lazy-v1");
+                    return Ok(response);
                 }
                 let agent = agents
                     .into_iter()
@@ -910,6 +1049,54 @@ mod tests {
         ]
     }
     #[test]
+    fn native_subagents_history_is_indexed_without_bodies_and_paged_beyond_200() {
+        let dir = tempfile::tempdir().unwrap();
+        let homes = homes(dir.path());
+        let parent = homes
+            .codex_home
+            .join("sessions")
+            .join(format!("rollout-{PARENT}.jsonl"));
+        let child = homes
+            .codex_home
+            .join("sessions")
+            .join(format!("rollout-{CHILD}.jsonl"));
+        write(&parent, &spawn_entries());
+        let mut entries = vec![json!({"type":"session_meta","payload":{"id":CHILD}})];
+        for n in 0..235 {
+            entries.push(json!({"timestamp":AT,"type":"response_item","payload":{"type":"message","id":format!("message-{n}"),"role":"assistant","content":[{"text":format!("Message {n}\n{}", "private-body".repeat(2000))}]}}));
+        }
+        write(&child, &entries);
+        let mut cache = NativeSubagentsCache::default();
+        cache.list(&homes, "codex", PARENT);
+        let agent = &cache.parents[&("codex".into(), PARENT.into())].agents[CHILD];
+        assert_eq!(agent.items.len(), 235);
+        assert!(agent
+            .items
+            .iter()
+            .all(|item| !item.text.contains("private-body")));
+        let mut before = None;
+        let mut ids = std::collections::HashSet::new();
+        loop {
+            let page = cache.detail("codex", PARENT, CHILD, before).unwrap();
+            assert!(page.items.len() <= HISTORY_PAGE_SIZE);
+            for item in &page.items {
+                assert!(ids.insert(item.id.clone()));
+            }
+            before = page.items.first().and_then(|item| item.sequence);
+            if !page.has_earlier_items {
+                break;
+            }
+        }
+        assert_eq!(ids.len(), 235);
+        let body = agent.item_detail("message-0").unwrap();
+        assert!(body.text.len() > 16_000);
+        assert_eq!(
+            body.text,
+            format!("Message 0\n{}", "private-body".repeat(2000))
+        );
+        assert!(agent.item_detail("missing").is_err());
+    }
+    #[test]
     fn native_subagents_codex_forks_exclude_parent_usage_and_follow_completion() {
         let dir = tempfile::tempdir().unwrap();
         let homes = homes(dir.path());
@@ -950,15 +1137,20 @@ mod tests {
                 > 0.
         );
         assert_eq!(list[0].updated_at.as_deref(), Some("2026-10-09T00:00:13Z"));
-        let detail = cache.detail("codex", PARENT, CHILD).unwrap();
+        let detail = cache.detail("codex", PARENT, CHILD, None).unwrap();
         assert_eq!(detail.items.len(), 1);
-        assert!(detail.items[0].text.contains("cargo test"));
-        assert!(detail.items[0].text.contains("Tests passed"));
+        assert_eq!(detail.items[0].text, "exec_command · cargo test");
+        let agent = &cache.parents[&("codex".into(), PARENT.into())].agents[CHILD];
+        let body = agent.item_detail("tool-1").unwrap();
+        assert!(body.text.contains("cargo test"));
+        assert!(body.text.contains("Tests passed"));
         assert!(!detail
             .items
             .iter()
             .any(|item| item.text.contains("Parent private")));
-        assert!(cache.detail("codex", "another-parent", CHILD).is_none());
+        assert!(cache
+            .detail("codex", "another-parent", CHILD, None)
+            .is_none());
         assert_eq!(
             cache.list(&homes, "codex", PARENT)[0].token_usage,
             list[0].token_usage

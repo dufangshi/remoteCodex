@@ -256,3 +256,38 @@ it.each([
     expect(within(panel).getByText('Last update')).toBeVisible();
   },
 );
+
+it('keeps record bodies lazy through grouped operations and loads older metadata on demand', async () => {
+  const rows = [
+    { id: 'command-a', kind: 'toolCall' as const, text: 'Run tests', sequence: 31, status: 'completed' },
+    { id: 'read-b', kind: 'toolCall' as const, text: 'Read source', sequence: 32, status: 'completed' },
+  ];
+  const bodyCalls: string[] = [];
+  vi.mocked(request).mockImplementation(async url => {
+    const parsed = new URL(String(url), 'http://fixture');
+    if (parsed.pathname.endsWith('/subagents')) return { agents: [agent] };
+    const item = parsed.searchParams.get('itemId');
+    if (item) { bodyCalls.push(item); return { ...rows[0], text: 'Full private command output' }; }
+    if (parsed.searchParams.has('before')) return { historyMode: 'lazy-v1', agent, items: [{ id: 'older', kind: 'agentMessage', text: 'Earlier checkpoint', sequence: 1 }], hasEarlierItems: false };
+    return { historyMode: 'lazy-v1', agent, items: rows, hasEarlierItems: true };
+  });
+  render(<ThreadSubagentsControl detail={detail} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Subagents (1)' }));
+  const panel = screen.getByRole('dialog', { name: 'Native subagents' });
+  expect(within(panel).getByText(/Created/)).toBeVisible();
+  expect(within(panel).getByText(/Updated.*ago/)).toBeVisible();
+  expect(vi.mocked(request).mock.calls.every(([url]) => String(url).endsWith('/subagents'))).toBe(true);
+  fireEvent.click(within(panel).getByRole('button', { name: /Review runtime/ }));
+  const group = await within(panel).findByRole('button', { name: 'Performed 2 operations' });
+  expect(bodyCalls).toEqual([]);
+  expect(within(panel).queryByText('Run tests')).toBeNull();
+  fireEvent.click(group);
+  expect(bodyCalls).toEqual([]);
+  fireEvent.click(within(panel).getByRole('button', { name: /Run tests/ }));
+  await expect(within(panel).findByText('Full private command output')).resolves.toBeVisible();
+  expect(bodyCalls).toEqual(['command-a']);
+  fireEvent.click(within(panel).getByRole('button', { name: 'Load earlier activity' }));
+  await expect(within(panel).findByText('Earlier checkpoint')).resolves.toBeVisible();
+  expect(bodyCalls).toEqual(['command-a']);
+  expect(within(panel).queryByRole('button', { name: 'Load earlier activity' })).toBeNull();
+});

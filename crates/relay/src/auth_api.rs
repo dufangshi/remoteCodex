@@ -67,6 +67,7 @@ pub(crate) fn routes() -> Router<Arc<AppState>> {
         .route("/relay/devices/{id}/bootstrap", post(device_bootstrap))
         .route("/relay/setup/redeem", post(redeem_bootstrap))
         .route("/setup.sh", get(setup_script))
+        .route("/setup.ps1", get(setup_powershell_script))
         .merge(passkeys::routes())
         .route("/relay/devices/{id}/token", post(rotate_device_token))
         .route("/relay/account/security", get(summary))
@@ -479,6 +480,15 @@ async fn setup_script() -> impl IntoResponse {
         ],
         include_str!("../../../scripts/setup.sh")
             .replace("__REMOTE_CODEX_VERSION__", env!("CARGO_PKG_VERSION")),
+    )
+}
+async fn setup_powershell_script() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "text/plain; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        include_str!("../../../scripts/setup.ps1"),
     )
 }
 async fn device_bootstrap(

@@ -194,7 +194,7 @@ async fn native_subagent_http_reads_scoped_transcripts_and_rejects_other_parent(
     ];
     let child_records = [
         json!({"type":"session_meta","payload":{"id":child}}),
-        json!({"type":"response_item","timestamp":"2026-10-09T00:00:01Z","payload":{"type":"message","role":"assistant","content":[{"text":"Review finished"}]}}),
+        json!({"type":"response_item","timestamp":"2026-10-09T00:00:01Z","payload":{"type":"message","role":"assistant","content":[{"text":"Review finished\nPrivate record body"}]}}),
         json!({"type":"event_msg","timestamp":"2026-10-09T00:00:02Z","payload":{"type":"task_complete"}}),
     ];
     for (id, records) in [
@@ -221,6 +221,19 @@ async fn native_subagent_http_reads_scoped_transcripts_and_rejects_other_parent(
     .await;
     assert_eq!(detail["items"][0]["text"], "Review finished");
     assert_eq!(detail["agent"]["prompt"], "Review runtime");
+    assert_eq!(detail["historyMode"], "lazy-v1");
+    let item_id = detail["items"][0]["id"].as_str().unwrap();
+    let body = json(
+        &client,
+        client
+            .get(format!(
+                "{base}/api/threads/{}/subagents/{child}",
+                parents[0]
+            ))
+            .query(&[("itemId", item_id)]),
+    )
+    .await;
+    assert_eq!(body["text"], "Review finished\nPrivate record body");
     for parent in [&parents[1], "missing-parent"] {
         let response = client
             .get(format!("{base}/api/threads/{parent}/subagents/{child}"))

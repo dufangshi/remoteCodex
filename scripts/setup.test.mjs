@@ -53,14 +53,6 @@ test('service definitions preserve literal paths and keep credentials out of ser
   );
 });
 
-test('public setup script installs the latest runtime with a permanent token', () => {
-  const script = fs.readFileSync(new URL('./setup.sh', import.meta.url), 'utf8');
-  assert.match(script, /remote-codex@latest/);
-  assert.match(script, /--token/);
-  assert.doesNotMatch(script, /__REMOTE_CODEX_VERSION__/);
-  assert.match(script, /--registry=https:\/\/registry.npmjs.org/);
-});
-
 test('systemd fields use their own escaping rules rather than shell quoting', () => {
   const linux = serviceDefinition('linux', {
     node: '/usr/bin/node', launcher: '/home/a $USER %h/launcher.mjs',
@@ -87,7 +79,7 @@ test('real systemd accepts generated units and rejects the old quoted working di
     home: '/home/ubuntu', config: '/home/ubuntu/a "b" %h $USER/config.json',
     log: '/unused', searchPath: '/usr/bin:/bin',
   });
-  const verify = () => spawnSync('systemd-analyze', ['verify', '--man=no', unit], { encoding: 'utf8' });
+  const verify = () => spawnSync('systemd-analyze', ['verify', '--man=no', unit], { encoding: 'utf8', env: { ...process.env, SYSTEMD_UNIT_PATH: `${root}:/usr/lib/systemd/system:/lib/systemd/system` } });
   fs.writeFileSync(unit, definition.replace('WorkingDirectory=%h', 'WorkingDirectory="/home/ubuntu"'));
   const broken = verify();
   assert.notEqual(broken.status, 0);
@@ -153,38 +145,4 @@ test('an existing service updates through management and verifies its actual run
   await ensureExistingDeviceOnline(server.address().port, saved, '9.9.9');
   assert.equal(updates, 1);
   assert(logins >= 3);
-});
-
-test('bootstrap resolves official latest on each run, skips reinstall and upgrades a stale copy', (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-latest-test-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const bin = path.join(root, 'bin'); fs.mkdirSync(bin);
-  fs.symlinkSync(process.execPath, path.join(bin, 'node'));
-  const log = path.join(root, 'npm-calls.jsonl');
-  const mock = `#!${process.execPath}
-const fs=require('fs'),path=require('path');
-const args=process.argv.slice(2);fs.appendFileSync(process.env.TEST_NPM_LOG,JSON.stringify(args)+'\\n');
-if(args[0]==='view'){console.log(JSON.stringify(process.env.TEST_LATEST));process.exit(0);}
-if(args[0]!=='install')process.exit(1);
-const pkg=path.join(args[args.indexOf('--prefix')+1],'lib/node_modules/remote-codex');fs.mkdirSync(path.join(pkg,'bin'),{recursive:true});
-fs.writeFileSync(path.join(pkg,'package.json'),JSON.stringify({version:args.find(a=>a.startsWith('remote-codex@')).slice(13)}));
-fs.writeFileSync(path.join(pkg,'bin/remote-codex.mjs'),"console.log('setup-arguments '+JSON.stringify(process.argv.slice(2))); ");
-`;
-  fs.writeFileSync(path.join(bin, 'npm'), mock, { mode: 0o755 });
-  const run = version => {
-    const result = spawnSync('/bin/sh', [fileURLToPath(new URL('./setup.sh', import.meta.url)), '--relay', 'https://relay.example.test', '--token', 'rcd_synthetic', '--port', '45679'], {
-      encoding: 'utf8', env: { ...process.env, HOME: root, PATH: `${bin}:/usr/bin:/bin`, TEST_NPM_LOG: log, TEST_LATEST: version, npm_config_registry: 'https://stale-mirror.invalid' },
-    });
-    assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /setup-arguments.*--token.*rcd_synthetic/, result.stderr);
-    return result.stdout;
-  };
-  run('9.1.0');
-  assert.match(run('9.1.0'), /already installed/);
-  run('9.2.0');
-  const calls = fs.readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse);
-  assert.equal(calls.filter(c => c[0] === 'view').length, 3);
-  assert.equal(calls.filter(c => c[0] === 'install').length, 2);
-  assert(calls.every(c => c.includes('--registry=https://registry.npmjs.org')));
-  assert(calls.at(-1).includes('remote-codex@9.2.0'));
 });
