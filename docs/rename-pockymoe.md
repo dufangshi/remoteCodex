@@ -5,8 +5,6 @@ Pockymoe. Identifiers that older installations, browsers, relays, native apps
 or users' harness configurations still read keep their old names, and the
 runtime accepts the old command and environment names.
 
-Naming proposal and icon: [docs/proposals/naming](proposals/naming/README.zh.md).
-
 ## Name forms
 
 | Before | After |
@@ -107,4 +105,4 @@ Release asset names can switch to `pockymoe-*` only after a release whose update
 - **Native apps.** Update the iOS, Android and macOS apps in their own repository before renaming their bridges.
 - **Trademarks.**
   - "Pocky" is a registered trademark of Ezaki Glico; check the name before promoting it.
-  - The icon carries no company marks, but its centre character is a fan-made DeepSeek persona; see the [icon notes](proposals/naming/pockymoe/README.zh.md).
+  - The icon carries no company marks, but its centre character is a fan-made DeepSeek persona.

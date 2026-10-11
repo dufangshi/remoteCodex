@@ -110,7 +110,7 @@ It should normally also be given:
 
 Private device HTTP previews are optional. Set
 `POCKYMOE_PORT_PREVIEW_BASE_URL` only after configuring wildcard DNS, TLS
-and ingress routing; see [device web previews](relay-port-preview-proposal.md).
+and ingress routing; see [device web previews](port-previews.md).
 
 Google and GitHub OAuth are enabled only when both credentials for that
 provider are configured. `POCKYMOE_PUBLIC_BASE_URL` must be the public

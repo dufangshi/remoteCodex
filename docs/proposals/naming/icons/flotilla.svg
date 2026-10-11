@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Flotilla"><title>Flotilla</title><defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#17201e"/><stop offset="1" stop-color="#0c0f11"/></linearGradient></defs><rect width="512" height="512" rx="116" fill="url(#bg)"/><rect x="3" y="3" width="506" height="506" rx="113" fill="none" stroke="#263038" stroke-width="6"/>
-<path d="M118,238 Q166,280 182,332 L118,332 Z" fill="#6f7d86"/>
-<path d="M214,178 Q277,247 298,332 L214,332 Z" fill="#f4f7f6"/>
-<path d="M330,106 Q390,208 410,332 L330,332 Z" fill="#00cc76"/>
-<path d="M100,346 L192,346 L179,364 L112,364 Z" fill="#6f7d86"/>
-<path d="M196,346 L308,346 L293,366 L210,366 Z" fill="#f4f7f6"/>
-<path d="M312,346 L420,346 L404,368 L324,368 Z" fill="#00cc76"/>
-<path d="M96,404 q27,-16 54,0 t54,0 t54,0 t54,0 t54,0 t54,0" fill="none" stroke="#00cc76" stroke-opacity="0.45" stroke-width="14" stroke-linecap="round"/>
-</svg>

@@ -1,6 +1,6 @@
 # 跨 device 线程通信与文件传输（同一 owner）
 
-状态：已实现（分支 `feat/cross-device-peer`），尚未发布。本文是实现时的接口契约，实施中的调整见 §17。上线需要所有参与设备升级到包含本功能的 runtime，并部署 relay；只升级其中一端不会生效。
+本文是同一 owner 名下 device 之间线程通信与文件传输的接口契约，§16 记录了相对最初设计的调整。两端 device 和 relay 都需要包含本功能的版本；只升级其中一端不会生效。
 
 ## 1. 范围
 
@@ -91,7 +91,7 @@ relay → 目标（沿用 `relay.request`，多一个只由 relay 写入的 `pee
 - 响应：`x-rcd-encrypted: 1` 时用 exporter `remote-codex/http-response/v1` 派生的 AES-256-GCM（零 nonce，AAD `{请求 AAD}\nresponse`）解密并 unpack，得到 `{headers,status,streamNext}` + body；有 `streamNext` 时继续加密 GET 拼接（总量 ≤ 64 MiB）。
 - relay 产生的明文错误按 §4 表映射：503→`Offline`，504→`Timeout`，其余→`Remote`；隧道未连接→`RelayUnavailable`。
 
-## 8. `peer_link` API（骨架已提交）
+## 8. `peer_link` API
 
 `relay_identity`、`directory`、`request`、`request_json`、`reset_pin`、`PeerError`（`retryable()` 仅对 `RelayUnavailable`/`Offline`/`Timeout` 为真）。链路状态按 `state.config.database_url` 区分（与 `secure_transport::transport` 相同），以便同一进程内的多个 supervisor 互不干扰。隧道断开时让所有在途请求失败为 `RelayUnavailable`。
 
@@ -179,32 +179,16 @@ KV `peer:outbox:{id}`：
 
 ## 15. 测试与验收
 
-- 各分支：`cargo fmt --all`，相关 crate 的 `cargo check --all-targets`，以及本分支新增/受影响测试（`cargo test -p <crate> <name>`）。不跑 `cargo test --workspace`。
 - relay：鉴权（同 owner 通过；他人设备 404；离线 503；超时 504）、前缀与明文规则、header 过滤、响应路由回发起方、目录。
 - 传输：Rust client ↔ `secure_transport` 服务端往返；签名错误；钉扎变化；streamNext 续读；时钟偏移；隧道 pending 关联与断线失败。
 - 目标端：`router().oneshot()` 注入 `TrustedRelayForward` + `PeerCaller` 测白名单、开关、远程发件人、去重、完成通知写 outbox；无 `PeerCaller` 访问 `/api/peer/*` 被拒；带 `PeerCaller` 访问其他路由被拒。
 - 文件：分片、续传、偏移冲突、哈希不符、名字清洗、路径越界、incoming 落点。
-- 集成（合并后）：`scripts/peer-e2e-live.mjs` 用真实二进制在临时目录跑 relay + 两台 fake-runtime supervisor，覆盖目录、开关、远端 list/status/send/transcript/create、完成通知回到 A 的 inbox、B 离线时进 outbox 并在恢复后送达、附件（含 > 16 MiB）、`fs get`，以及一个经 relay 的 20 MiB 浏览器式上传不再断隧道。
+- 集成：`scripts/peer-e2e-live.mjs` 用真实二进制在临时目录跑 relay + 两台 fake-runtime supervisor，覆盖目录、开关、远端 list/status/send/transcript/create、完成通知回到 A 的 inbox、B 离线时进 outbox 并在恢复后送达、附件（含 > 16 MiB）、`fs get`，以及一个经 relay 的 20 MiB 浏览器式上传不再断隧道。
 
-## 16. 分工与文件归属
-
-| 分支 | 负责 | 主要文件 |
-| --- | --- | --- |
-| relay | §4 relay 侧、§5 | `crates/relay/src/peer.rs`（新）、`lib.rs` 少量接入 |
-| transport | §4 supervisor 侧、§6、§7、§8 | `tunnel.rs`、`auth.rs`、`peer_link.rs`、`secure_transport/{client,streams}.rs`、`Cargo.toml` |
-| peer-api | §9、§10 | `peer_api.rs`、`crates/runtime/src/interaction/{mod,inbox,peer}.rs` |
-| peer-send | §11、§12、CLI 与文档 | `peer_send.rs`、`interaction.rs`（仅 `info` 与转发入口）、`crates/cli/src/*`、`skills/thread-interaction/SKILL.md`、`docs/thread-interaction.md` |
-| peer-files | §13 | `peer_files.rs` |
-
-不要修改其他分支负责的文件；确实需要时在交付说明里写明。`crates/supervisor/src/lib.rs` 里 peer 模块的 `#[allow(dead_code)]` 由各自负责的分支在实现完成后移除。
-
-## 17. 实施结果与偏差
+## 16. 相对设计的调整
 
 - 目录不要求本机开关：它只询问 relay，不接触其他 device，便于开启前先查看。`device list` 返回 `{devices, peerAccess}`。所有发往其他 device 的请求仍要求两端开启。
 - 远程完成通知把 transcript 提示写成 `DEVICE/THREAD`，并说明 DEVICE 即该邮件的 `fromDeviceId`（runtime 不知道本机 relay ID）。
 - relay 与 supervisor 都拒绝非字面的 peer 路径：`.`、`..` 或空段，以及 `%`、`\`。两端各自检查，不依赖对方规范化路径。
 - 附件发送的回执带 `attachments`（每个文件在目标端的路径、大小与 sha256）。
 - 发布版二进制带平台后缀（如 `remote-codex-linux-x64-gnu`），受管 agent 的 `pockymoe` 曾落到 PATH 上更旧的全局安装。supervisor 现在在 `<数据库>.cli-bin/` 中链接 `pockymoe`（Unix 用 symlink，Windows 用硬链接或复制），并把该目录放在受管 PATH 的最前面。
-- 验证：
-  - 各分支的定向测试，以及合并后的 supervisor 单元测试、`http_e2e`、runtime `thread_interaction` / `agent_coordination` / `thread_lineage`、relay 单元测试、CLI 测试。
-  - `scripts/peer-e2e-live.mjs` 全部阶段通过：目录、两端开关、跨 owner 隔离、带远程署名的投信与按 `replyTo` 回信、本机/远端 URL 寻址、完成通知回到发起方 inbox、远程创建、三类附件（含 20 MiB）、`fs ls/get` 与越界拦截、离线 outbox 与重连后送达、经 relay 的 20 MiB 浏览器式上传不再断隧道。

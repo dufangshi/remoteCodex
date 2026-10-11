@@ -121,7 +121,7 @@ Optional notification subscriptions and explicit retry receipts use the existing
 
 ## Validation
 
-See [the Docker E2E record](thread-interaction-e2e.md). The [skill](../skills/thread-interaction/SKILL.md) teaches discovery, handoff, waiting, creation and progressive reads. `pockymoe skill` fetches the running Supervisor's embedded guide, falling back to the CLI's copy if offline or talking to an older Supervisor.
+A Docker end-to-end check lives in [e2e/thread-interaction](../e2e/thread-interaction/README.md). The [skill](../skills/thread-interaction/SKILL.md) teaches discovery, handoff, waiting, creation and progressive reads. `pockymoe skill` fetches the running Supervisor's embedded guide, falling back to the CLI's copy if offline or talking to an older Supervisor.
 
 ## 0.12.32 delivery and inbox revision
 

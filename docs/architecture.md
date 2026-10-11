@@ -1,6 +1,6 @@
 # Architecture
 
-Pockymoe is a Treer-shaped control plane for personal coding-agent sessions.
+Pockymoe is a self-hosted control plane for personal coding-agent sessions.
 
 ```text
 Browser / mobile WebView / native macOS app

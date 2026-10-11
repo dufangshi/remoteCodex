@@ -1,7 +1,5 @@
 # Relay 账户安全与密文传输：迁移和恢复
 
-本功能在 `security/relay-auth-encryption` 开发，已合并 main 并随 [0.12.16](./release-0.12.16.zh.md) 上线。实施范围和验收见 [计划](./relay-security-auth-encryption-plan.zh.md)。
-
 ## 登录体验
 
 普通账户在 Account → Security，管理员在 Admin → Security 设置安全因素。邮箱或用户名＋密码登录均支持二步验证。
@@ -59,11 +57,10 @@ WebSocket 一次握手后复用分方向 AES-GCM 密钥，以单调序号构造 
 - 公开分享由浏览器投影用户消息和最终回复后显式发布，公开快照及其图片本来就是公开内容，由 relay 明文保存。分享不再要求 relay 读取整个私有 transcript。HTML 导出保持浏览器渲染流程。
 - **本方案不能阻止已经控制 relay 的攻击者替换它提供的网页 JavaScript，也不能阻止仍有设备控制能力的 relay 自行发起获授权命令。** 首次公钥固定也依赖可信首次连接／独立指纹核对。因此这次的加密保护转发内容，不等于把 relay 从设备信任边界中移除。进一步设备权限限制按用户要求暂缓。
 
-## 审计与后续上线
+## 审计
 
 `relay_security_events` 保留最近 10,000 条安全事件：账号 ID、事件名、资源 ID、时间。记录登录／挑战、安全设置、会话与浏览器撤销、设备 token 轮换，不记录密码、OTP、token、私有正文或原始 User-Agent。审计数据库仍应仅供可信运维读取；不是无限期合规日志。
 
-合并前保留分支测试证据；正式上线需新不可变 runtime/npm 版本及完整四平台资产，按 [release-runtime](../.agents/skills/release-runtime/SKILL.md) 执行。Web 由公网 Rust relay 提供，合并 main 后固定共享 UI SHA 运行 relay-deploy，不能以重启设备 supervisor 代替 Web 部署。Windows Device Manager 不随本次 runtime 改动独立发版。
 
 
 ## 设备安装命令与旧凭据恢复

@@ -1,6 +1,6 @@
 # DSH（DeepSeek Harness）接入：bridge 架构、差异与路线图
 
-分支 `feat/dsh-bridge`，共享 UI 分支 `feat/dsh-bridge-ui`。实测基线为 npm `@deepseek-ai/dsh@0.2.0-rc.2`（latest），源码对照 `dsh-v0.1.5-rc.1` 与 `0.2.1-alpha.1`。
+适配基线为 npm `@deepseek-ai/dsh@0.2.0-rc.2`，源码对照 `dsh-v0.1.5-rc.1` 与 `0.2.1-alpha.1`。升级 DSH 时至少覆盖当前 latest 与下一个 alpha。
 
 ## 结论
 
@@ -19,7 +19,7 @@ DSH 本身是 Cordis 全插件平台，但它**刻意把 ACP 定为“仅自动�
 
 bridge 是 DSH 的又一个 carrier：它通过 `ctx.typertGateway.invoke()` 调用 DSH 自己 Web 客户端使用的 `@Remote` 方法（`commands`、`goals`、`permissionPresets`、`pluginManager`、`llm`），通过 `agentPresets` 绑定运行模式，并订阅 DSH 自己的 session projection。它不改 DSH 内核。
 
-Rust 重写后，插件系统原本只剩“设备级开关终端按钮”的作用。本次把它恢复为真正的扩展点：
+插件系统是 Supervisor 的扩展点：
 
 - Supervisor 有内置插件注册表（终端 + DeepSeek Harness），`/api/plugins` 的读取、启停和卸载保护都走这张表。
 - thread-ui 的内置模块为每个插件贡献 thread panel。
@@ -43,21 +43,6 @@ Rust 重写后，插件系统原本只剩“设备级开关终端按钮”的作
 | 进程 | 每线程一个 | 每线程一个 | 每线程一个，空闲约 170 MB RSS | 进程级 env（权限）正好需要每线程独立进程 |
 | 稳定性 | 稳定协议 | 稳定协议 | 公开 API 处于 pre-stable 阶段，0.1.5 → 0.2 已改模型目录和设置存储 | bridge 按服务逐项探测并带协议版本；任一功能缺失只降级该功能 |
 | 隐私 | — | — | `session-log-deepseek.enabled` 默认把会话日志随请求上传；OTEL 默认 `FEEDBACK_ONLY` | 面板展示并可修改该开关 |
-
-## 修复前实测到的问题
-
-以下均在隔离 `DSH_HOME` 中用真实 DSH 0.2.0-rc.2 复现：
-
-1. **只读线程能写工作区。** Pockymoe 的 sandbox/approval 设置从未传给 DSH，DSH 默认 workspace-write。选 Full access 也只能在 bwrap 拒绝后靠自动批准提权。
-2. **模型列表不一致。** 0.2.x 的 acp 默认模型 `deepseek-v4-flash` 已不在 DeepSeek 目录中。旧的发现插件只列出目录内模型，线程当前模型不在下拉框里。
-3. **没有流式输出。** 长推理期间界面一直不动，直到该步提交才一次性出现。
-4. **goal 自治轮次在回合外运行。** 模型调用 `create_goal` 后，ACP prompt 先返回 `end_turn`，DSH 随后在后台继续跑：12 秒内跑到 15/256 轮。Pockymoe 看不到这些输出，也没有 Stop 可以按，只能看着 token 被消耗。
-5. **`exit_plan_mode` 必然失败。** 没有问题应答方，结果是 `NO_PROVIDER`；同时 plan 模式本身也无法进入。`/compact`、`/goal` 被当作普通文本发给模型。
-6. **插件清单混入 `include:` 组行**，且对任何操作都只读。
-7. **只能用 DSH 的默认模式。** ACP 组合里没有运行模式；DSH Web 建的 preset 会话经 ACP 恢复时会丢掉 preset。现已由原生组合 + `agent/created` 绑定修复。
-8. 仍未处理，见路线图：
-   - ACP 的图片能力由 acp 行默认模型决定；默认模型不在目录中，图片输入被关闭。
-   - 工具卡缺少 diff 和位置信息。
 
 ## bridge 架构
 
@@ -157,7 +142,7 @@ relay ACL 默认拒绝共享用户访问该路径（有回归测试）。`GET /a
 | 按会话的控件可用性 | ✓ | 极简模式没有 plan/goal/compact，线程隐藏对应控件 |
 | 任意 DSH 命令（含插件命令） | ✓ | `commands/list` 校验后执行 |
 | DSH 插件自带界面、模式编辑器、DSH 设置页等全部 Web 功能 | ✓ 原生控制台（新标签页） | 同进程 Web 主机 + 回环代理 |
-| 凭据、provider 配置 | 原生控制台里可用；Pockymoe 的「上游」tab 在另一分支 | 计划只写入、不读取 |
+| 凭据、provider 配置 | 原生控制台里可用；在 Pockymoe 的「上游」tab 中配置 | 计划只写入、不读取 |
 | 插件安装/卸载 | 原生控制台里可用；Pockymoe 面板未做 | pnpm 长任务 |
 | 会话标题 | ✓ 线程标题同步到 DSH | `sessionTitle.rename` |
 | 工具富展示（diff、位置） | 未做 | bridge 转发 presentation |
@@ -265,91 +250,15 @@ relay 会把 Host/Origin 改写成 `127.0.0.1:<端口>`，正好通过代理围�
   - 插件安装/卸载：pnpm 长任务，含进度、registry 选择（DSH 内置 npmmirror 回退）、版本兼容检查和重启编排。
   - 向上游争取：ACP 的 mode/permission config options、流式 chunk、`_meta` 中的工具展示。
 
-## 真实上游测试（集成分支 `integrate/dsh-upstreams`）
+## 测试
 
-**环境。**
-
-- 「上游」tab 把本机 Codex 使用的 OpenAI 兼容网关（Responses API）配置给 DSH。
-- Supervisor 的 HOME、CODEX_HOME、CLAUDE_CONFIG_DIR、DSH_HOME 全部隔离，`DSH_TELEMETRY_DISABLED=1`。
-
-**通过的任务。**
-
-| 任务 | 结果 |
-|---|---|
-| 多文件 Python 包、CLI、单元测试 | 自跑 13 项通过，独立复跑通过 |
-| 后续扩展与计划模式 | 计划审阅 → 批准 → 按计划实施 |
-| 子代理代码审查 | 审查发现 2 个真实问题并已修复 |
-| goal | 小目标自主完成；大目标中途停止后，两侧都处于暂停 |
-| 用户提问 | 问题出现在 Pockymoe，回答后继续 |
-| 只读沙箱下的提权 | 以权限请求呈现，拒绝后未写入 |
-| `/compact` | 下一轮上下文从 21k 降到 10k，记忆保留 |
-| 切换上游模型 | 旧线程继续使用旧模型，新线程使用新模型 |
-| 备份逐个恢复 | 精确回到初始状态 |
-
-**测出并修复的问题。**
-
-1. **审批卡死。** 原生组合里 DSH 的 Web 网关会接住 `approval/request` 和 `user-questions/request`，并等待 DSH 网页客户端回答；没有客户端时永远不放行，触发提权的回合因此挂起。现在 bridge 对根会话及其子代理统一作答：审批转成线程的权限请求（yolo 自动允许，否则「允许一次 / 拒绝」，无法展示时拒绝），提问归到根会话所在的回合。
-2. **模型列表。** 有启用中的上游时，模型列表改用上游目录的裸 id，而 DSH 只接受 `["provider","model"]`，建线程直接失败。现在 DSH 始终以自己的 ACP 选项为准。
-3. **切换上游模型后旧线程无法恢复，排队消息每 5 秒重试一次。** 现在 DSH 适配器写入新模型时保留此前写入过的模型。
-4. **输出上限、上下文窗口和推理档位都不是真实值。**
-   - 适配器曾写死 `maxTokens: 4096`。DSH 会把它作为 `max_output_tokens` 发出；即使不写，也会发送 pi-ai 默认的 32768。
-   - 现在 Responses 上游设置 `compat.supportsMaxOutputTokens: false`，不再发送上限，由模型自身的上限决定，与 Codex 一致。实测该网关本来就忽略这个参数。Chat Completions 上游没有对应开关，仍用 DSH 默认值。
-   - 上下文窗口、推理档位（`reasoningEfforts`）、默认档位和输入模态来自 PATH 上所有 Codex CLI 的 `codex debug models`，按版本合并、新版优先。例如 `gpt-6-astra`：272000 上下文；low/medium/high/xhigh/max 五档，默认 low；支持图片。
-   - 推理档位声明后，Pockymoe 线程的推理强度选择器会出现。录制代理实测，选择的 low/xhigh/high 都作为 `reasoning.effort` 发给了上游。
-   - 表单里未改动的默认上下文 500000 不再当作模型事实。
-5. **没有每回合用量。** DSH 的 ACP 只报上下文占用。现在 bridge 监听 `session/event` 中 `assistant/message` 的用量（含子代理），按互斥计数映射后计入回合。
-6. **工具分类。** DSH 工具都是 `kind:"other"`：`todo_write` 被当成文件变更，`write` 不显示路径，`bash` 不显示为命令。现在按输入判断。
-7. **PTC 在没有 TypeScript 支持的 Node 上必然失败。** 发行版打包的 Node 可能不带 TypeScript 支持，例如本机的 22.22.1。现在 bridge 把 PTC 标记为不可用并写明原因，界面上显示为置灰。
-
-**仍存在的现象。**
-
-- 网关偶发的 `upstream_http2_stream_error` 现在会自动重试：DSH 原本把它归为不可重试的 `PI_AI_ERROR`，现在 provider 的 `retryPolicy` 包含这个错误码，最多重试 6 次，指数退避（1 秒起，最长 20 秒）。故障注入代理实测：前两次失败后第三次成功，回合正常完成。
-- Codex 专有的 `ultra` 档位在 DSH 中没有对应级别。
-- 机器上同时存在 `/usr/local/bin/codex`（0.154）与 `~/.local/bin/codex`（0.160）。正式环境按 `$HOME/.local/bin` 优先解析到新版；HOME 被隔离的测试环境会落到旧版，所以元数据合并所有安装并以新版为准。
-- 压缩完成后，界面上的上下文用量要到下一次模型调用才刷新。
-- 我们注入的上下文提示会引导模型优先使用 `pockymoe` CLI 协作，与 DSH 自带的子代理工具形成竞争。
-
-## 验证
-
-均为隔离 `DSH_HOME`，未连接正式 relay 或 Supervisor：
+无需模型密钥：用 scripted provider 驱动真实 DSH（`dsh` 需在 PATH 上），`DSH_HOME` 与工作区都必须是隔离的绝对路径。
 
 ```sh
-cargo test -p pockymoe-runtime --lib                 # 123 通过（含组合发现、按会话控件、流式对账、权限 fail closed）
-cargo test -p pockymoe-relay --lib route_acl          # 10 通过：harness 动作仅限 owner，运行模式目录可共享
-cargo test -p pockymoe-supervisor --lib               # 62 通过
-cargo test -p pockymoe-runtime --test acp_turn --test thread_interaction   # 7 + 13 通过
-node --test scripts/dsh-bridge.test.mjs                  # 10 通过：白名单、问答、流式、备份、运行模式绑定与锁定、控制台代理围栏、标题同步
-pnpm --filter @pockymoe/supervisor-web exec vitest run src/components/HarnessSettingsDialog.test.tsx   # 13 通过
-pnpm --filter @pockymoe/thread-ui exec vitest run src/plugins src/components/workbench/WorkbenchPanels.test.tsx src/i18n   # 17 通过
-pnpm --filter @pockymoe/supervisor-web typecheck
-
-# 真实 DSH + scripted provider，无需模型密钥（dsh 需在 PATH）
+node --test scripts/dsh-bridge.test.mjs
 E2E_REAL_DSH=1 E2E_DSH_SCRIPTED=1 E2E_DSH_HOME=/absolute/isolated-dsh-home \
   E2E_API_PORT=18875 E2E_WEB_PORT=15179 E2E_WORKSPACE_ROOT=/absolute/isolated-workspaces \
   pnpm exec playwright test e2e/dsh-bridge.spec.ts e2e/dsh-console-relay.spec.ts --project=desktop-chromium
 ```
 
-`e2e/dsh-bridge.spec.ts` 与 `e2e/dsh-console-relay.spec.ts` 在 desktop 与 mobile Chromium 上各 8 个用例全部通过，覆盖：
-
-- 只读阻止写入；
-- 流式与无重复；
-- plan 审阅通过后退出 plan；
-- goal 轮次留在回合内且可停止；
-- 面板插件开关：写前备份、重启后新进程确实生效、应用 bundle 被拒绝；
-- 新建对话选「极简」：模型实际只拿到 `bash`，首轮后锁定，plan/compact 控件关闭；
-- 插件侧栏面板：切换到 PTC，运行 DSH 插件注册的 `/e2e-echo`（夹具 `e2e/fixtures/dsh-e2e-command.mjs`），线程负责的命令不可在面板执行，原生控制台在新标签页完成 token 登录并显示 DSH 界面。
-- `e2e/dsh-console-relay.spec.ts`：经本地 relay 的仅 owner 端口预览打开控制台（应用与预览跨站）。
-
-Playwright 配置在真实 DSH 运行时设置 `DSH_TELEMETRY_DISABLED=1`。
-
-独立代码审查发现的问题均已修复，并各自有回归测试：
-- 重连不重启；
-- 失败 attempt 被存成正常完成的消息；
-- 缺少 permission 插件时权限 fail open；
-- bridge 与 ACP 竞态导致文本重复；
-- 后台子代理落在回合外；
-- 设置错误被吞掉；
-- UTF-8 跨读取被拆坏；
-- bridge 关闭后调用仍等到超时。
-
-真实模型的 `e2e/dsh.spec.ts` 需要 DeepSeek 或其他 provider 凭据，本次未运行；Windows 与线上 relay 也未运行。本分支未改 runtime 版本号；正式部署需要配套的共享 UI 提交与 relay 部署。
+Playwright 配置在真实 DSH 运行时设置 `DSH_TELEMETRY_DISABLED=1`。真实模型的 `e2e/dsh.spec.ts` 需要 DeepSeek 或其他 provider 凭据。

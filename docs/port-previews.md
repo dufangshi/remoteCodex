@@ -59,7 +59,7 @@ resolves its subdomains to loopback. Plain HTTP is for local development only.
 
 ### Current production ingress
 
-The `lnz-study.com` preview ingress was enabled on 2026-10-08. Cloudflare proxies
+For the `lnz-study.com` preview ingress, Cloudflare proxies
 `*.lnz-study.com` to the existing `remote.lnz-study.com` ingress; its active
 Universal SSL certificate covers these first-level preview hosts. The origin
 keeps the existing main-site HTTP ingress path. This setup does not install a

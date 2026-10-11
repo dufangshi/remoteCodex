@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Pilothouse"><title>Pilothouse</title><defs><linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#17201e"/><stop offset="1" stop-color="#0c0f11"/></linearGradient></defs><rect width="512" height="512" rx="116" fill="url(#bg)"/><rect x="3" y="3" width="506" height="506" rx="113" fill="none" stroke="#263038" stroke-width="6"/>
-<circle cx="256" cy="114" r="13" fill="#00cc76"/>
-<rect x="108" y="138" width="296" height="28" rx="14" fill="#f4f7f6"/>
-<path d="M118,180 L200.7,180 L207.3,272 L138,272 Z" fill="#00cc76"/>
-<path d="M214.7,180 L297.3,180 L290.7,272 L221.3,272 Z" fill="#3ee59c"/>
-<path d="M311.3,180 L394,180 L374,272 L304.7,272 Z" fill="#00cc76"/>
-<rect x="138" y="272" width="236" height="88" fill="#f4f7f6" fill-opacity="0.16"/>
-<path d="M80,360 L432,360 Q426,378 404,412 L108,412 Q86,378 80,360 Z" fill="#f4f7f6"/>
-</svg>

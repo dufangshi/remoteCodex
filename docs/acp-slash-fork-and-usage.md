@@ -59,10 +59,8 @@ pricing catalog and its user overrides; native logs must still be available.
 
 ## Verification
 
-`cargo test --workspace` covers protocol mapping, usage normalization, history
-recovery, command updates, HTTP actions and capability access. The focused
-`e2e/slash-fork-regression.spec.ts` with `--project=desktop-chromium` checks dynamic
-menu replacement, slash composition, fork navigation and reload.
+Rust tests cover protocol mapping, usage normalization, history recovery, command
+updates, HTTP actions and capability access.
 
 After `cargo build -p pockymoe`, `node scripts/verify-acp-forks.mjs` runs real
 harnesses against an isolated database. It verifies inherited context, parent
@@ -70,9 +68,3 @@ isolation, Codex historical boundaries, restart continuation and Grok usage
 backfill. It requires installed/authenticated harnesses and makes small real
 model requests. `FORK_TEST_AGENTS=codex,claude,grok` selects the harnesses and
 `FORK_TEST_PORT` overrides the test port. Evidence is saved under `.local/`.
-
-For the complete browser path, start a real supervisor with its own database on
-`E2E_API_PORT`, then run `RUN_REAL_FORK_UI=1 pnpm test:e2e
-e2e/harness-fork-ui.spec.ts --project=mobile-chromium` with matching port/workspace
-environment variables. This opt-in test makes real model requests and verifies
-both fork buttons, inherited context and the selected historical boundary.

@@ -24,6 +24,9 @@ npm/remote-codex/native-manifest.json
 *.apk
 .temp/
 .tmp/
+# Local agent working notes; see .scratch/README.md
+.scratch/*
+!.scratch/README.md
 .playwright-cli/*
 test-results/
 apps/supervisor-web/test-results/

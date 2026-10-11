@@ -1,23 +1,32 @@
 # Agent notes
 
-This branch is a Rust rewrite of the Pockymoe control plane.
+Pockymoe is a self-hosted control plane for coding agents. The Supervisor, relay
+and CLI are Rust under `crates/`; the Web UI is `apps/supervisor-web`. The shared
+thread UI comes from the separate `dufangshi/pockymoe-thread-ui-rust` repository,
+checked out at `pockymoe-thread-ui/`. Documentation index: [docs/README.md](docs/README.md).
 
-- The project was renamed from Remote Codex by `scripts/rename-pockymoe.mjs`. Persisted, wire-level and externally owned identifiers (including GitHub release asset names) deliberately keep their old names, and the runtime still accepts `REMOTE_CODEX_*` variables and the `remote-codex` command. Read [the rename notes](docs/rename-pockymoe.md) before renaming any remaining `remote-codex`, `REMOTE_CODEX_` or `remoteCodex` literal.
-- Runtime and HTTP live under `crates/`. Do not reintroduce the TypeScript supervisor or the 15-coordinator split.
-- ACP is the default harness path. Add a thin adapter under `crates/runtime/src/acp/` for command/capability differences (see `catalog.rs` for the command catalog and `capabilities.rs` for capability overlays).
-- Keep JSON field names camelCase. The React app in `apps/supervisor-web` still consumes `@pockymoe/shared`.
-- After changing `crates/`, run relevant crate/test-name regressions and formatting/compilation checks in proportion to the change. Do not default to `cargo test --workspace` or a platform matrix.
-- Routine PR CI runs lightweight, path-selected checks only. Full compatibility checks, workspace-wide tests, full browser suites, and release dry-runs require an explicit user request for that validation (or an explicitly authorized release requiring its release gates). Do not dispatch them as extra insurance after targeted checks pass. See [CI scope and manual invocation](docs/ci.md).
-- Web E2E: follow the project [focused-e2e skill](.agents/skills/focused-e2e/SKILL.md) when selecting, writing, or running tests. Select relevant spec files/tests and an explicit browser project; do not run the full suite by default.
-- Treat `apps/windows-device-manager` as a stable, independently released bootstrap. A runtime, HTTP, ACP, model, or harness fix must not by itself bump the Device Manager version, change its bundled seed version, or create a `windows-device-manager-v*` release. Publish the new `pockymoe` runtime/GitHub version. Migrate legacy npm devices once through setup, then update using the Web device-scoped management API; existing Manager bootstrap updates remain independent.
-- Bump or release Windows Device Manager only when its WinForms UI, installer, tray/startup behavior, self-update path, or other bootstrap-owned behavior changes. Keep the independent Manager release separate from runtime releases.
-- A versioned runtime release is immutable and includes the supported platform assets at one version. Path-filter PR CI to the affected code, but do not publish a partial replacement of one platform under an existing runtime version.
-- Do not copy Android/iOS/Windows sources into this tree.
-- After completing a change and its checks, commit the relevant files in each affected repository. Keep unrelated work out of the commit.
-- For runtime/GitHub releases or installed-version troubleshooting, follow the project [release-runtime skill](.agents/skills/release-runtime/SKILL.md).
+## Code
 
-- Public Web UI for `remote.lnz-study.com` is served by the remote Rust relay, not the device supervisor. After a Web/shared UI change, publish the shared UI commit and dispatch `relay-deploy.yml` from `main` with its full `thread_ui_sha`; restarting a device supervisor alone does not deploy Web changes. `legacy/node-0.11` is a backup branch, not the main deployment target.
+- Keep runtime and HTTP in Rust under `crates/`; do not add a Node or TypeScript supervisor.
+- ACP is the harness path. Put command or capability differences in a thin adapter under `crates/runtime/src/acp/` (`catalog.rs`, `capabilities.rs`).
+- JSON field names are camelCase.
+- Some `remote-codex`, `REMOTE_CODEX_` and `remoteCodex` identifiers must keep their old names. Read [docs/rename-pockymoe.md](docs/rename-pockymoe.md) before renaming one.
+- Do not copy Android, iOS or Windows app sources into this tree.
 
-- For an already-running Supervisor, prefer its device-scoped management Check/Update API (Settings) over manually replacing its native executable or killing the process. The updater must run independently, restart the service, and resume only threads interrupted by that update. Use manual detached recovery only when the installed API is unavailable or cannot complete the update.
+## Checks and commits
 
-- GitHub Releases are authoritative for runtime versions. Use `runtime-release.yml`; do not publish new runtime/npm packages. Keep the Windows Device Manager bootstrap release independent and mark its releases `--latest=false` so the GitHub latest alias remains the stable runtime.
+- Run checks in proportion to the change: the affected crates or test names, formatting and compilation. Do not run `cargo test --workspace`, full browser suites, platform matrices or release dry-runs unless the user asks. See [docs/ci.md](docs/ci.md).
+- For Web E2E, follow the [focused-e2e skill](.agents/skills/focused-e2e/SKILL.md): chosen specs and one explicit browser project.
+- After a change passes its checks, commit the relevant files in each affected repository. Keep unrelated work out of the commit.
+
+## Releases and deployment
+
+- Follow the [release-runtime skill](.agents/skills/release-runtime/SKILL.md) for runtime releases and installed-version problems. GitHub Releases are authoritative. A release is immutable and contains every platform; do not publish npm packages.
+- The Windows Device Manager is released independently. Bump or release it only when its own UI, installer, tray/startup or self-update behavior changes, never for a runtime fix, and mark its releases `--latest=false`.
+- The public Web UI is served by the relay, not by device Supervisors. After a Web or shared UI change, push the shared UI and dispatch `relay-deploy.yml` from `main` with its full `thread_ui_sha`.
+- Update a running Supervisor through its management Check/Update API (Settings), not by replacing its executable or killing it.
+
+## Documentation and notes
+
+- `docs/` holds only maintained documentation. Follow the rules in [docs/README.md](docs/README.md), and update docs in the same commit as the behavior they describe.
+- Write plans, task notes, investigation logs and test evidence in `.scratch/`, which git ignores, never in `docs/`.

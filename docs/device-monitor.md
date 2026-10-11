@@ -113,16 +113,3 @@ event for that turn. Socket pings, polling, expanding history and rerendering do
 not reset it. Initial/reloaded views fall back to recorded activity timestamps.
 Silence does not itself mark a turn stuck or finished; known background agents
 continue to have their own explicit status.
-
-
-## 2026-10-07 local investigation
-
-The Ubuntu host exposes `coretemp` package and physical-core readings without
-extra permissions (CPU package was 95–97°C during investigation). Both MSR and
-MMIO RAPL providers expose `package-0`; all energy counters are mode 0400 root.
-The Supervisor account is ubuntu, and noninteractive sudo is unavailable.
-The updated collector returns real CPU temperature and an explicit RAPL access
-reason. Real watts on this host remain unverified until an administrator grants
-the counter access above; fixture tests verify watts, wrap handling, provider
-deduplication/switching and fallback selection. No real Mac/Windows hardware was
-used for this change’s sensor validation.

@@ -54,27 +54,28 @@ The opt-in live test runs **inside an isolated Linux machine**, with two distinc
 ```sh
 node scripts/test-supervisor-update-live.mjs \
   --allow-token-use \
-  --directory /home/mac/pockymoe-update-test \
-  --prefix /home/mac/pockymoe-update-test/prefix \
-  --seed-binary /home/mac/pockymoe-update-test/seed-binary \
-  --candidate-binary /home/mac/pockymoe-update-test/candidate-binary
+  --directory /path/to/isolated-test \
+  --prefix /path/to/isolated-test/prefix \
+  --seed-binary /path/to/isolated-test/seed-binary \
+  --candidate-binary /path/to/isolated-test/candidate-binary
 ```
 
 Only release distribution is served from a loopback test registry, using distinct unpublished test versions. The production management API, npm installation, native binary hash validation, independent update worker, process restart, SQLite recovery, and real ACP/Codex session execute normally. The test triggers Update during a multi-step task, checks that the PID/version changes, then requires the same native session to finish a five-line checkpoint without duplicate lines. Evidence is written to the isolated run directory's `result.json`.
 
-### Recorded live verification (2026-09-07)
+`scripts/test-supervisor-relay-restart-live.mjs` runs the real relay, Supervisor and
+independent worker twice through the owner's device-scoped API, with registry
+access blocked. It makes no model calls.
 
-On the existing Treer Apple Container machine (Linux ARM64), a real `gpt-5.6-luna` Codex session was interrupted through the management Update endpoint. The separate updater replaced unpublished fixture version `0.0.900` with `0.0.901`, verified health under a different PID, and the same session completed its checkpoint exactly once (`1,2,3,4,5`). History retained one interrupted turn and one completed continuation, with `danger-full-access` unchanged. The host Supervisor was not restarted for this test. These fixture version numbers are not published runtime releases.
+## Confirming the new process
 
+The worker treats an update as successful only when the new process's health
+endpoint reports `relayConnected: true`. The Supervisor sets the flag after the
+relay's registration greeting and clears it when its tunnel exits. An explicit
+`relayConnected: false` wins over any older connection log, and an empty log
+override falls back to the default path.
 
-### Relay verification and the 2026-09-11 offline incident
-
-The 0.12.29 worker treated an empty `POCKYMOE_RELAY_SUPERVISOR_LOG` exported by tmux as a real path. Although the 0.12.31 process was running and reachable through Relay, the worker could not find its connection log, timed out, and restored 0.12.29. The database already used migration 8, so the old runtime could not start. Recovery reinstalled the already-published 0.12.31 package in the same npm prefix and started it with the existing database and device identity. Incident evidence is retained under `~/.remote-codex/recovery/update-0.12.31-offline/`.
-
-The unreleased fix reads `relayConnected` from the new process's health endpoint. The Supervisor sets this flag only after the relay's registration greeting and clears it when its tunnel exits or is cancelled. Compatibility with old runtimes resolves an empty log override to the launcher's default and interprets file offsets as bytes. Explicit `relayConnected: false` always wins over a historical connection log. A verification failure keeps the new process and installed package rather than blindly downgrading a migrated database.
-
-Settings labels the installed/running version separately from the ongoing operation, explains temporarily disabled controls, and clears stale jobs when a current snapshot no longer contains one. Polling does not overlap during a reconnect.
-
-`test-supervisor-relay-restart-live.mjs` exercises the real relay, Supervisor and independent worker twice through the owner's device-scoped API in Treer, with an empty log override and registry access blocked. It makes no model calls. Together with the worker's failure tests and UI reconnect tests, this covers the branch omitted by the earlier local-mode restart test. These fixes are committed without a version bump or deployment.
-
-Unreleased verification (2026-09-11): workspace tests passed (267 passed, one existing real-Gemini test ignored), updater tests 13/13, runtime-settings component tests 8/8, Web typecheck and production build passed. Treer relay evidence: `/home/mac/pockymoe-update-test/relay-restart-ZMBMoR/result.json`; PID sequence `3639 → 3695 → 3786`, both jobs completed with the same version and the device connected. The initial fixture lacked the relay's required administrator settings; it was corrected before the successful run. The production device was restored using the already-published 0.12.31 package, and its failed maintenance record was explicitly marked `recovered` with the original error retained.
+A failed verification keeps the new process and installation instead of
+downgrading: the new version may already have migrated the database, and the old
+runtime cannot open it. Settings shows the installed and running versions
+separately from the current operation, explains temporarily disabled controls,
+and clears a stale job once a fresh snapshot no longer contains it.
