@@ -36,9 +36,9 @@ test('Markdown illustration back restores the document and reading position, wit
   expect((await toolbar.boundingBox())!.height).toBeLessThanOrEqual(48);
   expect((await markdown.boundingBox())!.height).toBeGreaterThan(page.viewportSize()!.height * .6);
   await files.getByRole('button',{name:'File actions',exact:true}).click();
-  const actions = page.getByRole('menu',{name:'File actions',exact:true});
-  await actions.getByRole('menuitem',{name:'Reload from disk',exact:true}).click();
-  await expect(actions.getByRole('status')).toHaveText('Already up to date');
+  const actions = files.getByRole('toolbar',{name:'File actions',exact:true});
+  await actions.getByRole('button',{name:'Reload from disk',exact:true}).click();
+  await expect(actions.locator('.workspace-file-action-feedback[role="status"]')).toHaveText('Already up to date');
   await page.keyboard.press('Escape');
   await expect(actions).toHaveCount(0);
   await expect(markdown).toBeVisible();
@@ -47,17 +47,21 @@ test('Markdown illustration back restores the document and reading position, wit
   expect(before).toBeGreaterThan(100);
   await markdown.getByRole('link',{name:'Open illustration',exact:true}).click();
   await expect(files.locator('.thread-graph-viewer img')).toBeVisible();
+  await files.getByRole('button',{name:'File actions',exact:true}).click();
   await files.getByRole('button',{name:'Back to index.md',exact:true}).click();
   await expect(markdown).toBeVisible();
   await expect.poll(async () => Math.abs(await markdown.evaluate(el => el.scrollTop) - before)).toBeLessThan(3);
   await expect(markdown.getByRole('link',{name:'Open illustration',exact:true})).toBeInViewport();
   await page.screenshot({path:testInfo.outputPath('markdown-position-restored.png'),scale:'css'});
+  await files.getByRole('button',{name:'File actions',exact:true}).click();
   await files.getByRole('button',{name:'Forward',exact:true}).click();
   await expect(files.locator('.thread-graph-viewer img')).toBeVisible();
+  await files.getByRole('button',{name:'File actions',exact:true}).click();
   await files.getByRole('button',{name:'Back to index.md',exact:true}).click();
   await markdown.getByRole('link',{name:'Read details',exact:true}).click();
   await expect(markdown.getByRole('heading',{name:'Detailed instructions',exact:true})).toBeVisible();
   await expect(files.getByRole('button',{name:'Forward',exact:true})).toHaveCount(0);
+  await files.getByRole('button',{name:'File actions',exact:true}).click();
   await files.getByRole('button',{name:'Back to index.md',exact:true}).click();
   await expect(markdown.getByRole('link',{name:'Open illustration',exact:true})).toBeInViewport();
   if (isMobile) await files.getByRole('button',{name:'Back to files',exact:true}).click();
@@ -67,6 +71,7 @@ test('Markdown illustration back restores the document and reading position, wit
     await files.getByRole('treeitem',{name:'index.md',exact:true}).getByRole('button',{name:'index.md',exact:true}).click();
     await markdown.getByRole('link',{name:'Open illustration',exact:true}).click();
     await expect(files.locator('.thread-graph-viewer img')).toBeVisible();
+    await files.getByRole('button',{name:'File actions',exact:true}).click();
     await files.getByRole('button',{name:'Back to index.md',exact:true}).click();
     await expect(markdown.getByRole('link',{name:'Open illustration',exact:true})).toBeInViewport();
   }
@@ -103,12 +108,12 @@ test('file previews retain multiple tabs and both workspace and chat images acce
   await open('first.svg');
   await expect(files.locator('.workspace-image-viewport img')).toBeVisible();
   if (isMobile) await files.getByRole('button', { name: 'Back to files', exact: true }).click();
-  else await files.getByRole('button', { name: 'Hide preview', exact: true }).click();
+  else await files.getByRole('button', { name: 'Back to files', exact: true }).click();
   await expect(files.getByRole('tree')).toBeVisible();
   await open('second.svg');
   await expect(files.getByRole('tab')).toHaveCount(2);
-  // The outer X hides this preview; it does not close its active tab or drawer.
-  await files.getByRole('button', { name: 'Hide preview', exact: true }).click();
+  // Returning to the tree retains the file tab and drawer.
+  await files.getByRole('button', { name: 'Back to files', exact: true }).click();
   await expect(files.getByRole('tree')).toBeVisible();
   await open('notes.md');
   await expect(files.getByRole('tab')).toHaveCount(3);
@@ -137,7 +142,7 @@ test('file previews retain multiple tabs and both workspace and chat images acce
     await lightbox.getByRole('button', { name: 'Close image preview', exact: true }).click();
     await percent.click();
     await expect(percent).toHaveText('100%');
-    await files.getByRole('button', { name: 'Hide preview', exact: true }).click();
+    await files.getByRole('button', { name: 'Back to files', exact: true }).click();
     await files.getByTestId('workbench-close-files').click();
     const photo = page.getByRole('button', { name: 'Open image preview: photo.png', exact: true });
     await expect.poll(() => photo.locator('img').evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
@@ -204,6 +209,7 @@ test('GitHub README HTML renders centered badges and workspace illustrations', a
   await markdown.getByRole('link', { name: '简体中文', exact: true }).click();
   await expect(files.getByRole('heading', { name: '中文说明', exact: true })).toBeVisible();
   await expect(files.getByRole('tab')).toHaveCount(2);
+  await files.getByRole('button', { name: 'File actions', exact: true }).click();
   await files.getByRole('button', { name: 'Back to README.md', exact: true }).click();
   await expect(markdown.locator('h1')).toHaveText('Pockymoe');
 });

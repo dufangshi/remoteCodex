@@ -83,12 +83,7 @@ async function setup(page: Page, request: APIRequestContext, mobile = false) {
   expect(promptResponse.ok()).toBeTruthy();
   await page.goto(`/threads/${id}`);
   if (mobile) {
-    await page
-      .getByRole('button', { name: '切换快捷方式侧栏', exact: true })
-      .click();
-    await page
-      .getByRole('button', { name: '打开文件浏览器', exact: true })
-      .click();
+    await page.locator('.matter-topbar').getByRole('button', { name: '切换文件浏览器', exact: true }).click();
   } else
     await page
       .getByRole('navigation', { name: '工作区工具' })
@@ -98,6 +93,7 @@ async function setup(page: Page, request: APIRequestContext, mobile = false) {
   await expect(row).toBeVisible();
   await row.focus();
   await row.press('Enter');
+  await page.getByRole('button', { name: '文件操作', exact: true }).click();
   await page.getByRole('button', { name: '编辑文件', exact: true }).click();
   return { absPath, id, ws, otherId };
 }
@@ -138,7 +134,7 @@ test('new file opens for editing and never overwrites an existing path', async (
   const { absPath } = await setup(page, request, mobile);
   await mkdir(path.join(absPath, 'docs'));
   const revealTree = async () => {
-    const show = page.getByRole('button', { name: '显示文件浏览器', exact: true });
+    const show = page.getByRole('button', { name: '返回文件列表', exact: true });
     if (await show.isVisible()) await show.click();
   };
   await revealTree();
@@ -170,6 +166,7 @@ test('new file opens for editing and never overwrites an existing path', async (
   const content = '# 新建文件\n\n可直接开始编辑。';
   await input.focus();
   await page.keyboard.insertText(content);
+  if (!await page.getByRole('button', { name: '保存文件', exact: true }).isVisible()) await page.getByRole('button', { name: '文件操作', exact: true }).click();
   await page.getByRole('button', { name: '保存文件', exact: true }).click();
   await expect.poll(() => readFile(path.join(absPath, 'docs/新笔记.md'), 'utf8')).toBe(content);
   await screenshot(page, mobile ? 'mobile-new-file.png' : 'desktop-new-file.png');
@@ -236,7 +233,7 @@ test('dirty file survives tab switch, undo, navigation cancel and guarded save-a
     .click();
   await expect(page).toHaveURL(new RegExp(`/threads/${id}$`));
   // Hiding the panel may unmount its view; retained drafts still guard reload.
-  await page.getByTestId('workbench-close-files').click();
+  await page.getByRole('navigation', { name: '工作区工具' }).getByRole('button', { name: '切换文件浏览器', exact: true }).click();
   let unloadPrompt = false;
   page.once('dialog', async (dialog) => {
     unloadPrompt = dialog.type() === 'beforeunload';
@@ -283,6 +280,7 @@ test('external write conflicts with fixed snapshot and overwrite checks the disp
     (response) =>
       response.url().endsWith('/files/save') && response.status() === 409,
   );
+  if (!await page.getByRole('button', { name: '保存文件', exact: true }).isVisible()) await page.getByRole('button', { name: '文件操作', exact: true }).click();
   await page.getByRole('button', { name: '保存文件', exact: true }).click();
   await rejected;
   await expect(page.getByTestId('workspace-document-conflict')).toContainText(
@@ -345,6 +343,7 @@ test('lost save receipt reconciles actual commit without overwriting later typin
     await pending;
     await route.abort('failed');
   });
+  if (!await page.getByRole('button', { name: '保存文件', exact: true }).isVisible()) await page.getByRole('button', { name: '文件操作', exact: true }).click();
   await page.getByRole('button', { name: '保存文件', exact: true }).click();
   await expect.poll(() => committed).toBe(true);
   await expect(page.getByTestId('workspace-document-status')).toContainText(
@@ -362,6 +361,7 @@ test('lost save receipt reconciles actual commit without overwriting later typin
   expect(writes).toBe(1);
   expect(await readFile(path.join(absPath, noteName), 'utf8')).toBe(draft);
   await page.unroute('**/files/save');
+  if (!await page.getByRole('button', { name: '保存文件', exact: true }).isVisible()) await page.getByRole('button', { name: '文件操作', exact: true }).click();
   await page.getByRole('button', { name: '保存文件', exact: true }).click();
   await expect(page.getByTestId('workspace-document-status')).toContainText(
     '已保存',
@@ -390,6 +390,7 @@ test('mobile editor preserves draft and exposes save and close actions without o
     page.getByRole('button', { name: '继续编辑', exact: true }),
   ).toBeVisible();
   await page.getByRole('button', { name: '继续编辑', exact: true }).click();
+  if (!await page.getByRole('button', { name: '保存文件', exact: true }).isVisible()) await page.getByRole('button', { name: '文件操作', exact: true }).click();
   await page.getByRole('button', { name: '保存文件', exact: true }).click();
   await expect(page.getByTestId('workspace-document-status')).toContainText(
     '已保存',
