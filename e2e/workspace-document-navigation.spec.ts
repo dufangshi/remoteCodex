@@ -47,7 +47,6 @@ test('Markdown illustration back restores the document and reading position, wit
   expect(before).toBeGreaterThan(100);
   await markdown.getByRole('link',{name:'Open illustration',exact:true}).click();
   await expect(files.locator('.thread-graph-viewer img')).toBeVisible();
-  await files.getByRole('button',{name:'File actions',exact:true}).click();
   await files.getByRole('button',{name:'Back to index.md',exact:true}).click();
   await expect(markdown).toBeVisible();
   await expect.poll(async () => Math.abs(await markdown.evaluate(el => el.scrollTop) - before)).toBeLessThan(3);
@@ -56,12 +55,10 @@ test('Markdown illustration back restores the document and reading position, wit
   await files.getByRole('button',{name:'File actions',exact:true}).click();
   await files.getByRole('button',{name:'Forward',exact:true}).click();
   await expect(files.locator('.thread-graph-viewer img')).toBeVisible();
-  await files.getByRole('button',{name:'File actions',exact:true}).click();
   await files.getByRole('button',{name:'Back to index.md',exact:true}).click();
   await markdown.getByRole('link',{name:'Read details',exact:true}).click();
   await expect(markdown.getByRole('heading',{name:'Detailed instructions',exact:true})).toBeVisible();
   await expect(files.getByRole('button',{name:'Forward',exact:true})).toHaveCount(0);
-  await files.getByRole('button',{name:'File actions',exact:true}).click();
   await files.getByRole('button',{name:'Back to index.md',exact:true}).click();
   await expect(markdown.getByRole('link',{name:'Open illustration',exact:true})).toBeInViewport();
   if (isMobile) await files.getByRole('button',{name:'Back to files',exact:true}).click();
@@ -71,7 +68,6 @@ test('Markdown illustration back restores the document and reading position, wit
     await files.getByRole('treeitem',{name:'index.md',exact:true}).getByRole('button',{name:'index.md',exact:true}).click();
     await markdown.getByRole('link',{name:'Open illustration',exact:true}).click();
     await expect(files.locator('.thread-graph-viewer img')).toBeVisible();
-    await files.getByRole('button',{name:'File actions',exact:true}).click();
     await files.getByRole('button',{name:'Back to index.md',exact:true}).click();
     await expect(markdown.getByRole('link',{name:'Open illustration',exact:true})).toBeInViewport();
   }
@@ -204,12 +200,27 @@ test('GitHub README HTML renders centered badges and workspace illustrations', a
   expect(await markdown.textContent()).not.toContain('<p align=');
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize()!.width);
   await page.screenshot({ path: testInfo.outputPath(`readme-html-${isMobile ? 'mobile' : 'desktop'}.png`), scale: 'css' });
+  await markdown.getByRole('button', { name: /^Open image preview: Pockymoe:/ }).click();
+  const lightbox = page.locator('.thread-graph-image-lightbox');
+  await expect(lightbox).toBeVisible();
+  await lightbox.getByRole('button', { name: 'Zoom in', exact: true }).click();
+  await expect(lightbox.locator('.thread-graph-image-lightbox-scale')).toContainText('125%');
+  await lightbox.evaluate(el => el.setAttribute('data-kept-preview', 'readme'));
+  // Each real capability poll refreshes the parent page. The same modal and zoom
+  // must survive consecutive refreshes, rather than disappearing a few seconds later.
+  for (let i = 0; i < 2; i++) {
+    await page.waitForResponse(response => response.url().includes('/capabilities') && response.ok());
+    await expect(lightbox).toHaveAttribute('data-kept-preview', 'readme');
+    await expect(lightbox.locator('.thread-graph-image-lightbox-scale')).toContainText('125%');
+  }
+  await page.screenshot({ path: testInfo.outputPath('readme-image-stays-open.png'), scale: 'css' });
+  await lightbox.getByRole('button', { name: 'Close image preview', exact: true }).click();
+  await expect(lightbox).toHaveCount(0);
   await markdown.getByText('More information', { exact: true }).click();
   await expect(markdown.getByText('Keep reading', { exact: true })).toBeVisible();
   await markdown.getByRole('link', { name: '简体中文', exact: true }).click();
   await expect(files.getByRole('heading', { name: '中文说明', exact: true })).toBeVisible();
   await expect(files.getByRole('tab')).toHaveCount(2);
-  await files.getByRole('button', { name: 'File actions', exact: true }).click();
   await files.getByRole('button', { name: 'Back to README.md', exact: true }).click();
   await expect(markdown.locator('h1')).toHaveText('Pockymoe');
 });

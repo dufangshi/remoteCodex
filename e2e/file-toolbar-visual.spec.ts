@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+test.use({ actionTimeout: 15_000 });
 const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
 test('file toolbar stays compact, tabs swipe independently and icon actions inherit dark and light themes', async ({ page, request, context, isMobile }, testInfo) => {
   const root = path.resolve(process.env.E2E_WORKSPACE_ROOT!, randomUUID());
@@ -40,7 +41,9 @@ test('file toolbar stays compact, tabs swipe independently and icon actions inhe
   await expect(files.getByTestId('workbench-close-files')).toHaveCount(0);
   await expect(row.locator('.thread-graph-editor-toolbar-button')).toHaveCount(1);
   await expect(shelf).toHaveCount(0);
-  expect((await row.boundingBox())!.height).toBeLessThanOrEqual(45);
+  expect((await row.boundingBox())!.height).toBeCloseTo((await page.locator('.matter-tabs-row').boundingBox())!.height, 0);
+  for (const tab of await files.locator('.thread-graph-editor-tab').all()) expect((await tab.boundingBox())!.width).toBeLessThanOrEqual(isMobile ? 136 : 156);
+  await expect(files.locator('.workspace-file-tab-name').last()).toHaveCSS('direction', 'rtl');
   expect(await strip.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(true);
   await expect(strip).toHaveCSS('scrollbar-width', 'none');
   const beforeBack = (await back.boundingBox())!, beforeMore = (await more.boundingBox())!;
@@ -67,10 +70,19 @@ test('file toolbar stays compact, tabs swipe independently and icon actions inhe
   await threadStrip.evaluate(el => { el.scrollLeft = 0; });
   await expect(page.locator('.matter-tab-scroll')).toHaveAttribute('data-overflow-end', 'true');
   await more.click();
-  expect((await shelf.boundingBox())!.height).toBeLessThanOrEqual(40);
+  expect((await shelf.boundingBox())!.height).toBeLessThanOrEqual(30);
+  expect((await shelf.boundingBox())!.width).toBeLessThan((await row.boundingBox())!.width * .7);
+  expect((await shelf.boundingBox())!.x + (await shelf.boundingBox())!.width).toBeCloseTo((await row.boundingBox())!.x + (await row.boundingBox())!.width - 4, 0);
+  await expect(shelf.locator('.workspace-file-state')).toHaveCount(0);
+  await expect(shelf.getByRole('button', {name: /^Back/})).toHaveCount(0);
   expect((await shelf.boundingBox())!.y).toBeGreaterThanOrEqual((await row.boundingBox())!.y + (await row.boundingBox())!.height - 1);
   await expect(page.getByRole('menu', { name: 'File actions', exact: true })).toHaveCount(0);
-  for (const name of ['Edit file', 'Markdown source', 'Reload from disk', 'Download file']) await expect(shelf.getByRole('button', { name, exact: true })).toBeVisible();
+  for (const name of ['Edit file', 'Markdown source', 'Reload from disk', 'Download file', 'Copy file path', 'Copy file name']) await expect(shelf.getByRole('button', { name, exact: true })).toBeVisible();
+  await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => { (window as unknown as { copiedFileText: string }).copiedFileText = text; } } }));
+  await shelf.getByRole('button', {name: 'Copy file path', exact: true}).click();
+  expect(await page.evaluate(() => (window as unknown as { copiedFileText: string }).copiedFileText)).toBe(path.join(root, names.at(-1)!));
+  await shelf.getByRole('button', {name: 'Copy file name', exact: true}).click();
+  expect(await page.evaluate(() => (window as unknown as { copiedFileText: string }).copiedFileText)).toBe(names.at(-1));
   // Check actual rendered colors, not only theme attributes or a CSS class.
   async function colors(target: Locator) {
     return target.evaluate(el => {
