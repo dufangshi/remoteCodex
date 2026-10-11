@@ -3637,6 +3637,8 @@ snapshots:
       react-resizable-panels: 3.0.6(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       react-syntax-highlighter: 15.6.6(react@19.2.7)
       rehype-katex: 7.0.1
+      rehype-raw: 7.0.0
+      rehype-sanitize: 6.0.0
       remark-cjk-friendly: 2.3.1(@types/mdast@4.0.4)(micromark-util-types@2.0.2)(micromark@4.0.2)(unified@11.0.5)
       remark-gfm: 4.0.1
       remark-math: 6.0.0
