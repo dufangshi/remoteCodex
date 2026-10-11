@@ -100,6 +100,15 @@ impl ClaudeCompletion {
         }
     }
 
+    pub fn confirms_final_reply(&self, delivered_text: &str) -> bool {
+        !self.invalid
+            && self.pending_tools.is_empty()
+            && self
+                .final_text
+                .as_deref()
+                .is_some_and(|text| text.trim() == delivered_text.trim())
+    }
+
     pub fn completed_queued_command(&self, delivered_text: Option<&str>) -> Option<&str> {
         if self.invalid
             || self.queue_ambiguous

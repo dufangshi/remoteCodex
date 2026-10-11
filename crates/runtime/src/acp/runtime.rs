@@ -2442,8 +2442,28 @@ impl AgentRuntime for AcpRuntime {
                 Some(error.to_string()),
             ),
         };
+        if let Some(reader) = claude_usage_reader.as_mut() {
+            for usage in reader.poll_final() {
+                emit_usage(&bus, &input.thread_id, &input.turn_id, usage, input.hidden);
+            }
+            for notice in reader.take_task_notices() {
+                emit_mapped(
+                    &bus,
+                    &input.thread_id,
+                    &input.turn_id,
+                    mapper.native_task_notification(&notice),
+                    input.hidden,
+                );
+            }
+        }
         let completed_tools = mapper.completed_tool_ids();
         let mut items = mapper.finish(!matches!(outcome, TurnOutcome::Completed));
+        if let Some(reader) = claude_usage_reader.as_ref() {
+            reader.annotate_background_reply_phases(
+                &mut items,
+                matches!(outcome, TurnOutcome::Completed),
+            );
+        }
         for item in &mut items {
             if item.status.as_deref() != Some("failed")
                 && !abandoned_tools.contains(&item.id)

@@ -33,3 +33,7 @@ wake, same-turn rendering, and reload). The opt-in real-harness test
 it checks the wake anchor, post-wake command, final report and usage. The
 companion `haiku_monitor_events_and_final_report_stay_in_one_durable_turn`
 checks intermediate Monitor wakes as well as completion.
+
+## Folding progress and final replies
+
+Background waits, wakes and progress stay inside the same expandable execution history. A folded turn exposes only its native-confirmed final reply. The runtime writes `responsePhase: commentary | final` on background-turn agent messages: only the last delivered reply matching a complete native `end_turn`, with no pending tools/background tasks, receives `final`; cancellation, incomplete tails and unmatched text remain commentary. The UI conservatively folds untyped legacy background replies rather than treating the last progress update as a final answer. Expanding still shows all saved text; no old database rows are rewritten.

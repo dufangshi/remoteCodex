@@ -269,6 +269,24 @@ async fn native_background_wake_acceptance(
     let wake_ids = observed.expect("bounded real wake").unwrap();
     let items = done.expect("test completes").unwrap().unwrap();
     assert!(items.iter().any(|item| item.text.contains(final_marker)));
+    let replies: Vec<_> = items
+        .iter()
+        .filter(|item| item.kind == "agentMessage")
+        .collect();
+    assert_eq!(
+        replies
+            .iter()
+            .filter(|item| item.extra.get("responsePhase").and_then(Value::as_str) == Some("final"))
+            .count(),
+        1
+    );
+    assert!(replies
+        .iter()
+        .any(|item| item.text.contains(final_marker) && item.extra["responsePhase"] == "final"));
+    assert!(replies
+        .iter()
+        .filter(|item| !item.text.contains(final_marker))
+        .all(|item| item.extra["responsePhase"] == "commentary"));
     let detail = state
         .get_thread_turn_detail(&thread.id, &turn_id)
         .await
@@ -277,6 +295,12 @@ async fn native_background_wake_acceptance(
     assert!(
         detail.items.iter().any(|i| i.text.contains(final_marker)),
         "final report persisted before completion"
+    );
+    assert!(
+        detail.items.iter().any(|item| item.kind == "agentMessage"
+            && item.text.contains(final_marker)
+            && item.extra["responsePhase"] == "final"),
+        "native-confirmed final phase survives persistence"
     );
     for id in &wake_ids {
         let notice = detail.items.iter().find(|i| &i.id == id).unwrap();

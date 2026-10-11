@@ -903,6 +903,7 @@ export interface ThreadHistoryItemDto {
   waitingStartedAt?: string | null;
   awakenedAt?: string | null;
   backgroundTaskCount?: number | null;
+  responsePhase?: 'commentary' | 'final' | null;
   status?: string | null;
   assetPath?: string | null;
   changedFiles?: number | null;

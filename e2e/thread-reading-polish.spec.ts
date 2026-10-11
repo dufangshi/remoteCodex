@@ -530,17 +530,20 @@ test('background wake replaces its waiting anchor and continues within the same 
   await page.route(`**/api/threads/${id}?**`,route=>route.fulfill({json:response()}));
   await page.goto(`/threads/${id}`);
   const waitRow=page.locator('.thread-graph-task-notice');
-  await expect(waitRow).toContainText('等待唤醒');
+  await expect(waitRow).toHaveCount(0);
   await expect(page.locator('.thread-graph-turn-footer')).toContainText('等待唤醒');
   await expect(page.locator('.thread-graph-worked-summary')).toHaveCount(1);
   // The waiting marker is durable and remains explicit after a full page reload.
   await page.reload();
+  await expect(waitRow).toHaveCount(0);
+  await expect(page.locator('.thread-graph-turn-footer')).toContainText('等待唤醒');
+  await page.locator('.thread-graph-worked-summary button[aria-expanded]').click();
   await expect(waitRow).toContainText('等待唤醒');
   await page.screenshot({path:testInfo.outputPath('background-waiting.png'),scale:'css'});
   const wake={...wait,origin:'nativeTaskNotification',taskStatus:'completed',status:'completed',text:'GitHub 发布任务已完成',detailText:'所有平台产物和部署检查已通过。',awakenedAt:new Date().toISOString()};
   const checking={id:'checking',kind:'agentMessage',text:'已收到完成通知，正在核对线上版本。',status:'completed',sequence:4};
   const command={id:'verification',kind:'commandExecution',text:'检查已部署版本',status:'completed',sequence:5};
-  const final={id:'final',kind:'agentMessage',text:'部署检查完成，线上版本与发布版本一致。',status:'completed',sequence:6};
+  const final={id:'final',kind:'agentMessage',responsePhase:'final',text:'部署检查完成，线上版本与发布版本一致。',status:'completed',sequence:6};
   const emit=(type:string,payload:object)=>socket!.send(JSON.stringify({type,threadId:id,timestamp:new Date().toISOString(),payload}));
   items=[prompt,foreground,wake,checking,command,final];
   for (const item of [wake,checking,command,final]) emit('thread.item.completed',{turnId,item});
@@ -559,7 +562,8 @@ test('background wake replaces its waiting anchor and continues within the same 
   completed=true;
   emit('thread.turn.completed',{turnId,status:'completed'});
   await page.reload();
-  await expect(waitRow).toContainText('已唤醒');
+  await expect(waitRow).toHaveCount(0);
+  await expect(page.getByText(checking.text,{exact:true})).toHaveCount(0);
   await expect(page.getByText(final.text,{exact:true})).toBeVisible();
   expect(detailLoads).toBe(0);
   await page.locator('.thread-graph-worked-summary button[aria-expanded]').click();
@@ -577,7 +581,7 @@ test('background wake replaces its waiting anchor and continues within the same 
     await expect(page.getByText(foreground.text, { exact: true })).toHaveCount(0);
     await expect(page.getByText(checking.text, { exact: true })).toHaveCount(0);
     await expect(page.getByText(final.text, { exact: true })).toBeVisible();
-    await expect(waitRow).toContainText('已唤醒');
+    await expect(waitRow).toHaveCount(0);
     if (attempt === 0) await page.screenshot({ path: testInfo.outputPath('background-collapsed.png'), scale: 'css' });
     await workedToggle.click();
     await expect(workedToggle).toHaveAttribute('aria-expanded', 'true');
@@ -585,4 +589,18 @@ test('background wake replaces its waiting anchor and continues within the same 
     await expect(page.getByText(checking.text, { exact: true })).toBeVisible();
   }
   expect(detailLoads).toBe(1);
+  // A turn can be closed without a final answer (including older lost-wake
+  // records). Neither an explicit progress reply nor an untyped legacy reply
+  // should escape the folded history just because it is the last text.
+  for (const responsePhase of ['commentary', undefined]) {
+    const progress = { ...final, text: 'Still waiting on the other platforms', responsePhase };
+    items = [prompt, foreground, wake, checking, command, progress];
+    await page.reload();
+    await expect(workedToggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(waitRow).toHaveCount(0);
+    await expect(page.getByText(progress.text, { exact: true })).toHaveCount(0);
+    await workedToggle.click();
+    await expect(waitRow).toContainText('已唤醒');
+    await expect(page.getByText(progress.text, { exact: true })).toBeVisible();
+  }
 });

@@ -146,6 +146,38 @@ impl ClaudeUsageReader {
         self.tasks.take_notices()
     }
 
+    pub fn annotate_background_reply_phases(
+        &self,
+        items: &mut [pockymoe_protocol::ThreadHistoryItemDto],
+        completed: bool,
+    ) {
+        if !items.iter().any(|item| {
+            matches!(
+                item.extra.get("origin").and_then(Value::as_str),
+                Some("nativeBackgroundWait" | "nativeTaskNotification")
+            )
+        }) {
+            return;
+        }
+        let final_index = items.iter().rposition(|item| item.kind == "agentMessage");
+        for (index, item) in items
+            .iter_mut()
+            .enumerate()
+            .filter(|(_, item)| item.kind == "agentMessage")
+        {
+            let confirmed = completed
+                && Some(index) == final_index
+                && self.complete_tail
+                && !self.background_pending()
+                && self.background_subagents().is_empty()
+                && self.completion.confirms_final_reply(&item.text);
+            item.extra.insert(
+                "responsePhase".into(),
+                json!(if confirmed { "final" } else { "commentary" }),
+            );
+        }
+    }
+
     pub fn record_sdk(&mut self, message: &Value) {
         self.tasks.record_sdk(message);
     }
@@ -201,6 +233,65 @@ impl ClaudeUsageReader {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn background_reply_phase_requires_native_end_turn_and_no_unfinished_work() {
+        use pockymoe_protocol::ThreadHistoryItemDto;
+        let home = tempfile::tempdir().unwrap();
+        let session = uuid::Uuid::new_v4().to_string();
+        let mut reader = ClaudeUsageReader::with_home(home.path().into(), &session);
+        let entry = |value: Value| {
+            let mut value = value;
+            value["sessionId"] = json!(session);
+            value["timestamp"] = json!("2099-01-01T00:00:00Z");
+            value
+        };
+        let item = |id: &str, kind: &str, text: &str| -> ThreadHistoryItemDto {
+            serde_json::from_value(json!({"id":id,"kind":kind,"text":text})).unwrap()
+        };
+        let mut wake = item("wake", "generic", "Build finished");
+        wake.extra
+            .insert("origin".into(), json!("nativeTaskNotification"));
+        let mut items = vec![
+            wake,
+            item("progress", "agentMessage", "Waiting on other platforms"),
+            item("reply", "agentMessage", "Done"),
+        ];
+        let text = |text: &str, stop: &str| {
+            entry(
+                json!({"type":"assistant","message":{"stop_reason":stop,"content":[{"type":"text","text":text}]}}),
+            )
+        };
+        reader.complete_tail = true;
+        reader.record(&text("Done", "tool_use"));
+        reader.annotate_background_reply_phases(&mut items, true);
+        assert_eq!(items[2].extra["responsePhase"], "commentary");
+        reader.record(&text("Done", "end_turn"));
+        reader.annotate_background_reply_phases(&mut items, true);
+        assert_eq!(items[1].extra["responsePhase"], "commentary");
+        assert_eq!(items[2].extra["responsePhase"], "final");
+        reader.annotate_background_reply_phases(&mut items, false);
+        assert_eq!(items[2].extra["responsePhase"], "commentary");
+        reader.complete_tail = false;
+        reader.annotate_background_reply_phases(&mut items, true);
+        assert_eq!(items[2].extra["responsePhase"], "commentary");
+        reader.complete_tail = true;
+        reader.record(&entry(json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"launch","name":"Bash"}]}})));
+        reader.record(&entry(json!({"type":"user","toolUseResult":{"backgroundTaskId":"build"},"message":{"content":[{"type":"tool_result","tool_use_id":"launch"}]}})));
+        reader.record(&text("Done", "end_turn"));
+        reader.annotate_background_reply_phases(&mut items, true);
+        assert_eq!(
+            items[2].extra["responsePhase"], "commentary",
+            "foreground end_turn while waiting is not the final report"
+        );
+        reader.record(&entry(json!({"type":"user","origin":{"kind":"task-notification"},"message":{"content":"<task-notification><task-id>build</task-id><status>completed</status></task-notification>"}})));
+        reader.record(&text("Done", "end_turn"));
+        reader.annotate_background_reply_phases(&mut items, true);
+        assert_eq!(items[2].extra["responsePhase"], "final");
+        items[2].text = "Unconfirmed text".into();
+        reader.annotate_background_reply_phases(&mut items, true);
+        assert_eq!(items[2].extra["responsePhase"], "commentary");
+    }
 
     #[test]
     fn background_agents_exclude_history_foreign_sessions_and_sidechains() {
