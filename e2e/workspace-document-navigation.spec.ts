@@ -82,9 +82,12 @@ test('file previews retain multiple tabs and both workspace and chat images acce
   const workspace = await (await request.post(`${base}/api/workspaces`, { data: { absPath, label: 'Image tabs' } })).json();
   const started = await (await request.post(`${base}/api/threads/start`, { data: { workspaceId: workspace.id, title: 'Image tabs', provider: 'acp', agentId: 'codex', model: 'ios-e2e-stream', approvalMode: 'yolo' } })).json();
   const id = started.id ?? started.thread.id;
+  const photoPath = `./.temp/threads/${id}/photo.png`;
+  await mkdir(path.join(absPath, '.temp/threads', id), { recursive: true });
+  await copyFile('apps/supervisor-web/public/icon-192.png', path.join(absPath, photoPath));
   const detail = await (await request.get(`${base}/api/threads/${id}`)).json();
   const now = new Date().toISOString();
-  await page.route(`**/api/threads/${id}?**`, route => route.fulfill({ json: { ...detail, totalTurnCount: 1, turns: [{ id: 'photo-turn', status: 'completed', startedAt: now, completedAt: now, items: [{ id: 'photo', kind: 'userMessage', text: `[PHOTO ${path.join(absPath, 'first.svg')}]` }, { id: 'reply', kind: 'agentMessage', text: 'Preview this image.' }] }] } }));
+  await page.route(`**/api/threads/${id}?**`, route => route.fulfill({ json: { ...detail, totalTurnCount: 1, turns: [{ id: 'photo-turn', status: 'completed', startedAt: now, completedAt: now, items: [{ id: 'photo', kind: 'userMessage', text: `[PHOTO ${photoPath}]` }, { id: 'reply', kind: 'agentMessage', text: 'Preview this image.' }] }] } }));
   await page.addInitScript(() => {
     localStorage.setItem('remote-codex-theme-mode', 'dark');
     localStorage.setItem('pockymoe.onboarding.v1:' + JSON.stringify([location.origin, 'local:owner']), JSON.stringify({ welcomeDismissed: true, completed: [] }));
@@ -136,9 +139,11 @@ test('file previews retain multiple tabs and both workspace and chat images acce
     await expect(percent).toHaveText('100%');
     await files.getByRole('button', { name: 'Hide preview', exact: true }).click();
     await files.getByTestId('workbench-close-files').click();
-    const photo = page.getByRole('button', { name: 'Open image preview: first.svg', exact: true });
+    const photo = page.getByRole('button', { name: 'Open image preview: photo.png', exact: true });
+    await expect.poll(() => photo.locator('img').evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
     await photo.click();
     await expect(lightbox).toBeVisible();
+    await expect.poll(() => lightbox.locator('img').evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
     await pinch(lightbox.locator('.thread-graph-image-lightbox-viewport'));
     await expect(lightbox.locator('.thread-graph-image-lightbox-scale')).not.toContainText('100%');
     await page.screenshot({ path: testInfo.outputPath('pinched-chat-photo.png'), scale: 'css' });
