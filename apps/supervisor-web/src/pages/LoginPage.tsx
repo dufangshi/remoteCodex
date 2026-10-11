@@ -46,9 +46,7 @@ export function LoginPage({
       <section className="w-full max-w-sm rounded-lg border border-[var(--theme-border)] bg-[var(--theme-panel)] p-5 shadow-[var(--theme-shadow)] sm:p-6">
         <div className="mb-5"><LanguageSwitcher className="mb-4" />
           <div className="mb-5 flex items-center gap-3 border-b border-[var(--theme-border)] pb-4">
-            <span className="inline-flex h-10 w-10 items-center justify-center rounded-md bg-[var(--theme-accent-soft)] text-xs font-bold text-[var(--theme-accent-strong)]">
-              RC
-            </span>
+            <img src="/icon-192.png?v=pockymoe" alt="" className="h-10 w-10 rounded-md" />
             <div>
               <p className="text-sm font-semibold text-[var(--theme-fg)]">Pockymoe</p>
               <p className="text-xs text-[var(--theme-fg-muted)]">{eyebrow}</p>

@@ -521,9 +521,7 @@ function RelayFrame({ children }: { children: React.ReactNode }) {
           to="/"
         >
           <ArrowLeft aria-hidden="true" className="h-4 w-4 shrink-0" />
-          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--theme-accent-soft)] text-xs text-[var(--theme-accent-strong)]">
-            RC
-          </span>
+          <img src="/icon-192.png?v=pockymoe" alt="" className="h-8 w-8 shrink-0 rounded-lg" />
           <span className="truncate">{translate("auth.relayHome")}</span>
         </Link>
         <Link
