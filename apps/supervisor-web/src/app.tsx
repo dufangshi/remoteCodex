@@ -58,6 +58,7 @@ import {
 } from './lib/api';
 import { builtinFrontendPlugins } from './plugins/builtin-plugin-modules';
 import { useComposerPreferences } from './lib/useComposerPreferences';
+import { themeChromeColor, useThemePreset } from './lib/themePreset';
 
 const THEME_STORAGE_KEY = 'remote-codex-theme-mode';
 const BACKEND_STORAGE_KEY = 'remote-codex-default-backend';
@@ -577,6 +578,7 @@ export function App() {
     systemThemePreference(),
   );
   const effectiveTheme = themeMode === 'system' ? systemTheme : themeMode;
+  const [themePreset] = useThemePreset();
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -618,8 +620,8 @@ export function App() {
     root.style.colorScheme = effectiveTheme;
     document
       .querySelector<HTMLMetaElement>('meta[name="theme-color"]')
-      ?.setAttribute('content', effectiveTheme === 'dark' ? '#171713' : '#f3f6f7');
-  }, [effectiveTheme, themeMode]);
+      ?.setAttribute('content', themeChromeColor(themePreset, effectiveTheme));
+  }, [effectiveTheme, themeMode, themePreset]);
 
   return (
     <div className="theme-shell theme-scrollbar">

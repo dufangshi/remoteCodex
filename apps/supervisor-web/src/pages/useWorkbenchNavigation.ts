@@ -7,6 +7,7 @@ import type {
 } from '@pockymoe/thread-ui';
 import { ApiError, relayModeActive, request } from '../lib/api';
 import { threadHref } from '../lib/relayRoutes';
+import { threadAgentField } from '../lib/themePreset';
 
 interface ThreadReference {
   deviceId: string | null;
@@ -311,6 +312,7 @@ export function useWorkbenchNavigation(
       ...(activity?.parentThreadId ? {parentKey: `${r.deviceId ?? 'local'}:${activity.parentThreadId}`} : {}),
       ...(activity?.rootThreadId ? {rootKey: `${r.deviceId ?? 'local'}:${activity.rootThreadId}`} : {}),
       status: workbenchThreadStatus(activity, r.readCompletedAt),
+      ...(local ? threadAgentField(local) : {}),
     };
   });
   const localNotifications: WorkbenchNotification[] = relay
@@ -372,6 +374,7 @@ export function useWorkbenchNavigation(
           ...(thread.parentThreadId ? {parentKey: `${tabContext.deviceId ?? 'local'}:${thread.parentThreadId}`} : {}),
           ...(thread.rootThreadId ? {rootKey: `${tabContext.deviceId ?? 'local'}:${thread.rootThreadId}`} : {}),
           status: workbenchThreadStatus(thread.id === tabContext.detail?.thread.id ? tabContext.detail.thread : thread, reference?.readCompletedAt),
+          ...threadAgentField(thread),
         };
       });
   // Sidebar families are independent of the selected workspace. Current-device
@@ -395,6 +398,7 @@ export function useWorkbenchNavigation(
       ...(thread.rootThreadId ? { rootKey: `${familyDevice}:${thread.rootThreadId}` } : {}),
       status: workbenchThreadStatus(statuses[key]?.status === 'unknown' && familyDevice !== (deviceId ?? 'local')
         ? { ...activity, status: 'unknown' } : activity, reference?.readCompletedAt),
+      ...threadAgentField(thread),
     } satisfies WorkbenchThread] as const;
   }));
   const roots = new Set(items.map(thread => thread.rootKey ?? thread.key));

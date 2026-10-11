@@ -43,3 +43,12 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+# Fonts
+
+The Web UI bundles these fonts under the SIL Open Font License 1.1. Each license
+is next to its font in `apps/supervisor-web/public/fonts/`.
+
+- DM Sans (`dm-sans-OFL.txt`), https://github.com/googlefonts/dm-fonts
+- Nunito (`nunito-OFL.txt`), https://github.com/googlefonts/nunito
+- Fredoka (`fredoka-OFL.txt`), https://github.com/hafontia/Fredoka-One

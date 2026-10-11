@@ -7,6 +7,7 @@ import { UpstreamsSettings } from './UpstreamsSettings';
 import { ModelPricingSettings } from './ModelPricingSettings';
 import { ComposerShortcutSettings } from './ComposerShortcutSettings';
 import { TourSettingsEntry } from './onboarding/TourProvider';
+import { ThemePresetSettings } from './ThemePresetSettings';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type {
@@ -817,6 +818,8 @@ export function AppShellSettingsDialog({
             <fieldset className="py-5">
               <legend className="text-sm font-semibold text-[var(--theme-fg)]">
                 {translate("files.appearance")}</legend>
+              <ThemePresetSettings />
+              <p className="mt-5 text-xs font-semibold text-[var(--theme-fg)]">{translate("files.colorMode")}</p>
               <p className="mt-1 text-xs leading-5 text-[var(--theme-fg-muted)]">
                 {translate("files.chooseAThemeForThisBrowserThe")}{' '}
                 {effectiveTheme}.

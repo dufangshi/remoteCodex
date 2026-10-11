@@ -8,10 +8,12 @@ import { App } from './app';
 import './index.css';
 import './native-subagents.css';
 import { initializeFontSize } from './lib/fontSize';
+import { initializeThemePreset } from './lib/themePreset';
 
 // The host bundler resolves the worker asset before dependency optimization.
 Object.assign(window, { MonacoEnvironment: { getWorker: () => new WorkspaceEditorWorker() } });
 initializeFontSize();
+initializeThemePreset();
 initializeI18n();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

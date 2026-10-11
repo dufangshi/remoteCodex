@@ -1,9 +1,15 @@
-import { test, expect, type Locator } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
 test.use({ actionTimeout: 15_000 });
+// A fresh browser shows the guided tour's welcome card, which covers the navigation.
+async function dismissTour(page: Page) {
+  const later = page.getByRole('button', { name: 'Later', exact: true });
+  await later.waitFor({ timeout: 3_000 }).catch(() => {});
+  if (await later.isVisible()) await later.click();
+}
 async function geometry(dialog: Locator) {
   return dialog.evaluate(node => {
     const r = node.getBoundingClientRect(), s = getComputedStyle(node);
@@ -21,6 +27,7 @@ test('settings retain centered geometry through theme switches and share their s
   const workspace = await (await request.post(base + '/api/workspaces', { data: { absPath, label: 'Appearance' } })).json();
   const thread = await (await request.post(base + '/api/threads/start', { data: { workspaceId: workspace.id, provider: 'acp', agentId: 'codex', model: 'ios-e2e-stream', approvalMode: 'yolo' } })).json();
   await page.goto('/workspaces');
+  await dismissTour(page);
   await page.getByRole('button', { name: 'Open Navigation' }).click();
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   let dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
@@ -49,4 +56,53 @@ test('settings retain centered geometry through theme switches and share their s
     await expect.poll(async () => Math.abs((await geometry(dialog)).y - inside.y)).toBeLessThan(1);
   }
   await page.screenshot({ path: testInfo.outputPath('shared-settings.png') });
+});
+
+test('theme presets restyle the app, combine with color modes and persist across reloads', async ({ page, request }, testInfo) => {
+  const mobile = testInfo.project.name === 'mobile-chromium';
+  const base = `http://127.0.0.1:${process.env.E2E_API_PORT ?? 8787}`;
+  const absPath = path.resolve(process.env.E2E_WORKSPACE_ROOT!, randomUUID());
+  await mkdir(absPath, { recursive: true });
+  const workspace = await (await request.post(base + '/api/workspaces', { data: { absPath, label: 'Presets' } })).json();
+  const thread = await (await request.post(base + '/api/threads/start', { data: { workspaceId: workspace.id, title: 'Preset thread', provider: 'acp', agentId: 'codex', model: 'ios-e2e-stream', approvalMode: 'yolo' } })).json();
+  const root = page.locator('html');
+  const token = (name: string) => page.evaluate(n => getComputedStyle(document.documentElement).getPropertyValue(n).trim(), name);
+  await page.goto('/workspaces');
+  await expect(root).toHaveAttribute('data-theme-preset', 'classic');
+  await dismissTour(page);
+  await page.getByRole('button', { name: 'Open Navigation' }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings', exact: true });
+  await dialog.getByRole('radio', { name: 'Light', exact: true }).locator('..').click();
+  const presets = dialog.getByRole('radiogroup', { name: 'Theme' });
+  await expect(presets.getByRole('radio', { name: /^Classic/ })).toBeChecked();
+  await presets.locator('label').filter({ hasText: 'Plum Pocket' }).click();
+  await expect(root).toHaveAttribute('data-theme-preset', 'plum-pocket');
+  await expect(presets.getByRole('radio', { name: /^Plum Pocket/ })).toBeChecked();
+  expect(await token('--theme-accent-solid')).toBe('#e8a93a');
+  await dialog.getByRole('radio', { name: 'Dark', exact: true }).locator('..').click();
+  await expect(dialog).toHaveAttribute('data-theme-effective', 'dark');
+  expect(await token('--theme-accent-solid')).toBe('#f0b54a');
+  await page.keyboard.press('Escape');
+
+  await page.goto(`/threads/${thread.id}`);
+  await expect(root).toHaveAttribute('data-theme-preset', 'plum-pocket');
+  await expect(root).toHaveAttribute('data-theme-effective', 'dark');
+  const composer = page.locator('.matter-workbench .thread-graph-composer-shell');
+  await expect(composer).toHaveCSS('border-top-style', 'dashed');
+  if (!mobile) {
+    const avatar = page.locator('.matter-thread-row .matter-thread-avatar[data-agent="codex"]').first();
+    await expect(avatar).toBeVisible();
+    await expect(avatar).toHaveCSS('background-image', /codex\.webp/);
+  }
+  await page.screenshot({ path: testInfo.outputPath('plum-pocket-dark.png') });
+
+  await page.getByRole('button', { name: 'Open settings', exact: true }).click();
+  const inside = page.getByRole('dialog', { name: 'Settings', exact: true });
+  await inside.getByRole('radiogroup', { name: 'Theme' }).locator('label').filter({ hasText: 'Classic' }).click();
+  await expect(root).toHaveAttribute('data-theme-preset', 'classic');
+  await expect(root).toHaveAttribute('data-theme-effective', 'dark');
+  await page.keyboard.press('Escape');
+  await expect(composer).toHaveCSS('border-top-style', 'solid');
+  for (const avatar of await page.locator('.matter-thread-avatar').all()) await expect(avatar).toBeHidden();
 });
