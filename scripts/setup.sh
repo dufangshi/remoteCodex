@@ -37,7 +37,7 @@ mkdir -p "$setup_root"
 setup_tmp=$(mktemp -d "$setup_root/bootstrap.XXXXXX")
 trap 'setup_exit=$?; rm -rf "$setup_tmp"; exit "$setup_exit"' EXIT
 trap 'exit 1' HUP INT TERM
-setup_repo=https://github.com/dufangshi/remoteCodex
+setup_repo=https://github.com/dufangshi/pockymoe
 setup_asset="remote-codex-${setup_os}-${setup_arch}"
 [ "$setup_os" != linux ] || setup_asset="$setup_asset-gnu"
 echo 'Checking the latest Pockymoe GitHub release…'

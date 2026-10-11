@@ -25,7 +25,7 @@ concurrency:
 
 env:
   RUST_VERSION: 1.89.0
-  THREAD_UI_REPO: https://github.com/dufangshi/remote-codex-thread-ui-rust.git
+  THREAD_UI_REPO: https://github.com/dufangshi/pockymoe-thread-ui-rust.git
 
 jobs:
   verify:

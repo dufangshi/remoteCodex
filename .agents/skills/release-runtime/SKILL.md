@@ -15,7 +15,7 @@ GitHub Releases 是 runtime 的权威版本。不要发布新的 runtime/npm 包
 
 ## 固定内容与检查
 
-记录 runtime 候选提交、稳定版本和共享 UI 的完整已发布 SHA。共享 UI origin 必须为 `dufangshi/remote-codex-thread-ui-rust`。若别人还在修改 checkout，用独立 worktree，不能把未授权的其它改动顺手发布。
+记录 runtime 候选提交、稳定版本和共享 UI 的完整已发布 SHA。共享 UI origin 必须为 `dufangshi/pockymoe-thread-ui-rust`。若别人还在修改 checkout，用独立 worktree，不能把未授权的其它改动顺手发布。
 
 核对 GitHub 已有版本，使用 `node scripts/set-version.mjs VERSION` 更新 root/Cargo 版本并同步 Cargo.lock。所有四个平台必须同一不可变版本；不要改 Windows Device Manager 版本或 seed。它的独立 release 必须 `--latest=false`，保留 runtime latest alias。
 

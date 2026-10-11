@@ -123,7 +123,7 @@ jobs:
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
-          repo=https://github.com/dufangshi/remote-codex-thread-ui-rust.git
+          repo=https://github.com/dufangshi/pockymoe-thread-ui-rust.git
           ref=main
           if git ls-remote --exit-code --heads "${repo}" "${BRANCH}" >/dev/null; then ref="${BRANCH}"; fi
           git clone --depth 1 --branch "${ref}" "${repo}" ./pockymoe-thread-ui

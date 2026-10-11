@@ -9,7 +9,7 @@ $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 if (([bool]$Token) -eq ([bool]$Code)) { throw 'Provide exactly one device token or setup code.' }
 if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64' -and $env:PROCESSOR_ARCHITEW6432 -ne 'AMD64') { throw 'The Windows runtime currently requires x64.' }
-$repo = 'https://github.com/dufangshi/remoteCodex'
+$repo = 'https://github.com/dufangshi/pockymoe'
 $stage = Join-Path ([IO.Path]::GetTempPath()) ('pockymoe-bootstrap-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $stage | Out-Null
 try {

@@ -16,6 +16,7 @@ Naming proposal and icon: [docs/proposals/naming](proposals/naming/README.zh.md)
 | `remote-codex-{protocol,runtime,supervisor,relay}` crates | `pockymoe-…` (`pockymoe_…` in Rust paths) |
 | `@remote-codex/*` workspace packages | `@pockymoe/*` |
 | `REMOTE_CODEX_*` environment variables | `POCKYMOE_*` |
+| GitHub repositories `dufangshi/remoteCodex`, `dufangshi/remote-codex-thread-ui-rust` | `dufangshi/pockymoe`, `dufangshi/pockymoe-thread-ui-rust` |
 | `remote-codex-thread-ui` checkout directory | `pockymoe-thread-ui` |
 | `.remote-codex/agents/*.md` role files | `.pockymoe/agents/*.md` |
 | `[remoteCodex …]` prompt markers, i18n keys | `[Pockymoe …]`, `pockymoe…` |
@@ -53,7 +54,8 @@ Kept unchanged, with the reason:
 | Device Manager internals | Assembly and executable names, mutex, control pipe, Run entry, `%LOCALAPPDATA%\RemoteCodex`, runtime-state keys, the npm package it installs |
 | Relay host paths, units and env file; `REMOTE_CODEX_RELAY_DEPLOY_*` secrets | Live infrastructure, renamed only in a coordinated rollout |
 | `/var/lib/remote-codex-relay` in `Dockerfile.relay` | Data volume of deployed images |
-| `remote.lnz-study.com`, `remote-codex.lnz-study.com`, GitHub repository names and URLs | External; see "Repository rename" below |
+| `remote.lnz-study.com`, `remote-codex.lnz-study.com` | Deployed domains; renamed separately |
+| Old repository URLs in installed runtimes, the retired npm launcher and historical docs | GitHub redirects them; see "Repository rename" below |
 
 ## Regenerating the rename
 
@@ -85,16 +87,18 @@ For other branches after the rename lands:
    - npm devices install it through their existing Update, then press Update again to move to the native runtime.
 4. Deploy the relay with the same `thread_ui_sha`.
 
-## Repository rename (last)
+## Repository rename
 
-Rename the GitHub repositories only after the renamed runtime has been released and deployed.
+The repositories were renamed on 2026-10-10, after the renamed runtime was released and deployed:
 
-- GitHub redirects git, web, API and release-download URLs from the old names, so installed updaters keep working. Never create a new repository under an old name: that would break the redirect.
-- In a later release:
-  - change the compiled-in repository URLs (`distribution/releases.rs`, `setup.sh`, `setup.ps1`, the workflows, npm manifests and notification claims);
-  - change the thread UI clone URLs;
-  - change the checkout instructions.
-- Release asset names can switch to `pockymoe-*` only after a release whose updater accepts both names has been deployed to existing devices.
+- `dufangshi/remoteCodex` → `dufangshi/pockymoe`
+- `dufangshi/remote-codex-thread-ui-rust` → `dufangshi/pockymoe-thread-ui-rust`
+
+GitHub redirects git, web, API and release-download URLs from the old names, so installed updaters, `setup.sh`/`setup.ps1` copies and the retired npm launcher keep working. Never create a new repository under an old name: that would break the redirect.
+
+The compiled-in repository URL (`distribution/releases.rs`), the setup scripts, the workflows, the relay Dockerfile and the notification claim use the new names. Release notes, incident reports and the frozen npm packages keep the old URLs.
+
+Release asset names can switch to `pockymoe-*` only after a release whose updater accepts both names has been deployed to existing devices.
 
 ## Follow-ups
 

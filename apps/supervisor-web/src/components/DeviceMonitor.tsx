@@ -31,7 +31,7 @@ function Power({
         <p className="device-monitor-caption">
           {reading.reason}{' '}
           {reading.reason.includes('RAPL') && (
-            <a href="https://github.com/dufangshi/remoteCodex/blob/main/docs/device-monitor.md#linux-sensor-access" target="_blank" rel="noreferrer">
+            <a href="https://github.com/dufangshi/pockymoe/blob/main/docs/device-monitor.md#linux-sensor-access" target="_blank" rel="noreferrer">
               {translate("devices.sensorAccessSetup")}</a>
           )}
         </p>

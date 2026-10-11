@@ -60,7 +60,7 @@ jobs:
       - name: Check out pinned shared UI
         uses: actions/checkout@v6
         with:
-          repository: dufangshi/remote-codex-thread-ui-rust
+          repository: dufangshi/pockymoe-thread-ui-rust
           ref: ${{ inputs.thread_ui_sha }}
           path: pockymoe-thread-ui
       - name: Validate shared UI revision

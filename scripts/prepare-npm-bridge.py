@@ -16,7 +16,7 @@ import re
 import shutil
 import zipfile
 
-REPO = 'https://github.com/dufangshi/remoteCodex'
+REPO = 'https://github.com/dufangshi/pockymoe'
 ASSETS = {
     'darwin-arm64': 'remote-codex-darwin-arm64',
     'linux-arm64-gnu': 'remote-codex-linux-arm64-gnu',

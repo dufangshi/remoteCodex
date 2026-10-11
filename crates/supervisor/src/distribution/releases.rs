@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-pub const REPO: &str = "https://github.com/dufangshi/remoteCodex";
+pub const REPO: &str = "https://github.com/dufangshi/pockymoe";
 pub const WEB: &str = "remote-codex-web.zip";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -1,6 +1,6 @@
 # Native installation and GitHub runtime releases
 
-GitHub Releases in `dufangshi/remoteCodex` are the authoritative runtime versions.
+GitHub Releases in `dufangshi/pockymoe` are the authoritative runtime versions.
 Pockymoe no longer publishes runtime/npm packages. npm remains a possible
 installation mechanism for third-party Agent/ACP dependencies, not for this runtime.
 

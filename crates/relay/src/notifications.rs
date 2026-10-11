@@ -306,7 +306,7 @@ fn encrypted_request(
     payload: &[u8],
 ) -> Result<web_push::WebPushMessage> {
     let mut signature = VapidSignatureBuilder::from_pem(std::io::Cursor::new(pem), sub)?;
-    signature.add_claim("sub", "https://github.com/dufangshi/remoteCodex");
+    signature.add_claim("sub", "https://github.com/dufangshi/pockymoe");
     let mut message = WebPushMessageBuilder::new(sub);
     message.set_payload(ContentEncoding::Aes128Gcm, payload);
     message.set_vapid_signature(signature.build()?);

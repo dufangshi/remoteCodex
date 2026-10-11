@@ -23,7 +23,7 @@
     <Description>Windows tray application for a Pockymoe Relay Device.</Description>
     <Company>Pockymoe</Company>
     <Authors>Pockymoe contributors</Authors>
-    <RepositoryUrl>https://github.com/dufangshi/remoteCodex</RepositoryUrl>
+    <RepositoryUrl>https://github.com/dufangshi/pockymoe</RepositoryUrl>
   </PropertyGroup>
 
   <PropertyGroup>
