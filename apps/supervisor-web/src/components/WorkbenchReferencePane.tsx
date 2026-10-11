@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { ThreadTimeline, ThreadComposer, createWorkspacePathResolver, type ThreadComposerProps } from '@pockymoe/thread-ui';
+import { GraphChatThreadChatPanel, createWorkspacePathResolver, type ThreadComposerProps } from '@pockymoe/thread-ui';
 import { translate as t, useI18n } from '@pockymoe/thread-ui/i18n';
 import {
   buildThreadImageAssetUrl,
@@ -61,65 +61,63 @@ export function WorkbenchReferencePane({
       )}
       {detail ? (
         <>
-          <ThreadTimeline
+          <GraphChatThreadChatPanel
             key={detail.thread.id}
-            threadId={detail.thread.id}
-            turns={detail.turns}
-            totalTurnCount={detail.totalTurnCount ?? detail.turns.length}
-            activeTurnId={detail.thread.activeTurnId}
-            threadRunning={detail.thread.status === 'running'}
-            liveOutput=""
-            liveItems={detail.liveItems ?? null}
-            pendingRequests={detail.pendingRequests}
-            respondingRequestId={controller.respondingRequestId}
-            {...(controller.canControl ? { onRespondToRequest: controller.respond } : {})}
-            pendingSteers={detail.pendingSteers ?? []}
-            answeredRequestNotes={detail.answeredRequestNotes ?? []}
-            activityNotes={detail.activityNotes ?? []}
-            onLoadEarlier={loadEarlier}
-            loadingEarlier={loadingEarlier}
-            adapter={adapter}
-            className="thread-timeline-surface min-h-0 flex-1"
-          />
-          <ThreadComposer
-            key={detail.thread.id}
-            activeView="chat"
-            sendShortcut={sendShortcut ?? 'ctrlEnter'}
-            busy={controller.busy}
-            settingsBusy={controller.busy}
-            error={null}
-            shellAvailable={false}
-            model={detail.thread.model}
-            agentLabel={detail.thread.agentId ?? detail.thread.provider}
-            reasoningEffort={detail.thread.reasoningEffort}
-            collaborationMode={detail.thread.collaborationMode}
-            sandboxMode={detail.thread.sandboxMode ?? null}
-            fastMode={detail.thread.fastMode ?? false}
-            modelOptions={controller.models}
-            contextUsage={resolveThreadContextUsage(detail)}
-            capabilities={controller.capabilities ? {
-              ...controller.capabilities,
-              turns: { ...controller.capabilities.turns, compact: false },
-              branching: { ...controller.capabilities.branching, fork: false, resumeAt: false, forkAt: false },
-              controls: { ...controller.capabilities.controls, goals: false },
-              management: { ...controller.capabilities.management, skills: false, mcpStatus: false, hooks: false, hostConfigFiles: false },
-            } : null}
-            threadConnected={detail.thread.isLoaded}
-            disabled={Boolean(controller.disabledReason)}
-            disabledPlaceholder={controller.disabledReason ?? undefined}
-            draftPrompt={draft.prompt}
-            draftAttachments={draft.attachments}
-            onDraftChange={onDraftChange}
-            onSubmit={controller.send}
-            canInterrupt={Boolean(controller.canControl && detail.thread.activeTurnId)}
-            pendingPrompts={(detail.pendingSteers ?? []).filter(item => item.delivery !== 'steer').map(item => ({ id: item.id, prompt: item.prompt }))}
-            {...(controller.canControl ? {
-              ...(onOpenHarness ? {onOpenHarness} : {}),
-              onInterrupt: async () => { await controller.interrupt(); },
-              onUpdateSettings: async input => { await controller.updateSettings(input); },
-              onCancelPendingPrompt: async queueId => { await controller.cancelQueued(queueId); },
-              ...(controller.capabilities?.turns.steer ? { onSteerPendingPrompt: async (queueId: string) => { await controller.steerQueued(queueId); } } : {}),
-            } : {})}
+            detail={detail}
+            floatingDesktopComposer
+            adapter={{
+              openThread: onOpenThread,
+              sendPrompt: controller.send,
+              ...(controller.canControl ? {
+                cancelPendingSteer: async (_threadId, queueId) => { await controller.cancelQueued(queueId); },
+                ...(controller.capabilities?.turns.steer ? { steerPendingPrompt: async (_threadId: string, queueId: string) => { await controller.steerQueued(queueId); } } : {}),
+              } : {}),
+            }}
+            timelineAdapter={adapter}
+            transcriptItemCount={detail.turns.reduce((total, turn) => total + turn.items.length, 0)}
+            timelineProps={{
+              liveItems: detail.liveItems ?? null,
+              respondingRequestId: controller.respondingRequestId,
+              ...(controller.canControl ? { onRespondToRequest: controller.respond } : {}),
+              answeredRequestNotes: detail.answeredRequestNotes ?? [],
+              activityNotes: detail.activityNotes ?? [],
+              onLoadEarlier: loadEarlier,
+              loadingEarlier,
+            }}
+            composerProps={{
+              sendShortcut: sendShortcut ?? 'ctrlEnter',
+              busy: controller.busy,
+              settingsBusy: controller.busy,
+              error: null,
+              shellAvailable: false,
+              model: detail.thread.model,
+              agentLabel: detail.thread.agentId ?? detail.thread.provider,
+              reasoningEffort: detail.thread.reasoningEffort,
+              collaborationMode: detail.thread.collaborationMode,
+              sandboxMode: detail.thread.sandboxMode ?? null,
+              fastMode: detail.thread.fastMode ?? false,
+              modelOptions: controller.models,
+              contextUsage: resolveThreadContextUsage(detail),
+              capabilities: controller.capabilities ? {
+                ...controller.capabilities,
+                turns: { ...controller.capabilities.turns, compact: false },
+                branching: { ...controller.capabilities.branching, fork: false, resumeAt: false, forkAt: false },
+                controls: { ...controller.capabilities.controls, goals: false },
+                management: { ...controller.capabilities.management, skills: false, mcpStatus: false, hooks: false, hostConfigFiles: false },
+              } : null,
+              threadConnected: detail.thread.isLoaded,
+              disabled: Boolean(controller.disabledReason),
+              disabledPlaceholder: controller.disabledReason ?? undefined,
+              draftPrompt: draft.prompt,
+              draftAttachments: draft.attachments,
+              onDraftChange,
+              canInterrupt: Boolean(controller.canControl && detail.thread.activeTurnId),
+              ...(controller.canControl ? {
+                ...(onOpenHarness ? { onOpenHarness } : {}),
+                onInterrupt: async () => { await controller.interrupt(); },
+                onUpdateSettings: async input => { await controller.updateSettings(input); },
+              } : {}),
+            }}
           />
         </>
       ) : (

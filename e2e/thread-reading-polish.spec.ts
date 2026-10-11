@@ -635,3 +635,84 @@ test('background wake replaces its waiting anchor and continues within the same 
   expect(splitUsage.y).toBeGreaterThanOrEqual(splitInput.y + splitInput.height);
   await page.screenshot({path:testInfo.outputPath('mobile-split-compact-usage.png'),scale:'css'});
 });
+
+test('split conversations keep identical composer geometry and surfaces while switching', async ({ page, request, isMobile }, testInfo) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('remote-codex.locale', 'zh-CN');
+    localStorage.setItem('remote-codex-theme-mode', 'dark');
+    localStorage.setItem(`pockymoe.onboarding.v1:${JSON.stringify([location.origin, 'local:owner'])}`, JSON.stringify({ welcomeDismissed: true, completed: [] }));
+  });
+  // Only the primary has subscription usage: its presence must not move the input.
+  await page.route('**/api/agent-runtimes/*/subscription-usage*', route => route.fulfill({ json: { usage: { provider: 'codex', authKind: 'subscription', observedAt: new Date().toISOString(), stale: false, windows: [{ id: 'five_hour', label: '5h', durationMinutes: 300, usedPercent: 30, resetsAt: null }] } } }));
+  const primaryId = await createThread(request);
+  const primary = await (await request.get(`${base}/api/threads/${primaryId}`)).json();
+  const value = await (await request.post(`${base}/api/threads/start`, { data: { workspaceId: primary.workspace.id, title: '另一个模型的会话', provider: 'acp', agentId: 'codex', model: 'default', approvalMode: 'yolo' } })).json();
+  const referenceId = value.id ?? value.thread.id;
+  await page.goto(`/threads/${primaryId}`);
+  await page.getByTestId('workbench-split-trigger').click();
+  await page.getByTestId('workbench-thread-picker').locator(`[data-thread-id="${referenceId}"]`).click();
+  const pane = (side: string) => page.getByTestId(`${side}-pane`);
+  const switchTo = async (side: string) => {
+    if (isMobile) await page.locator(`.thread-pane-switch[data-side="${side}"]:visible`).click();
+    else await pane(side).locator('[data-testid="chat-composer"] [data-slot="input-group"]').click();
+    await expect(pane(side)).toBeVisible();
+  };
+  const geometry = (side: string) => pane(side).locator('[data-testid="chat-composer"]').evaluate(form => {
+    const input = form.querySelector('[data-slot="input-group"]')!;
+    const shell = input.parentElement!;
+    const host = form.closest('.thread-graph-composer-host')!;
+    const cluster = host.querySelector('.thread-jump-latest-cluster')!;
+    const rect = input.getBoundingClientRect();
+    const strip = cluster.getBoundingClientRect();
+    return { y: rect.y, height: rect.height, width: rect.width, formBackground: getComputedStyle(form).backgroundColor, hostBackground: getComputedStyle(host).backgroundColor, shellBackground: getComputedStyle(shell).backgroundColor, layer: getComputedStyle(form.parentElement!).zIndex, gap: rect.top - strip.bottom };
+  });
+  await switchTo('primary');
+  await expect(pane('primary').locator('.thread-subscription-usage')).toBeVisible();
+  const left = await geometry('primary');
+  const nodes = await page.locator('[data-testid="chat-composer"]').elementHandles();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    for (const side of ['reference', 'primary']) {
+      await switchTo(side);
+      const current = await geometry(side);
+      expect(Math.abs(current.y - left.y)).toBeLessThanOrEqual(1);
+      expect(current.height).toBe(left.height);
+      if (isMobile) expect(current.width).toBe(left.width);
+      expect(current.formBackground).toBe('rgba(0, 0, 0, 0)');
+      expect(current.hostBackground).toBe(left.hostBackground);
+      expect(current.shellBackground).toBe(left.shellBackground);
+      expect(current.layer).toBe(left.layer);
+      if (isMobile) expect(Math.abs(current.gap - left.gap)).toBeLessThanOrEqual(1);
+    }
+  }
+  for (const node of nodes) expect(await node.evaluate(el => el.isConnected)).toBe(true);
+  for (const side of ['primary', 'reference']) {
+    await switchTo(side);
+    await pane(side).getByRole('textbox', { name: '提示词', exact: true }).fill(`${side} 独立草稿`);
+  }
+  for (const side of ['primary', 'reference']) {
+    await switchTo(side);
+    await expect(pane(side).getByRole('textbox', { name: '提示词', exact: true })).toHaveText(`${side} 独立草稿`);
+    await page.screenshot({ path: testInfo.outputPath(`split-composer-${side}.png`), scale: 'css' });
+  }
+  if (isMobile) {
+    // Browser-only viewport simulation checks the shared avoidance calculation;
+    // this is not a claim of Android IME validation.
+    await page.evaluate(() => {
+      Object.defineProperty(window.visualViewport!, 'height', { configurable: true, value: window.innerHeight - 250 });
+      Object.defineProperty(window.visualViewport!, 'offsetTop', { configurable: true, value: 0 });
+      window.visualViewport!.dispatchEvent(new Event('resize'));
+    });
+    await expect.poll(async () => {
+      const g = await geometry('reference');
+      return g.y + g.height;
+    }).toBeLessThan(page.viewportSize()!.height - 250);
+    for (const side of ['primary', 'reference']) {
+      await switchTo(side);
+      await pane(side).getByRole('textbox', { name: '提示词', exact: true }).focus();
+      await expect.poll(async () => {
+        const g = await geometry(side);
+        return g.y + g.height;
+      }).toBeLessThan(page.viewportSize()!.height - 250);
+    }
+  }
+});
