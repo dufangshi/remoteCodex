@@ -19,9 +19,9 @@ When an adapter lacks these task bookends, native launch receipts and trusted
 at the current file tail and excludes older turns, other sessions, sidechains,
 and human-quoted task XML. This change does not backfill old history.
 
-Lightweight history responses and collapsed turns keep waiting/wake anchors
-and narrative visible; operation
-steps remain expandable. After cancellation or disconnection the marker must
+Lightweight history responses retain waiting/wake anchors and narrative for
+expansion. Collapsed turns show the final reply and an active waiting footer;
+intermediate events and progress remain expandable. After cancellation or disconnection the marker must
 not keep claiming that the turn is waiting.
 
 Targeted acceptance lives in `acp::runtime::completion_tests` (durable SQLite
@@ -36,4 +36,13 @@ checks intermediate Monitor wakes as well as completion.
 
 ## Folding progress and final replies
 
-Background waits, wakes and progress stay inside the same expandable execution history. A folded turn exposes only its native-confirmed final reply. The runtime writes `responsePhase: commentary | final` on background-turn agent messages: only the last delivered reply matching a complete native `end_turn`, with no pending tools/background tasks, receives `final`; cancellation, incomplete tails and unmatched text remain commentary. The UI conservatively folds untyped legacy background replies rather than treating the last progress update as a final answer. Expanding still shows all saved text; no old database rows are rewritten.
+Background waits, wakes and progress stay inside the same expandable execution history. A folded turn exposes only its native-confirmed final reply. The runtime writes `responsePhase: commentary | final` on background-turn agent messages: only the last delivered reply matching a complete native `end_turn`, with no pending tools/background tasks, receives `final`; cancellation, incomplete tails and unmatched text remain commentary.
+
+For completed Claude background turns saved before this field existed, history
+reads project the phase from the original native session within that turn's
+start/end window. Launch receipts and task notifications participate in the
+proof, so a foreground `end_turn` while still awaiting a build is progress. The
+projection is cached by file fingerprint and reply content, shared by summary
+and detail reads, and never rewrites database rows or imports missing messages.
+When native proof is unavailable, untyped text stays expandable. Expanding
+still shows all saved text.

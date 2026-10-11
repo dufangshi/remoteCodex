@@ -11,6 +11,60 @@ use serde_json::{json, Value};
 
 use crate::usage::Tokens;
 
+/// Read-only compatibility for turns saved before responsePhase existed. Replay
+/// each original turn's native window, including launch receipts: end_turn alone
+/// is insufficient when Claude is still waiting for a background command.
+pub(crate) fn legacy_background_reply_phases(
+    path: &std::path::Path,
+    session: &str,
+    turns: &mut [pockymoe_protocol::ThreadTurnDto],
+) -> std::io::Result<()> {
+    let mut readers: Vec<_> = turns
+        .iter()
+        .map(|turn| {
+            let start = turn
+                .started_at
+                .as_deref()
+                .and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())?
+                .with_timezone(&chrono::Utc);
+            let end = turn
+                .completed_at
+                .as_deref()
+                .and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())?
+                .with_timezone(&chrono::Utc);
+            let mut reader = ClaudeUsageReader::unopened(PathBuf::new(), session);
+            reader.started = start;
+            reader.complete_tail = true;
+            Some((reader, end))
+        })
+        .collect();
+    for line in BufReader::new(File::open(path)?).lines() {
+        let line = line?;
+        let Ok(entry) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        let Some(at) = entry["timestamp"]
+            .as_str()
+            .and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())
+        else {
+            continue;
+        };
+        for (reader, end) in readers.iter_mut().flatten() {
+            if at <= *end {
+                reader.record(&entry);
+                // Historical inspection never delivers notices or usage.
+                reader.tasks.take_notices();
+            }
+        }
+    }
+    for (turn, reader) in turns.iter_mut().zip(readers) {
+        if let Some((reader, _)) = reader {
+            reader.annotate_background_reply_phases(&mut turn.items, turn.status == "completed");
+        }
+    }
+    Ok(())
+}
+
 pub(super) struct ClaudeUsageReader {
     home: PathBuf,
     session: String,
@@ -34,7 +88,17 @@ impl ClaudeUsageReader {
     }
 
     fn with_home(home: PathBuf, session: &str) -> Self {
-        let mut reader = Self {
+        let mut reader = Self::unopened(home, session);
+        reader.find_path();
+        // Exclude old turns without reading their potentially huge tool output.
+        if let Some(file) = reader.path.as_ref().and_then(|p| File::open(p).ok()) {
+            reader.offset = file.metadata().map(|m| m.len()).unwrap_or(0);
+        }
+        reader
+    }
+
+    fn unopened(home: PathBuf, session: &str) -> Self {
+        Self {
             home,
             session: crate::import_id::parse_session_ref(session).raw_id,
             path: None,
@@ -46,13 +110,7 @@ impl ClaudeUsageReader {
             background: Default::default(),
             complete_tail: false,
             tasks: Default::default(),
-        };
-        reader.find_path();
-        // Exclude old turns without reading their potentially huge tool output.
-        if let Some(file) = reader.path.as_ref().and_then(|p| File::open(p).ok()) {
-            reader.offset = file.metadata().map(|m| m.len()).unwrap_or(0);
         }
-        reader
     }
 
     fn find_path(&mut self) {

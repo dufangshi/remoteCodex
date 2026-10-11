@@ -2,6 +2,7 @@ pub(crate) mod automation;
 mod automation_statistics;
 mod child_delete;
 mod claude_history;
+mod claude_reply_phases;
 mod generation;
 mod reliability;
 mod search;
@@ -314,6 +315,7 @@ pub struct Supervisor {
     usage_history: crate::usage_history::UsageHistoryCache,
     generation: generation::GenerationCache,
     claude_history: claude_history::HistoryCache,
+    claude_reply_phases: claude_reply_phases::ReplyPhaseCache,
     pub(crate) native_subagents:
         Arc<std::sync::Mutex<crate::native_subagents::NativeSubagentsCache>>,
     pub subscription_usage: crate::subscription::SubscriptionUsage,
@@ -376,6 +378,7 @@ impl Supervisor {
             usage_history: Default::default(),
             generation: Default::default(),
             claude_history: Default::default(),
+            claude_reply_phases: Default::default(),
             native_subagents: Default::default(),
             subscription_usage: Default::default(),
             device_monitor: Default::default(),
@@ -1810,6 +1813,8 @@ impl Supervisor {
         };
         self.hydrate_missing_harness_usage(&thread, &mut turns)
             .await?;
+        self.hydrate_legacy_claude_reply_phases(&thread, &mut turns)
+            .await;
         if !summary_only && thread.source == "local_codex_import" {
             normalize_imported_turns(&mut turns);
         }
@@ -2127,6 +2132,8 @@ impl Supervisor {
         }
         self.hydrate_missing_harness_usage(&thread, std::slice::from_mut(&mut turn))
             .await?;
+        self.hydrate_legacy_claude_reply_phases(&thread, std::slice::from_mut(&mut turn))
+            .await;
         turn.has_deferred_items = Some(false);
         turn.deferred_item_count = Some(0);
         Ok(turn)

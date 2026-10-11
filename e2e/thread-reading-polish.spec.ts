@@ -499,6 +499,7 @@ test('reading layout stays still with bounded images, visible effort and ten rec
 });
 
 test('background wake replaces its waiting anchor and continues within the same chat turn', async ({ page, request }, testInfo) => {
+  await page.route('**/api/agent-runtimes/*/subscription-usage*',route=>route.fulfill({json:{usage:{provider:'codex',authKind:'subscription',observedAt:new Date().toISOString(),stale:false,windows:[{id:'five_hour',label:'5h',durationMinutes:300,usedPercent:30,resetsAt:null},{id:'weekly',label:'7d',durationMinutes:10080,usedPercent:50,resetsAt:null}]}}}));
   await page.addInitScript(() => {
     localStorage.setItem('remote-codex.locale','zh-CN');
     localStorage.setItem('remote-codex-theme-mode','dark');
@@ -529,6 +530,19 @@ test('background wake replaces its waiting anchor and continues within the same 
   });
   await page.route(`**/api/threads/${id}?**`,route=>route.fulfill({json:response()}));
   await page.goto(`/threads/${id}`);
+  const usage = page.locator('.thread-subscription-usage');
+  await expect(usage).toBeVisible();
+  const input = page.locator('[data-testid="chat-composer"] [data-slot="input-group"]');
+  const usageBox = (await usage.boundingBox())!;
+  const inputBox = (await input.boundingBox())!;
+  expect(usageBox.y).toBeGreaterThanOrEqual(inputBox.y + inputBox.height);
+  const navigationBox = (await page.locator('.thread-jump-latest-badge').boundingBox())!;
+  expect(inputBox.y - navigationBox.y - navigationBox.height).toBeLessThan(18);
+  expect(usageBox.height).toBeLessThanOrEqual(16);
+  await usage.tap();
+  await expect(usage).toHaveAttribute('aria-expanded','true');
+  await page.keyboard.press('Escape');
+  await expect(usage).toHaveAttribute('aria-expanded','false');
   const waitRow=page.locator('.thread-graph-task-notice');
   await expect(waitRow).toHaveCount(0);
   await expect(page.locator('.thread-graph-turn-footer')).toContainText('等待唤醒');

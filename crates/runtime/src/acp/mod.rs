@@ -6,6 +6,7 @@ mod claude_completion;
 mod claude_lifecycle;
 mod claude_tasks;
 mod claude_usage;
+pub(crate) use claude_usage::legacy_background_reply_phases;
 mod codex_bridge;
 mod codex_models;
 mod codex_permissions;
