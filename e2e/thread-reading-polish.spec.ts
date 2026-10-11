@@ -617,4 +617,21 @@ test('background wake replaces its waiting anchor and continues within the same 
     await expect(waitRow).toContainText('已唤醒');
     await expect(page.getByText(progress.text, { exact: true })).toBeVisible();
   }
+  // In a phone split, usage must not lift the conversation switches/navigation
+  // away from the prompt (the original overlap was specific to this strip).
+  const other = await (await request.post(`${base}/api/threads/start`, {data:{workspaceId:detail.workspace.id,title:'参考会话',provider:'acp',agentId:'codex',model:'ios-e2e-stream',approvalMode:'yolo'}})).json();
+  await page.reload();
+  await page.getByTestId('workbench-split-trigger').click();
+  await page.getByTestId('workbench-thread-picker').locator(`[data-thread-id="${other.id ?? other.thread.id}"]`).click();
+  const cluster = page.locator('.thread-jump-latest-cluster.has-pane-switch:visible');
+  await expect(cluster).toBeVisible();
+  await cluster.locator('[data-side="primary"]').click();
+  const activeComposer = page.locator('[data-testid="chat-composer"]:visible');
+  const splitInput = (await activeComposer.locator('[data-slot="input-group"]').boundingBox())!;
+  await expect(activeComposer.locator('.thread-subscription-usage')).toBeVisible();
+  const splitUsage = (await activeComposer.locator('.thread-subscription-usage').boundingBox())!;
+  const clusterBox = (await cluster.boundingBox())!;
+  expect(splitInput.y - clusterBox.y - clusterBox.height).toBeLessThan(18);
+  expect(splitUsage.y).toBeGreaterThanOrEqual(splitInput.y + splitInput.height);
+  await page.screenshot({path:testInfo.outputPath('mobile-split-compact-usage.png'),scale:'css'});
 });
