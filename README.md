@@ -1,101 +1,230 @@
-# Pockymoe (Rust rewrite)
+<p align="center">
+  <a href="README.md"><img alt="English" src="https://img.shields.io/badge/English-current-7b3f8f?style=for-the-badge"></a>
+  <a href="README.zh-CN.md"><img alt="简体中文" src="https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-switch-555?style=for-the-badge"></a>
+</p>
 
-<img src="apps/supervisor-web/public/pockymoe-icon.png" alt="Pockymoe icon" width="96" />
+<p align="center">
+  <img src="docs/assets/readme/hero.jpg" alt="Pockymoe: three little agents in a pocket, connected to a laptop, a desktop and a cloud server" width="100%">
+</p>
 
-Formerly **Remote Codex**. Installed devices keep updating; the `remote-codex`
-command still works. See [the rename notes](docs/rename-pockymoe.md).
+<h1 align="center">
+  <img src="apps/supervisor-web/public/icon-192.png" alt="" width="44" align="center">
+  Pockymoe
+</h1>
 
-Self-hosted control plane for long-running coding agents. The supervisor is Rust. Harnesses speak **ACP** through thin adapters. The thread UI is still React (`pockymoe-thread-ui`).
+<p align="center"><b>Your coding agents, in your pocket.</b></p>
 
-This branch replaces the TypeScript `supervisor-api` / `relay-server` / per-harness SDK stacks.
+<p align="center">
+  Run Codex, Claude Code, Gemini, Grok and more on your own computers,<br>
+  then keep them working from your phone or any browser. Private, end-to-end encrypted, open source.
+</p>
 
-## Updates and agent guidance
+<p align="center">
+  <a href="https://github.com/dufangshi/pockymoe/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/dufangshi/pockymoe?color=7b3f8f"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-e0a526"></a>
+  <img alt="macOS, Linux, Windows" src="https://img.shields.io/badge/runs%20on-macOS%20%7C%20Linux%20%7C%20Windows-555">
+</p>
 
-Read [AGENTS.md](AGENTS.md) before changing or releasing this project.
-When a Supervisor is already running, prefer its own device-scoped update API
-(the same **Check updates** / **Update** controls in Settings) over manually replacing its executable and killing the process:
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#what-you-can-do">Features</a> ·
+  <a href="#works-with-the-agents-you-already-use">Agents</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#faq">FAQ</a>
+</p>
 
-- `POST /api/management/supervisor/check`
-- `POST /api/management/supervisor/update`
-- `GET /api/management/supervisor` to follow progress
+<p align="center">
+  <img src="docs/assets/readme/en/thread.png" alt="A Pockymoe conversation: the agent read files, ran commands, changed two files and summarized the result" width="92%">
+</p>
 
-Through the public relay, prefix these paths with `/relay/devices/<deviceId>`
-and use the device owner's authenticated session. Updates run independently of
-the initiating browser or agent, restart the Supervisor, and resume the threads
-interrupted by that update with their saved sessions, permissions, and queued
-input. Threads already stopped by the user stay stopped. If installation or
-restart fails, rollback restores the previous service and resumes its interrupted
-work where possible; recovery failures are reported on the affected thread.
+## Why Pockymoe
 
-Use the existing installation method only to bootstrap a version without this
-API or when the API is unavailable. See [the update and recovery design](docs/supervisor-update-recovery.md).
+Coding agents are great at long tasks, but they live in a terminal on one computer.
+Walk away from the desk and you lose sight of them.
 
-## Layout
+Pockymoe gives every agent on every one of your machines a home you can reach from
+anywhere:
 
-- `crates/protocol` — wire DTOs
-- `crates/runtime` — journal, files, ACP catalog, thread service
-- `crates/supervisor` — HTTP + WebSocket
-- `crates/relay` — public relay
-- `crates/cli` — `pockymoe`
-- `apps/supervisor-web` — existing product UI
+- **Start a task on your workstation, check on it from the couch.** Conversations,
+  terminals and files follow you to your phone.
+- **Keep your own setup.** Agents run on your computers with your files, tools and
+  logins. Nothing is uploaded to run them.
+- **Nobody else can read it.** Your browser and your computer talk end to end
+  encrypted. The relay in the middle only passes the envelopes along.
 
-## Run
+## Quick start
 
-```bash
-cargo run -p pockymoe -- supervisor
-# another terminal
-pnpm install
-pnpm --filter @pockymoe/supervisor-web exec vite --host localhost --port 5173
+Three steps, no command-line knowledge needed beyond pasting one line.
+
+### 1. Open a relay
+
+A relay is the website you sign in to. It connects your browser to your computers.
+Use one that a friend, your team or a community already runs, or
+[host your own](docs/self-host-relay.md) on any small Linux server.
+
+### 2. Sign in
+
+Open the relay's address, then **Continue with Google** or create an account with
+an email and password.
+
+<p align="center"><img src="docs/assets/readme/en/step-1-sign-in.png" alt="The sign-in page with Continue with Google" width="360"></p>
+
+### 3. Add your computer
+
+Go to **Devices → Add device**, give it a name, and copy the command it shows.
+Paste it into a terminal on the computer you want to use (macOS, Linux or Windows).
+
+<p align="center"><img src="docs/assets/readme/en/step-2-add-device.png" alt="A new device with its one-line setup command" width="92%"></p>
+
+The command installs Pockymoe as a background service and connects it to the relay.
+A moment later the device shows **Online**. Click **Connect**, choose a project
+folder and start a conversation with any installed agent. That's it.
+
+> [!TIP]
+> Missing an agent? Install or update Codex, Claude Code, Gemini CLI, Grok Build,
+> Cursor, Copilot and OpenCode from **Settings → Harnesses**, right in the browser.
+
+## What you can do
+
+### A real workbench, not just a chat
+
+Put two conversations side by side, open a terminal under them, browse and edit
+files, and search across all your conversations.
+
+<p align="center"><img src="docs/assets/readme/en/workbench.png" alt="Two conversations side by side with a terminal docked below" width="92%"></p>
+
+### Made for your phone
+
+<table>
+  <tr>
+    <td width="38%"><img src="docs/assets/readme/en/mobile.png" alt="Pockymoe on a phone in dark mode"></td>
+    <td>
+      <p>Every screen is designed for touch, not squeezed from the desktop.</p>
+      <ul>
+        <li>Follow a long task as it happens, step by step.</li>
+        <li>Reply, queue a follow-up, or steer an agent mid-task.</li>
+        <li>Open a terminal with a touch keyboard bar.</li>
+        <li>Get a notification when an agent finishes.</li>
+        <li>Add it to your home screen like an app. Light and dark themes, English and Chinese.</li>
+      </ul>
+    </td>
+  </tr>
+</table>
+
+### Private by design
+
+<p align="center"><img src="docs/assets/readme/en/encrypted.png" alt="The device list showing an encrypted connection and its fingerprint" width="92%"></p>
+
+- Content is encrypted between your browser and each computer. The relay sees only
+  routing information, and you can compare the device fingerprint yourself.
+- Your computer connects *out* to the relay, so there is no port forwarding, no
+  public IP and no VPN to set up.
+- Accounts support two-step verification, passkeys and trusted browsers.
+
+### Built for long tasks
+
+- **Nothing gets lost.** Close the browser, lose signal, switch devices: the agent
+  keeps working and the conversation is waiting when you come back.
+- **Updates don't interrupt work.** Pockymoe updates itself from Settings, then
+  resumes exactly the tasks that were running.
+- **Agents work as a team.** An agent can hand work to helper threads, message other
+  threads, share a task board and even reach agents on your other computers.
+- **Automations.** Run a prompt or a script when something happens, on a schedule
+  or when a task completes.
+
+### Everything in one place
+
+- All your computers, projects and conversations in one list.
+- Pick up sessions you started in the terminal.
+- See token usage and an estimated cost for every turn.
+- Switch an agent between API providers from **Settings → Upstreams**.
+- Share a conversation or a whole device with another account.
+
+## Works with the agents you already use
+
+| Agent | Install from Settings |
+| --- | :---: |
+| OpenAI Codex | ✓ |
+| Claude Code | ✓ |
+| Gemini CLI | ✓ |
+| Grok Build | ✓ |
+| Cursor Agent | ✓ |
+| GitHub Copilot CLI | ✓ |
+| OpenCode | ✓ |
+| DeepSeek Harness | |
+| Any agent that speaks [ACP](https://agentclientprotocol.com) | |
+
+Each agent uses its own login or your own API keys. Pockymoe doesn't sell or proxy
+model access.
+
+## How it works
+
+```mermaid
+flowchart LR
+    phone["📱 Phone / browser"] <-- "encrypted" --> relay["🌐 Relay<br/>(sign-in, routing)"]
+    relay <-- "encrypted, outbound" --> mac["💻 Laptop<br/>Claude Code, Codex"]
+    relay <-- "encrypted, outbound" --> tower["🖥️ Workstation<br/>Codex, Gemini"]
+    relay <-- "encrypted, outbound" --> cloud["☁️ Cloud server<br/>Grok, OpenCode"]
 ```
 
-Open `http://localhost:5173`. Local mode has no login.
+- **Device.** A small background service on each computer runs the agents, keeps
+  the history and serves the files and terminals.
+- **Relay.** A website that handles accounts and connects browsers to devices. It
+  stores no conversations.
+- **You.** Any modern browser: phone, tablet or another computer.
 
-The native supervisor serves the Web UI itself. Copy a setup command from the
-Devices page: macOS/Linux use SH, Windows uses PowerShell. Both download the
-matching Rust executable directly from GitHub Releases and verify its SHA256 and
-actual version. No Node/npm is required to install or update Pockymoe.
+## FAQ
 
-GitHub Releases are the authoritative runtime versions. Each immutable release
-contains all four supported binaries, the pinned Web bundle, `runtime-version.txt`
-and `SHA256SUMS`. See [native installation and releases](docs/github-runtime.md).
-Node.js is only prepared on demand for Agent/ACP dependencies that require it.
+<details>
+<summary><b>Is my code uploaded anywhere?</b></summary>
 
-The Windows Device Manager remains an independently released legacy bootstrap;
-this runtime migration does not change its installer or version. Prefer the new
-PowerShell setup and Web Settings for GitHub-native installation/updates. Existing
-npm installations require the one-time migration described in the runbook.
+No. Agents run on your computers. Conversations, files and terminal output are
+encrypted between your browser and the device; the relay can't read them. The
+agents themselves still talk to their model providers as they normally do.
+</details>
 
-Relay:
+<details>
+<summary><b>Does my computer need to stay on?</b></summary>
 
-```bash
-cargo run -p pockymoe -- relay
-POCKYMOE_MODE=relay POCKYMOE_RELAY_SERVER_URL=ws://127.0.0.1:8788 \
-  POCKYMOE_RELAY_AGENT_TOKEN=rcd_... cargo run -p pockymoe -- relay-supervisor
-```
+Yes, an agent runs where its device runs. Pockymoe starts with your user session,
+reconnects by itself, and resumes interrupted work after restarts and updates.
+</details>
 
-Before replacing a Node 0.11 relay, stop the Node process and inspect the
-existing data directory without changing it:
+<details>
+<summary><b>Which systems are supported?</b></summary>
 
-```bash
-pockymoe relay-migrate --data-dir /var/lib/remote-codex-relay --dry-run
-pockymoe relay-migrate --data-dir /var/lib/remote-codex-relay
-```
+Devices: macOS on Apple Silicon, Linux x64 and ARM64 (glibc 2.28+), and Windows x64.
+The Web UI works in any modern browser.
+</details>
 
-The migration keeps `relay-store.sqlite`, writes an online-backup snapshot, and
-does not delete a legacy `relay.sqlite`. Normal relay startup refuses an
-unmigrated legacy store unless `POCKYMOE_RELAY_AUTO_MIGRATE=1` is explicitly
-set.
+<details>
+<summary><b>What does it cost?</b></summary>
 
-The local supervisor keeps the Node 0.11 tables in
-`~/.remote-codex/supervisor.sqlite` and applies additive, transactional Rust
-migrations. Existing workspaces, turns, history, queued input, and settings are
-backfilled when the Rust supervisor first opens the database.
+Pockymoe is free and open source under the MIT license. You pay only for what your
+agents use with their providers, and for a server if you host your own relay.
+</details>
 
-## Tests
+<details>
+<summary><b>Can I run my own relay?</b></summary>
 
-```bash
-cargo test --workspace
-POCKYMOE_E2E_FAKE_RUNTIME=1 pnpm test:e2e
-```
+Yes, it's one executable plus a reverse proxy for HTTPS. See
+[Self-hosting a relay](docs/self-host-relay.md).
+</details>
 
-Deterministic e2e uses `POCKYMOE_E2E_FAKE_RUNTIME=1`. Production uses ACP (`codex-acp`, `claude-agent-acp`, `grok agent stdio`, `opencode acp`, …).
+## For developers and AI agents
+
+The details live in `docs/`. If you are an agent setting up or changing Pockymoe,
+start with these:
+
+- [Self-hosting a relay](docs/self-host-relay.md): download, configure, HTTPS, Docker, backups
+- [Native installation and releases](docs/github-runtime.md): what the setup command does, updates, npm migration
+- [Device setup, harnesses and upstreams](docs/device-setup.md)
+- [Development](docs/development.md): repository layout, running locally, tests, the update API
+- [Architecture](docs/architecture.md) and [AGENTS.md](AGENTS.md): project rules for contributors and coding agents
+
+Pockymoe was formerly called Remote Codex; existing installations keep updating.
+See [the rename notes](docs/rename-pockymoe.md).
+
+## License
+
+[MIT](LICENSE). Third-party notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

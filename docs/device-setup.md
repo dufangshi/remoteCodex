@@ -1,23 +1,22 @@
 # Device setup and upstream management
 
-On the relay Devices page, create a device and copy its macOS/Linux setup command.
-The command downloads `/setup.sh` from that relay and carries the device's
-permanent token. The script uses
-Node 22+ when available, otherwise installs a checksummed private Node 22 LTS
-runtime. Each run queries the official npm registry for the latest stable release,
-skips reinstalling an identical launcher, and verifies the running version and
-relay connection. Existing online Supervisors update through their management
-API. No shell profile is changed. A legacy configuration without a setup receipt
-is reused when its relay, token and port match; a different device configuration
-is never overwritten. The existing database and credentials are preserved.
+On the relay Devices page, create a device and copy its setup command: SH for
+macOS and Linux, PowerShell for Windows. The command downloads `/setup.sh` or
+`/setup.ps1` from that relay and carries the device's permanent token. It
+installs the native runtime from GitHub Releases, verifies its checksum and
+version, and starts the device; see
+[native installation and releases](github-runtime.md) for the details,
+migration of older npm installations and updates. Existing online Supervisors
+update through their management API. No shell profile is changed. The existing
+database, credentials and transport identity are preserved, and a different
+device configuration is never overwritten.
 
-Supported bootstrap platforms are Apple Silicon macOS and glibc Linux on ARM64/x64, with curl
-or wget and tar. macOS uses a user LaunchAgent; Linux uses a systemd user service
+Supported platforms are Apple Silicon macOS, glibc Linux on ARM64/x64 and
+Windows x64. macOS uses a user LaunchAgent; Linux uses a systemd user service
 when available. These start with the user session. Linux machines requiring
 startup before login need user lingering configured by their administrator.
 Without a user service manager (including some containers), setup starts a
-detached process and reports that reboot startup is unavailable. Windows retains
-the independently released Device Manager workflow.
+detached process and reports that reboot startup is unavailable.
 
 Linux units use `WorkingDirectory=%h`: systemd resolves the service user's home.
 Unlike `ExecStart` arguments and `Environment` assignments, this directive must
