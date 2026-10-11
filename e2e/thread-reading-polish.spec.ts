@@ -567,4 +567,22 @@ test('background wake replaces its waiting anchor and continues within the same 
   await expect(waitRow).toContainText('已唤醒');
   await expect(page.getByText(final.text,{exact:true})).toBeVisible();
   await expect(page.locator('.thread-graph-turn-footer')).toHaveCount(0);
+  const workedToggle = page.locator('.thread-graph-worked-summary button[aria-expanded]');
+  await expect(workedToggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByText(foreground.text, { exact: true })).toBeVisible();
+  await expect(page.getByText(checking.text, { exact: true })).toBeVisible();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await workedToggle.click();
+    await expect(workedToggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByText(foreground.text, { exact: true })).toHaveCount(0);
+    await expect(page.getByText(checking.text, { exact: true })).toHaveCount(0);
+    await expect(page.getByText(final.text, { exact: true })).toBeVisible();
+    await expect(waitRow).toContainText('已唤醒');
+    if (attempt === 0) await page.screenshot({ path: testInfo.outputPath('background-collapsed.png'), scale: 'css' });
+    await workedToggle.click();
+    await expect(workedToggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByText(foreground.text, { exact: true })).toBeVisible();
+    await expect(page.getByText(checking.text, { exact: true })).toBeVisible();
+  }
+  expect(detailLoads).toBe(1);
 });
